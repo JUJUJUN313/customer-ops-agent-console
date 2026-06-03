@@ -9,6 +9,12 @@
 - 新增企微智能机器人长连接 bridge：`scripts/wecom-aibot-bridge.mjs` 使用 `@wecom/aibot-node-sdk` 通过 WebSocket 读取真实机器人消息。
 - 新增 `wecomBindings.groups`，按企微 `chatid` 维护客户群绑定，未知群自动生成待绑定档案，避免不同客户群消息串档。
 - 新增企微入站 `externalMessageId/msgid` 去重，重复消息只写去重日志，不重复生成任务或Agent输出。
+- 新增个人微信单账号 AccountAgent Mock：`personalWechat` 保存账号、群上下文、回复决策、发送队列和运行日志。
+- 新增 `/api/personal-wechat/config`、`/api/personal-wechat/inbound`、`/api/personal-wechat/send-jobs/:jobId/confirm`。
+- 新增企微接入页个人微信区域，可配置托管账号、模拟外部群入站、查看群上下文、确认单账号发送队列和运行日志。
+- 新增个人微信回复风控：低风险客户消息生成 `queued` 发送任务，高风险报价/锁价/退款/赔偿/付款/合同/承诺类消息生成 `manual_required` 人工确认任务。
+- 新增个人微信入站 `messageId` 去重、同群只保留一个活跃待发送任务、员工或托管号回复取消同群待发。
+- 新增个人微信发送确认前的队列过期重判和单账号限频，过期任务取消，限频任务保持待发送。
 - 新增 `/api/wecom/aibot/check`、`/api/wecom/aibot/status`、`/api/wecom/group-bindings`。
 - 新增企微接入页“智能机器人长连接”和“群聊归档绑定”区域，可保存 Bot ID/Secret、查看桥接状态、绑定 `chatid` 到客户档案。
 - 新增 `src/wecomClient.js`，封装企微群机器人 `text`/`markdown` 消息发送、Webhook校验、超时控制和响应解析。
@@ -51,6 +57,8 @@
 - 触达草稿卡片在企微配置可用且草稿已确认时展示“发送企微测试群”按钮。
 - 能力审计新增“企微连接器”，外部触达执行器在企微Webhook配置后从未接入推进为半闭环。
 - 系统自检新增企微连接配置检查，并允许带 `wecomDelivery` 的 `企微已发送` 草稿通过。
+- 系统自检新增个人微信 AccountAgent 配置、`roomId` 群上下文唯一性和单群活跃发送队列检查。
+- 能力审计新增“个人微信AccountAgent”，明确当前为 Mock 可运行，真实个人微信 Gateway 仍待接入。
 - Agent运行结果新增 `modelConfig` 字段，记录本次实际生效的供应商、API URL、模型名、Key是否配置、温度、最大输出Token和来源。
 - Agent运行结果新增生效API URL和Key是否已配置，不暴露明文API Key。
 - `/api/state` 返回给前端的模型配置改为脱敏状态，只包含空 `apiKey`、`apiKeyConfigured` 和 `apiKeyMasked`。
@@ -83,7 +91,7 @@
 
 ### 验证
 
-- `npm test`：43 个用例通过，新增批量任务状态、批量草稿状态、真实LLM连接测试、Agent LLM增强、API Key保留/清空、客户归属、企微Webhook脱敏、企微智能机器人凭据脱敏、企微测试发送、企微草稿发送、企微模拟入站、`chatid` 独立建档、群绑定改绑和 `msgid` 去重断言。
+- `npm test`：48 个用例通过，新增批量任务状态、批量草稿状态、真实LLM连接测试、Agent LLM增强、API Key保留/清空、客户归属、企微Webhook脱敏、企微智能机器人凭据脱敏、企微测试发送、企微草稿发送、企微模拟入站、`chatid` 独立建档、群绑定改绑、`msgid` 去重、个人微信低风险队列、高风险人工确认、重复消息去重、队列过期取消和单账号限频断言。
 - `node --check src/app.js`
 - `node --check src/systemActions.js`
 - `node --check src/agentEngine.js`

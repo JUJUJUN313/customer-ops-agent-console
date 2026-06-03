@@ -14,6 +14,7 @@
 | GET | `/api/model-config` | 返回全局LLM、ASR/TTS语音模型、Agent覆盖配置和每个Agent的最终生效模型；API Key只返回掩码和是否已配置 |
 | GET | `/api/wecom/config` | 返回企微连接配置、智能机器人状态、群绑定、路由、入站设置和最近发送/入站日志；Webhook、Bot ID、Secret和入站Secret只返回掩码和是否已配置 |
 | GET | `/api/wecom/aibot/check` | 检查企微智能机器人 Bot ID/Secret 是否完整，返回 bridge 启动条件和当前连接状态 |
+| GET | `/api/personal-wechat/config` | 返回个人微信单账号 AccountAgent 配置、群上下文、发送队列、决策和运行日志 |
 | GET | `/api/outbound-drafts` | 返回触达草稿队列、客户信息和待确认/已复制/已处理等统计 |
 
 ## 写入接口
@@ -43,6 +44,9 @@
 | POST | `/api/wecom/group-bindings` | 把企微 `chatid` 绑定到客户档案和业务渠道 |
 | POST | `/api/wecom/test-send` | 真实调用企微群机器人Webhook发送测试消息，结果写入 `wecomLogs` |
 | POST | `/api/wecom/inbound` | 写入企微模拟或长连接入站消息，按 `chatid` 独立归档并路由到本地Agent |
+| POST | `/api/personal-wechat/config` | 保存个人微信单账号 AccountAgent 配置 |
+| POST | `/api/personal-wechat/inbound` | 写入个人微信外部群入站消息，按 `roomId` 维护群上下文、决策和发送队列 |
+| POST | `/api/personal-wechat/send-jobs/:jobId/confirm` | 模拟个人微信发送成功后的自回显或企微存档确认 |
 | POST | `/api/quotes` | 新增或更新报价 |
 | POST | `/api/quotes/subscribe` | 订阅报价型号 |
 | POST | `/api/sales-samples` | 新增销售话术样本，供销售承接Agent引用 |
@@ -203,6 +207,51 @@ npm run wecom:bridge -- --check --timeout=20000
 ```
 
 `/api/wecom/inbound` 会把 `VIP群` 映射为 `VIP模拟群`，把销售/电销企微映射为对应本地私聊渠道，然后复用本地消息路由和Agent。长连接 bridge 会传入企微消息的 `chatId`、`externalMessageId`、`requestId` 和 `senderId`；系统按 `externalMessageId` 去重，按 `chatId` 查找 `wecomBindings.groups`。未知群会自动创建“企微群待绑定”客户档案和待绑定群记录，避免不同客户群消息混档。
+
+个人微信单账号 AccountAgent 配置：
+
+```json
+{
+  "enabled": true,
+  "account": {
+    "id": "personal_wx_default",
+    "name": "个人微信托管号",
+    "displayName": "VIP群AccountAgent",
+    "defaultCustomerId": "c003",
+    "autoReply": true,
+    "requireApprovalForRisk": true,
+    "minSendIntervalSeconds": 3,
+    "maxQueueAgeSeconds": 60
+  }
+}
+```
+
+个人微信外部群入站：
+
+```json
+{
+  "customerId": "c003",
+  "roomId": "pwx_room_alpha",
+  "roomName": "成都VIP外部群",
+  "messageId": "pwx-msg-001",
+  "senderType": "customer",
+  "senderName": "周总",
+  "msgType": "text",
+  "text": "收到，我把资料补一下，流程怎么走？"
+}
+```
+
+`/api/personal-wechat/inbound` 会把个人微信外部群消息写入 `personalWechat.groupContexts`，同时复用本地 `VIP模拟群` 会话和VIP分流Agent。低风险客户消息生成 `queued` 发送任务，高风险报价、锁价、退款、赔偿、付款、合同和责任承诺类内容生成 `manual_required` 任务；员工或托管号消息只更新上下文并取消同群待发任务。重复 `messageId` 只写去重日志，不重复生成决策或队列。
+
+确认个人微信发送任务：
+
+```json
+{
+  "confirmedMessageId": "pwx_echo_001"
+}
+```
+
+`/api/personal-wechat/send-jobs/:jobId/confirm` 当前用于 Mock 自回显/企微存档回读确认，会把发送任务标记为 `confirmed`，把回复写入本地会话和客户事件；当前不触发真实个人微信外部发送。确认前会按账号配置执行 `maxQueueAgeSeconds` 过期重判和 `minSendIntervalSeconds` 单账号限频：过期任务会被取消，限频任务会保持 `queued` 并写入错误提示。
 
 绑定企微群到真实客户：
 

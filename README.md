@@ -1,6 +1,6 @@
 # 智能客服与客户运营中台本地可运行版
 
-这个项目使用本地 API、服务端 JSON 状态、本地消息入口、触达草稿队列、企微智能机器人长连接/测试群机器人连接器和规则型 Agent，把“电销筛选 → 销售承接 → VIP维护 → 报价订阅 → 数据回流”的本地闭环跑起来。当前系统会真实写入本地客户档案、任务、报价、会话、触达草稿、模型连接配置、企微配置/日志/群绑定、Agent运行记录和审计日志；不会真实外呼、发短信或同步CRM。默认Agent先由本地规则引擎稳定执行，点击模型连接测试或在Agent控制台勾选真实LLM增强时，会调用你配置的LLM；配置企微Webhook后，已确认草稿可以真实发送到企微测试群机器人；配置企微智能机器人 Bot ID/Secret 并启动 bridge 后，可以读取真实企微智能机器人消息并按 `chatid` 独立归档客户群。
+这个项目使用本地 API、服务端 JSON 状态、本地消息入口、触达草稿队列、企微智能机器人长连接/测试群机器人连接器、个人微信单账号 AccountAgent Mock 队列和规则型 Agent，把“电销筛选 → 销售承接 → VIP维护 → 报价订阅 → 数据回流”的本地闭环跑起来。当前系统会真实写入本地客户档案、任务、报价、会话、触达草稿、模型连接配置、企微配置/日志/群绑定、个人微信群上下文/发送队列、Agent运行记录和审计日志；不会真实外呼、发短信或同步CRM。默认Agent先由本地规则引擎稳定执行，点击模型连接测试或在Agent控制台勾选真实LLM增强时，会调用你配置的LLM；配置企微Webhook后，已确认草稿可以真实发送到企微测试群机器人；配置企微智能机器人 Bot ID/Secret 并启动 bridge 后，可以读取真实企微智能机器人消息并按 `chatid` 独立归档客户群。
 
 ## 运行
 
@@ -20,7 +20,7 @@ http://127.0.0.1:5175
 data/state.json
 ```
 
-该文件用于保存客户档案、事件流、会话上下文、任务、报价、销售样本、触达草稿、LLM/语音模型连接配置、企微Webhook配置、企微智能机器人凭据、企微群绑定、发送/入站日志、Agent 输出和审计日志，已加入 `.gitignore`。本地静态服务会阻断 `data/` 目录直接访问，状态读取统一走 API；前端状态接口不会返回明文 API Key、企微Webhook、Bot ID 或 Secret，只返回是否已配置和掩码。
+该文件用于保存客户档案、事件流、会话上下文、任务、报价、销售样本、触达草稿、LLM/语音模型连接配置、企微Webhook配置、企微智能机器人凭据、企微群绑定、个人微信 AccountAgent 配置/群上下文/发送队列、发送/入站日志、Agent 输出和审计日志，已加入 `.gitignore`。本地静态服务会阻断 `data/` 目录直接访问，状态读取统一走 API；前端状态接口不会返回明文 API Key、企微Webhook、Bot ID 或 Secret，只返回是否已配置和掩码。
 
 企微智能机器人长连接读取需要先启动本地 API，再启动 bridge：
 
@@ -66,6 +66,7 @@ npm test
 - 企微长连接入站会按 `chatid` 独立建档，按 `msgid` 去重，未知群进入待绑定群档案。
 - 非法阶段、风险、任务状态、优先级、销售结果等异常输入不会写入脏状态。
 - 畸形数值、缺失客户列表字段和非字符串报价型号不会导致 Agent 或运营动作中断。
+- 个人微信单账号 AccountAgent 会按 `roomId` 维护外部群上下文，低风险消息生成自动发送队列，高风险消息进入人工确认，重复消息会去重，员工回复会取消待发，发送确认会执行队列过期重判和账号限频。
 
 ## 已实现模块
 
@@ -74,7 +75,7 @@ npm test
 - 客户管理：新增客户、维护客户阶段/负责人/标签/关注型号、记录销售结果，客户列表支持搜索和筛选。
 - Agent 控制台：面向销售和运营的工作台，展示客户摘要、常用场景、业务动作、客户判断、建议话术、报价推荐和待办，不展示原始代码或 JSON。
 - 模型配置：配置全局 LLM API URL、API Key、模型名、温度、输出Token，配置ASR/TTS语音模型，并支持各Agent独立覆盖；支持测试LLM连接，Agent控制台可按需勾选真实LLM增强，ASR/TTS当前仍只保存连接参数。
-- 企微接入：保存企微智能机器人 Bot ID/Secret、启动长连接 bridge 读取真实消息、按 `chatid` 独立归档客户群、维护群聊绑定；同时保留企微测试群机器人Webhook发送测试消息和已确认草稿灰度推送。Webhook、Bot ID、Secret和入站Secret只在服务端状态保存，前端不回显明文。
+- 企微接入：保存企微智能机器人 Bot ID/Secret、启动长连接 bridge 读取真实消息、按 `chatid` 独立归档客户群、维护群聊绑定；同时保留企微测试群机器人Webhook发送测试消息、已确认草稿灰度推送，以及个人微信单账号 AccountAgent Mock 队列。Webhook、Bot ID、Secret和入站Secret只在服务端状态保存，前端不回显明文。
 - 销售学习：录入成交/培育话术样本，销售承接 Agent 会引用高质量匹配样本生成建议。
 - 本地消息：写入电销私聊、销售私聊、VIP 群本地消息，沉淀本地会话窗口，并自动路由到对应 Agent。
 - 触达草稿：Agent 和人工可生成待确认触达文案，支持搜索筛选、风险识别、确认、复制、发送企微测试群、批量处理、人工已处理和废弃；只有企微发送成功会标记外部动作已触发。
@@ -106,6 +107,7 @@ npm test
 - `GET /api/tasks/sla`：读取任务SLA报表。
 - `GET /api/model-config`：读取全局 LLM、语音模型和Agent生效模型配置，API Key按掩码返回。
 - `GET /api/wecom/config`：读取企微连接配置、智能机器人状态、群绑定和发送/入站日志摘要，Webhook、Bot ID、Secret和入站Secret按掩码返回。
+- `GET /api/personal-wechat/config`：读取个人微信单账号 AccountAgent 配置、群上下文、发送队列、决策和运行日志。
 - `GET /api/outbound-drafts`：读取触达草稿队列和状态统计。
 - `POST /api/reset`：重置本地样例数据。
 - `POST /api/demo/run`：按当前客户阶段批量运行本地规则Agent并生成闭环编排。
@@ -118,6 +120,9 @@ npm test
 - `POST /api/wecom/group-bindings`：把企微 `chatid` 绑定到客户档案和业务渠道。
 - `POST /api/wecom/test-send`：真实调用企微群机器人Webhook发送测试消息并写入日志。
 - `POST /api/wecom/inbound`：写入企微模拟或长连接入站消息，按 `chatid` 归档并路由到本地Agent。
+- `POST /api/personal-wechat/config`：保存个人微信单账号 AccountAgent 配置。
+- `POST /api/personal-wechat/inbound`：写入个人微信外部群入站消息，按 `roomId` 更新群上下文、生成风控决策和单账号发送队列。
+- `POST /api/personal-wechat/send-jobs/:jobId/confirm`：模拟个人微信发送成功后的自回显/存档确认，写入本地会话、事件和日志。
 - `POST /api/channels/message`：写入本地渠道消息并运行路由。
 - `POST /api/outbound-drafts`：人工新增本地触达草稿。
 - `POST /api/outbound-drafts/:draftId/status`：更新触达草稿状态。
@@ -139,6 +144,7 @@ npm test
 ## 当前设计边界
 
 - 已接入企微智能机器人长连接读取和测试群机器人Webhook发送；长连接消息会按 `chatid` 独立归档，未知群会生成待绑定客户群档案。尚未接入客户联系加好友回调、企业通讯录、成员私聊全量同步和生产级权限策略。
+- 个人微信单账号 AccountAgent 当前为 Mock Gateway：可以验证多外部群上下文、低风险自动排队、高风险人工确认、单账号串行发送队列、队列过期重判、账号限频和回显确认；尚未接真实个人微信登录、收发、掉线重连和生产合规审批。
 - 不接入真实外呼、短信、CRM、交易系统。
 - 已支持 LLM连接测试和Agent按需真实LLM增强；默认运行不调用外部模型，勾选增强后 `AgentRun.execution.modelInvocation` 会记录为“已调用”。ASR/TTS语音模型当前仍只保存连接参数。
 - API Key会保存在本地 `data/state.json`，前端只读取掩码和配置状态；生产环境需要改为密钥管理服务或环境变量。

@@ -15,6 +15,26 @@ export const initialState = {
   auditLog: [],
   outboundDrafts: [],
   wecomLogs: [],
+  personalWechat: {
+    enabled: true,
+    account: {
+      id: "personal_wx_default",
+      name: "个人微信托管号",
+      displayName: "VIP群AccountAgent",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      requireApprovalForRisk: true,
+      minSendIntervalSeconds: 3,
+      maxQueueAgeSeconds: 60,
+      status: "未连接",
+      lastEventAt: "",
+      lastError: ""
+    },
+    groupContexts: [],
+    sendJobs: [],
+    decisions: [],
+    logs: []
+  },
   wecomBindings: {
     groups: []
   },

@@ -10,6 +10,7 @@ import {
   buildCapabilityAudit,
   buildModelConfigReport,
   buildOutboundDraftReport,
+  buildPersonalWechatReport,
   buildTaskSlaReport,
   buildWecomConfigReport,
   createCustomerAction,
@@ -19,7 +20,9 @@ import {
   diagnoseState,
   escalateOverdueTasksAction,
   enhanceLatestAgentRunWithLlmAction,
+  confirmPersonalWechatSendJobAction,
   ingestMessageAction,
+  ingestPersonalWechatMessageAction,
   ingestWecomMessageAction,
   recordOutcomeAction,
   runAgentAction,
@@ -33,6 +36,7 @@ import {
   testModelConnectionAction,
   updateCustomerAction,
   updateModelConfigAction,
+  updatePersonalWechatConfigAction,
   updateWecomBridgeStatusAction,
   updateWecomGroupBindingAction,
   updateOutboundDraftStatusAction,
@@ -125,6 +129,7 @@ function publicState(state) {
   copy.wecomConfig = wecomReport.config;
   copy.wecomBindings = { groups: wecomReport.bindings || [] };
   copy.wecomLogs = Array.isArray(state.wecomLogs) ? state.wecomLogs.slice(0, 100) : [];
+  copy.personalWechat = buildPersonalWechatReport(state).config;
   return copy;
 }
 
@@ -222,6 +227,10 @@ async function handleApi(req, res, pathname) {
 
   if (req.method === "GET" && pathname === "/api/wecom/config") {
     return json(res, 200, buildWecomConfigReport(readState()));
+  }
+
+  if (req.method === "GET" && pathname === "/api/personal-wechat/config") {
+    return json(res, 200, buildPersonalWechatReport(readState()));
   }
 
   if (req.method === "GET" && pathname === "/api/wecom/aibot/check") {
@@ -368,6 +377,25 @@ async function handleApi(req, res, pathname) {
   if (req.method === "POST" && pathname === "/api/wecom/inbound") {
     const body = await readBody(req);
     const nextState = await mutateState((currentState) => ingestWecomMessageAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  if (req.method === "POST" && pathname === "/api/personal-wechat/config") {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => updatePersonalWechatConfigAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  if (req.method === "POST" && pathname === "/api/personal-wechat/inbound") {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => ingestPersonalWechatMessageAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  const personalWechatConfirmMatch = pathname.match(/^\/api\/personal-wechat\/send-jobs\/([^/]+)\/confirm$/);
+  if (req.method === "POST" && personalWechatConfirmMatch) {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => confirmPersonalWechatSendJobAction(currentState, personalWechatConfirmMatch[1], body));
     return json(res, 200, publicState(nextState));
   }
 

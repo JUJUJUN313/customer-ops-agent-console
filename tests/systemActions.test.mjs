@@ -7,8 +7,10 @@ import {
   buildCapabilityAudit,
   buildModelConfigReport,
   buildOutboundDraftReport,
+  buildPersonalWechatReport,
   buildTaskSlaReport,
   buildWecomConfigReport,
+  confirmPersonalWechatSendJobAction,
   createCustomerAction,
   createOutboundDraftAction,
   createSalesSampleAction,
@@ -17,6 +19,7 @@ import {
   enhanceLatestAgentRunWithLlmAction,
   escalateOverdueTasksAction,
   ingestMessageAction,
+  ingestPersonalWechatMessageAction,
   recordOutcomeAction,
   runAgentAction,
   runDemoAction,
@@ -30,6 +33,7 @@ import {
   updateCustomerAction,
   updateModelConfigAction,
   updateOutboundDraftStatusAction,
+  updatePersonalWechatConfigAction,
   updateTaskAction,
   updateTemplateAction,
   updateWecomConfigAction,
@@ -866,6 +870,215 @@ test("企微群绑定可以改绑到已有客户并通过自检", () => {
   assert.equal(binding.customerId, "c003");
   assert.equal(binding.status, "已绑定");
   assert.equal(diagnoseState(state).ok, true);
+});
+
+test("个人微信AccountAgent低风险入站会生成单账号发送队列并可确认", () => {
+  let state = updatePersonalWechatConfigAction(seedState(), {
+    enabled: true,
+    account: {
+      id: "pwx_a",
+      name: "个人微信托管号A",
+      displayName: "VIP群助手",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      requireApprovalForRisk: true
+    }
+  });
+
+  state = ingestPersonalWechatMessageAction(state, {
+    customerId: "c003",
+    roomId: "pwx_room_alpha",
+    roomName: "成都VIP外部群",
+    messageId: "pwx-msg-001",
+    senderType: "customer",
+    senderName: "周总",
+    text: "收到，我把资料补一下，流程怎么走？"
+  });
+
+  assert.equal(state.personalWechat.decisions[0].action, "auto_reply");
+  assert.equal(state.personalWechat.decisions[0].riskLevel, "low");
+  assert.equal(state.personalWechat.sendJobs[0].status, "queued");
+  assert.equal(state.personalWechat.sendJobs[0].accountId, "pwx_a");
+  assert.equal(state.personalWechat.groupContexts[0].roomId, "pwx_room_alpha");
+
+  state = confirmPersonalWechatSendJobAction(state, state.personalWechat.sendJobs[0].jobId);
+
+  assert.equal(state.personalWechat.sendJobs[0].status, "confirmed");
+  assert.ok(state.personalWechat.sendJobs[0].confirmedAt);
+  assert.equal(state.personalWechat.logs[0].type, "发送确认");
+  assert.ok(
+    state.conversations
+      .find((conversation) => conversation.customerId === "c003" && conversation.channel === "VIP模拟群")
+      .messages.some((message) => message.senderRole === "私域" && message.text.includes("整理需求"))
+  );
+  assert.equal(buildPersonalWechatReport(state).summary.confirmedJobs, 1);
+  assert.equal(diagnoseState(state).ok, true);
+});
+
+test("个人微信AccountAgent高风险内容进入人工确认队列", () => {
+  let state = updatePersonalWechatConfigAction(seedState(), {
+    enabled: true,
+    account: {
+      id: "pwx_risk",
+      name: "个人微信托管号B",
+      displayName: "VIP群助手",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      requireApprovalForRisk: true
+    }
+  });
+
+  state = ingestPersonalWechatMessageAction(state, {
+    customerId: "c003",
+    roomId: "pwx_room_risk",
+    roomName: "华南VIP外部群",
+    messageId: "pwx-risk-001",
+    senderType: "customer",
+    senderName: "刘总",
+    text: "今天Mate60报价发一下，能不能锁价？"
+  });
+
+  assert.equal(state.personalWechat.decisions[0].action, "require_approval");
+  assert.equal(state.personalWechat.decisions[0].riskLevel, "high");
+  assert.equal(state.personalWechat.sendJobs[0].status, "manual_required");
+  assert.ok(state.personalWechat.sendJobs[0].replyText.includes("确认后再回复"));
+});
+
+test("个人微信AccountAgent会对重复消息去重并在员工回复后取消待发", () => {
+  let state = updatePersonalWechatConfigAction(seedState(), {
+    enabled: true,
+    account: {
+      id: "pwx_dedupe",
+      name: "个人微信托管号C",
+      displayName: "VIP群助手",
+      defaultCustomerId: "c003",
+      autoReply: true
+    }
+  });
+  const inbound = {
+    customerId: "c003",
+    roomId: "pwx_room_dedupe",
+    roomName: "华东VIP外部群",
+    messageId: "pwx-dedupe-001",
+    senderType: "customer",
+    senderName: "赵总",
+    text: "收到，稍后把数量发你"
+  };
+
+  state = ingestPersonalWechatMessageAction(state, inbound);
+  const jobId = state.personalWechat.sendJobs[0].jobId;
+  const decisionCount = state.personalWechat.decisions.length;
+  const jobCount = state.personalWechat.sendJobs.length;
+
+  state = ingestPersonalWechatMessageAction(state, inbound);
+
+  assert.equal(state.personalWechat.decisions.length, decisionCount);
+  assert.equal(state.personalWechat.sendJobs.length, jobCount);
+  assert.equal(state.personalWechat.logs[0].type, "重复入站");
+
+  state = ingestPersonalWechatMessageAction(state, {
+    ...inbound,
+    messageId: "pwx-staff-001",
+    senderType: "staff",
+    senderName: "销售同事",
+    text: "我来跟进这条"
+  });
+
+  assert.equal(state.personalWechat.sendJobs.find((job) => job.jobId === jobId).status, "cancelled");
+  assert.equal(state.personalWechat.decisions[0].action, "ignore");
+});
+
+test("个人微信发送队列超过过期时间会取消并要求重新判断", () => {
+  let state = updatePersonalWechatConfigAction(seedState(), {
+    enabled: true,
+    account: {
+      id: "pwx_expire",
+      name: "个人微信托管号D",
+      displayName: "VIP群助手",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      maxQueueAgeSeconds: 15
+    }
+  });
+
+  state = ingestPersonalWechatMessageAction(state, {
+    customerId: "c003",
+    roomId: "pwx_room_expire",
+    roomName: "过期测试VIP外部群",
+    messageId: "pwx-expire-001",
+    senderType: "customer",
+    senderName: "钱总",
+    text: "收到，流程我看一下"
+  });
+
+  const jobId = state.personalWechat.sendJobs[0].jobId;
+  state.personalWechat.sendJobs[0].createdAt = "2026-06-03T00:00:00.000Z";
+  const privateReplyCount = state.conversations
+    .flatMap((conversation) => conversation.messages || [])
+    .filter((message) => message.senderRole === "私域" && message.text.includes("整理需求"))
+    .length;
+
+  state = confirmPersonalWechatSendJobAction(state, jobId, { now: "2026-06-03T00:00:20.000Z" });
+
+  const job = state.personalWechat.sendJobs.find((item) => item.jobId === jobId);
+  assert.equal(job.status, "cancelled");
+  assert.ok(job.error.includes("重新判断"));
+  assert.equal(state.personalWechat.groupContexts.find((context) => context.roomId === "pwx_room_expire").pendingSendJobId, "");
+  assert.equal(state.personalWechat.logs[0].type, "发送过期");
+  assert.equal(
+    state.conversations
+      .flatMap((conversation) => conversation.messages || [])
+      .filter((message) => message.senderRole === "私域" && message.text.includes("整理需求"))
+      .length,
+    privateReplyCount
+  );
+});
+
+test("个人微信发送队列会执行单账号限频", () => {
+  let state = updatePersonalWechatConfigAction(seedState(), {
+    enabled: true,
+    account: {
+      id: "pwx_rate",
+      name: "个人微信托管号E",
+      displayName: "VIP群助手",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      minSendIntervalSeconds: 60
+    }
+  });
+
+  state = ingestPersonalWechatMessageAction(state, {
+    customerId: "c003",
+    roomId: "pwx_room_rate_a",
+    roomName: "限频测试A群",
+    messageId: "pwx-rate-001",
+    senderType: "customer",
+    senderName: "孙总",
+    text: "收到，我补充一下信息"
+  });
+  state = confirmPersonalWechatSendJobAction(state, state.personalWechat.sendJobs[0].jobId, { now: "2026-06-03T01:00:00.000Z" });
+
+  state = ingestPersonalWechatMessageAction(state, {
+    customerId: "c003",
+    roomId: "pwx_room_rate_b",
+    roomName: "限频测试B群",
+    messageId: "pwx-rate-002",
+    senderType: "customer",
+    senderName: "李总",
+    text: "流程我也确认一下"
+  });
+  const secondJobId = state.personalWechat.sendJobs[0].jobId;
+
+  state = confirmPersonalWechatSendJobAction(state, secondJobId, { now: "2026-06-03T01:00:10.000Z" });
+  let secondJob = state.personalWechat.sendJobs.find((job) => job.jobId === secondJobId);
+  assert.equal(secondJob.status, "queued");
+  assert.ok(secondJob.error.includes("限频"));
+  assert.equal(state.personalWechat.logs[0].type, "发送限频");
+
+  state = confirmPersonalWechatSendJobAction(state, secondJobId, { now: "2026-06-03T01:01:01.000Z" });
+  secondJob = state.personalWechat.sendJobs.find((job) => job.jobId === secondJobId);
+  assert.equal(secondJob.status, "confirmed");
+  assert.equal(secondJob.error, "");
 });
 
 test("销售样本能写入并进入能力审计", () => {

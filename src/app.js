@@ -115,6 +115,27 @@ const defaultWecomConfig = {
   }
 };
 
+const defaultPersonalWechatState = {
+  enabled: true,
+  account: {
+    id: "personal_wx_default",
+    name: "个人微信托管号",
+    displayName: "VIP群AccountAgent",
+    defaultCustomerId: "c003",
+    autoReply: true,
+    requireApprovalForRisk: true,
+    minSendIntervalSeconds: 3,
+    maxQueueAgeSeconds: 60,
+    status: "未连接",
+    lastEventAt: "",
+    lastError: ""
+  },
+  groupContexts: [],
+  sendJobs: [],
+  decisions: [],
+  logs: []
+};
+
 let state = await loadState();
 let activeView = "overview";
 let activeNavGroup = "overview";
@@ -190,6 +211,7 @@ async function loadState() {
       wecomConfig: defaultWecomConfig,
       wecomBindings: { groups: [] },
       wecomLogs: [],
+      personalWechat: defaultPersonalWechatState,
       auditLog: [],
       loadError: error.message
     });
@@ -220,6 +242,7 @@ function normalizeState(nextState = {}) {
     wecomConfig: defaultWecomConfig,
     wecomBindings: { groups: [] },
     wecomLogs: [],
+    personalWechat: defaultPersonalWechatState,
     auditLog: [],
     ...nextState
   };
@@ -235,6 +258,7 @@ function normalizeState(nextState = {}) {
   normalized.wecomBindings = {
     groups: Array.isArray(normalized.wecomBindings?.groups) ? normalized.wecomBindings.groups : []
   };
+  normalized.personalWechat = normalizePersonalWechatState(normalized.personalWechat);
   return normalized;
 }
 
@@ -341,6 +365,29 @@ function normalizeWecomConfigState(config = {}) {
       secretConfigured: Boolean(config.aibot?.secretConfigured),
       secretMasked: config.aibot?.secretMasked || ""
     }
+  };
+}
+
+function normalizePersonalWechatState(config = {}) {
+  const account = {
+    ...defaultPersonalWechatState.account,
+    ...(config.account || {})
+  };
+  return {
+    ...defaultPersonalWechatState,
+    ...config,
+    enabled: config.enabled === undefined ? defaultPersonalWechatState.enabled : Boolean(config.enabled),
+    account: {
+      ...account,
+      autoReply: Boolean(account.autoReply),
+      requireApprovalForRisk: account.requireApprovalForRisk === undefined ? true : Boolean(account.requireApprovalForRisk),
+      minSendIntervalSeconds: Number(account.minSendIntervalSeconds || defaultPersonalWechatState.account.minSendIntervalSeconds),
+      maxQueueAgeSeconds: Number(account.maxQueueAgeSeconds || defaultPersonalWechatState.account.maxQueueAgeSeconds)
+    },
+    groupContexts: Array.isArray(config.groupContexts) ? config.groupContexts : [],
+    sendJobs: Array.isArray(config.sendJobs) ? config.sendJobs : [],
+    decisions: Array.isArray(config.decisions) ? config.decisions : [],
+    logs: Array.isArray(config.logs) ? config.logs : []
   };
 }
 
@@ -2026,6 +2073,88 @@ function wecomAibotCredentialPlaceholder(config = {}, field = "botId") {
   return field === "botId" ? "企业微信智能机器人 Bot ID" : "企业微信智能机器人 Secret";
 }
 
+function personalWechatConfigPayload(form) {
+  const data = formData(form);
+  return {
+    enabled: Boolean(data.enabled),
+    account: {
+      id: data["account.id"] || defaultPersonalWechatState.account.id,
+      name: data["account.name"] || defaultPersonalWechatState.account.name,
+      displayName: data["account.displayName"] || defaultPersonalWechatState.account.displayName,
+      defaultCustomerId: data["account.defaultCustomerId"] || state.selectedCustomerId || "",
+      autoReply: Boolean(data["account.autoReply"]),
+      requireApprovalForRisk: Boolean(data["account.requireApprovalForRisk"]),
+      minSendIntervalSeconds: Number(data["account.minSendIntervalSeconds"] || defaultPersonalWechatState.account.minSendIntervalSeconds),
+      maxQueueAgeSeconds: Number(data["account.maxQueueAgeSeconds"] || defaultPersonalWechatState.account.maxQueueAgeSeconds)
+    }
+  };
+}
+
+function personalWechatJobLabel(status = "") {
+  const labels = {
+    queued: "待自动发送",
+    sending: "发送中",
+    sent: "已发送待回显",
+    confirmed: "已确认",
+    failed: "失败",
+    cancelled: "已取消",
+    manual_required: "需人工确认"
+  };
+  return labels[status] || status || "未知";
+}
+
+function personalWechatJobClass(status = "") {
+  if (status === "confirmed") return "success-card";
+  if (status === "manual_required") return "warning-card";
+  if (status === "failed" || status === "cancelled") return "warning-card";
+  return "";
+}
+
+function renderPersonalWechatJob(job) {
+  const canConfirm = ["queued", "manual_required", "sent"].includes(job.status);
+  return `
+    <div class="business-card ${personalWechatJobClass(job.status)}">
+      <div class="agent-customer-head">
+        <div>
+          <strong>${escapeHtml(job.roomName || job.roomId || "未命名外部群")}</strong>
+          <span>${escapeHtml(job.jobId)} · ${escapeHtml(job.reason || "AccountAgent发送队列")}</span>
+        </div>
+        <span class="status-pill">${escapeHtml(personalWechatJobLabel(job.status))}</span>
+      </div>
+      <p class="event-text">${escapeHtml(job.replyText || "无回复内容")}</p>
+      ${job.error ? `<p class="event-text">队列提示：${escapeHtml(job.error)}</p>` : ""}
+      <div class="tag-list">
+        <span class="tag">${job.riskLevel === "high" ? "高风险" : "低风险"}</span>
+        <span class="tag">账号 ${escapeHtml(job.accountId || "")}</span>
+        ${job.createdAt ? `<span class="tag">创建 ${escapeHtml(formatDateTime(job.createdAt))}</span>` : ""}
+        ${job.confirmedAt ? `<span class="tag">确认 ${escapeHtml(formatDateTime(job.confirmedAt))}</span>` : ""}
+      </div>
+      ${canConfirm ? `<button class="small-button" type="button" data-personal-wechat-confirm-job="${escapeHtml(job.jobId)}" ${actionAttrs(`pwx-confirm-${job.jobId}`)}>${job.status === "manual_required" ? "人工确认并模拟发送" : "模拟发送回显"}</button>` : ""}
+    </div>
+  `;
+}
+
+function renderPersonalWechatContext(context) {
+  const lastMessage = (context.messages || []).at(-1);
+  return `
+    <div class="business-card">
+      <div class="agent-customer-head">
+        <div>
+          <strong>${escapeHtml(context.roomName || context.roomId)}</strong>
+          <span>${escapeHtml(context.roomId)} · ${escapeHtml(customerName(context.customerId))}</span>
+        </div>
+        <span class="status-pill">${escapeHtml(context.pendingSendJobId ? "有待发" : "空闲")}</span>
+      </div>
+      ${lastMessage ? `<p class="event-text">${escapeHtml(lastMessage.senderName)}：${escapeHtml(lastMessage.text)}</p>` : ""}
+      <div class="tag-list">
+        <span class="tag">消息 ${escapeHtml(context.messageCount || 0)} 条</span>
+        ${context.lastMessageAt ? `<span class="tag">最近 ${escapeHtml(formatDateTime(context.lastMessageAt))}</span>` : ""}
+        ${context.lastReplyAt ? `<span class="tag">回复 ${escapeHtml(formatDateTime(context.lastReplyAt))}</span>` : ""}
+      </div>
+    </div>
+  `;
+}
+
 function renderWecomLog(log) {
   const className = log.status === "成功" ? "success-card" : "warning-card";
   return `
@@ -2071,6 +2200,14 @@ function renderWecom() {
   const boundGroups = bindings.filter((binding) => binding.status === "已绑定");
   const pendingGroups = bindings.filter((binding) => binding.status !== "已绑定");
   const defaultAibotCustomer = state.customers.find((customer) => customer.id === aibot.defaultCustomerId) || selectedCustomer();
+  const personalWechat = normalizePersonalWechatState(state.personalWechat);
+  const personalAccount = personalWechat.account;
+  const personalJobs = personalWechat.sendJobs || [];
+  const personalContexts = personalWechat.groupContexts || [];
+  const personalQueuedJobs = personalJobs.filter((job) => job.status === "queued");
+  const personalManualJobs = personalJobs.filter((job) => job.status === "manual_required");
+  const personalConfirmedJobs = personalJobs.filter((job) => job.status === "confirmed");
+  const personalDefaultCustomer = state.customers.find((customer) => customer.id === personalAccount.defaultCustomerId) || selectedCustomer();
   return `
     <section class="grid four">
       ${cardKpi("长连接状态", aibot.bridgeStatus || "未启动", aibotReady ? "智能机器人凭据已配置" : "等待Bot ID/Secret")}
@@ -2086,6 +2223,143 @@ function renderWecom() {
           <p class="panel-subtitle">读取真实消息走智能机器人长连接：系统按企微chatid独立归档群消息。测试群Webhook只用于测试发送和草稿灰度推送，不能读取群聊。</p>
         </div>
       </div>
+    </section>
+
+    <section class="grid four">
+      ${cardKpi("个人微信账号", personalAccount.status || "未连接", personalWechat.enabled ? "单账号单Agent" : "已停用")}
+      ${cardKpi("外部群上下文", personalContexts.length, "按roomId隔离")}
+      ${cardKpi("待发送队列", personalQueuedJobs.length, `人工确认 ${personalManualJobs.length} 条`)}
+      ${cardKpi("已确认回显", personalConfirmedJobs.length, "Mock自回显/存档确认")}
+    </section>
+
+    <form id="personalWechatConfigForm">
+    <section class="grid two">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">个人微信单账号AccountAgent</h2>
+            <p class="panel-subtitle">一个个人微信号只绑定一个AccountAgent；它维护多个外部群上下文，但出站消息统一进入单账号队列。</p>
+          </div>
+        </div>
+        <div class="form-grid compact-form">
+          <label class="inline-check full-span">
+            <input name="enabled" type="checkbox" value="true" ${personalWechat.enabled ? "checked" : ""}>
+            <span>启用个人微信托管账号</span>
+          </label>
+          <div class="field"><label>账号ID</label><input name="account.id" value="${escapeHtml(personalAccount.id)}"></div>
+          <div class="field"><label>账号名称</label><input name="account.name" value="${escapeHtml(personalAccount.name)}"></div>
+          <div class="field"><label>群内显示名</label><input name="account.displayName" value="${escapeHtml(personalAccount.displayName)}"></div>
+          <div class="field"><label>默认客户</label><select name="account.defaultCustomerId">${customerOptions(personalDefaultCustomer)}</select></div>
+          <label class="inline-check compact-check"><input name="account.autoReply" type="checkbox" value="true" ${personalAccount.autoReply ? "checked" : ""}><span>低风险自动排队</span></label>
+          <label class="inline-check compact-check"><input name="account.requireApprovalForRisk" type="checkbox" value="true" ${personalAccount.requireApprovalForRisk ? "checked" : ""}><span>高风险人工确认</span></label>
+          <div class="field"><label>最小发送间隔秒</label><input name="account.minSendIntervalSeconds" type="number" min="1" max="60" value="${escapeHtml(personalAccount.minSendIntervalSeconds)}"></div>
+          <div class="field"><label>队列过期秒</label><input name="account.maxQueueAgeSeconds" type="number" min="15" max="600" value="${escapeHtml(personalAccount.maxQueueAgeSeconds)}"></div>
+          <button class="primary-button full-span" type="submit" ${actionAttrs("save-personal-wechat-config")}>保存个人微信配置</button>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">运行边界</h2>
+            <p class="panel-subtitle">当前实现为Mock个人微信Gateway，用于验证消息理解、风控、排队和确认闭环；生产网关接入后复用同一动作层。</p>
+          </div>
+        </div>
+        <div class="event-list">
+          <div class="business-card ${personalWechat.enabled ? "success-card" : "warning-card"}">
+            <div class="agent-customer-head">
+              <div>
+                <strong>${escapeHtml(personalAccount.name)}</strong>
+                <span>${escapeHtml(personalAccount.displayName)} · ${escapeHtml(personalAccount.id)}</span>
+              </div>
+              <span class="status-pill">${personalAccount.autoReply ? "低风险自动" : "全部人工确认"}</span>
+            </div>
+            <p class="event-text">发消息按账号串行队列执行；同一外部群同一时间只保留一个待发送任务。</p>
+            <div class="tag-list">
+              <span class="tag">限频 ${escapeHtml(personalAccount.minSendIntervalSeconds)} 秒</span>
+              <span class="tag">过期 ${escapeHtml(personalAccount.maxQueueAgeSeconds)} 秒重判</span>
+              ${personalAccount.lastEventAt ? `<span class="tag">最近 ${escapeHtml(formatDateTime(personalAccount.lastEventAt))}</span>` : ""}
+            </div>
+          </div>
+          ${personalAccount.lastError ? `<div class="business-card warning-card"><p class="event-text">最近错误：${escapeHtml(personalAccount.lastError)}</p></div>` : ""}
+        </div>
+      </article>
+    </section>
+    </form>
+
+    <section class="grid two">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">模拟个人微信外部群入站</h2>
+            <p class="panel-subtitle">用于第一阶段验证个人微信号已在外部群内时的实时收消息、上下文和回复队列。</p>
+          </div>
+        </div>
+        <div class="form-grid compact-form">
+          <div class="field"><label>绑定客户</label><select id="personalWechatInboundCustomer">${customerOptions(personalDefaultCustomer)}</select></div>
+          <div class="field"><label>发送人类型</label><select id="personalWechatSenderType"><option value="customer">客户</option><option value="staff">员工</option><option value="bot">托管号</option><option value="unknown">未知</option></select></div>
+          <div class="field"><label>外部群roomId</label><input id="personalWechatRoomId" value="${escapeHtml(`pwx_room_${state.selectedCustomerId || "default"}`)}"></div>
+          <div class="field"><label>外部群名称</label><input id="personalWechatRoomName" value="${escapeHtml(`${selectedCustomer()?.name || "客户"}VIP外部群`)}"></div>
+          <div class="field"><label>发送人</label><input id="personalWechatSenderName" value="${escapeHtml(selectedCustomer()?.contact || selectedCustomer()?.name || "客户")}"></div>
+          <div class="field"><label>消息ID</label><input id="personalWechatMessageId" placeholder="留空自动生成"></div>
+          <div class="field full-span"><label>消息内容</label><textarea id="personalWechatInboundText">收到，我把资料补一下，流程怎么走？</textarea></div>
+          <button class="primary-button full-span" id="ingestPersonalWechatMessage" type="button" ${actionAttrs("personal-wechat-inbound")} ${state.customers.length ? "" : "disabled"}>写入个人微信入站</button>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">单账号发送队列</h2>
+            <p class="panel-subtitle">低风险回复会自动排队，高风险回复停在人工确认；确认按钮模拟个人微信发送成功后的自回显。</p>
+          </div>
+        </div>
+        <div class="event-list">
+          ${personalJobs.slice(0, 8).map(renderPersonalWechatJob).join("") || renderEmptyState("暂无发送任务", "写入客户消息后，AccountAgent会按风险生成队列任务。")}
+        </div>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">个人微信群上下文</h2>
+            <p class="panel-subtitle">每个外部群按roomId独立保存最近消息、客户绑定、最近回复和待发送任务。</p>
+          </div>
+        </div>
+        <div class="event-list">
+          ${personalContexts.slice(0, 6).map(renderPersonalWechatContext).join("") || renderEmptyState("暂无个人微信群上下文", "写入第一条个人微信外部群消息后会自动创建。")}
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">个人微信运行日志</h2>
+            <p class="panel-subtitle">自动回复会记录触发消息、判断理由、回复内容、发送队列和确认结果。</p>
+          </div>
+        </div>
+        <div class="event-list">
+          ${(personalWechat.logs || []).slice(0, 6).map((log) => `
+            <div class="business-card ${log.status === "成功" ? "success-card" : "warning-card"}">
+              <div class="agent-customer-head">
+                <div>
+                  <strong>${escapeHtml(log.type || "个人微信记录")} · ${escapeHtml(log.status || "未知")}</strong>
+                  <span>${escapeHtml(log.roomName || log.roomId || "个人微信外部群")}</span>
+                </div>
+                <span class="status-pill">${escapeHtml(formatDateTime(log.createdAt))}</span>
+              </div>
+              ${log.contentPreview ? `<p class="event-text">${escapeHtml(log.contentPreview)}</p>` : ""}
+              <div class="tag-list">
+                <span class="tag">${log.externalSideEffects ? "已触发外部发送" : "Mock/未触发外部发送"}</span>
+                ${log.messageId ? `<span class="tag">msg ${escapeHtml(log.messageId)}</span>` : ""}
+                ${log.sendJobId ? `<span class="tag">job ${escapeHtml(log.sendJobId)}</span>` : ""}
+              </div>
+            </div>
+          `).join("") || renderEmptyState("暂无个人微信日志", "保存配置、写入消息或确认发送后会记录在这里。")}
+        </div>
+      </article>
     </section>
 
     <form id="wecomConfigForm">
@@ -3495,6 +3769,56 @@ document.addEventListener("click", (event) => {
     });
     return;
   }
+  const personalWechatConfirmButton = event.target.closest("[data-personal-wechat-confirm-job]");
+  if (personalWechatConfirmButton) {
+    const jobId = personalWechatConfirmButton.dataset.personalWechatConfirmJob;
+    void withBusy(`pwx-confirm-${jobId}`, async () => {
+      try {
+        const nextState = await api.confirmPersonalWechatSendJob(jobId);
+        const nextJob = nextState.personalWechat?.sendJobs?.find((item) => item.jobId === jobId);
+        setState(nextState);
+        if (nextJob?.status === "confirmed") {
+          showToast("个人微信发送已确认回显");
+        } else if (nextJob?.status === "cancelled") {
+          showToast(nextJob.error || "个人微信发送任务已取消");
+        } else if (nextJob?.error) {
+          showToast(nextJob.error);
+        } else {
+          showToast("个人微信发送任务已更新");
+        }
+      } catch (error) {
+        showToast(`个人微信发送确认失败：${error.message}`);
+      }
+    });
+    return;
+  }
+  if (event.target.closest("#ingestPersonalWechatMessage")) {
+    const customerId = document.querySelector("#personalWechatInboundCustomer")?.value || state.selectedCustomerId;
+    const roomId = document.querySelector("#personalWechatRoomId")?.value || `pwx_room_${customerId || "default"}`;
+    const roomName = document.querySelector("#personalWechatRoomName")?.value || "个人微信外部群";
+    const senderType = document.querySelector("#personalWechatSenderType")?.value || "customer";
+    const senderName = document.querySelector("#personalWechatSenderName")?.value || "";
+    const text = document.querySelector("#personalWechatInboundText")?.value || "";
+    const messageId = document.querySelector("#personalWechatMessageId")?.value || `pwx_${roomId}_${Date.now()}`;
+    void withBusy("personal-wechat-inbound", async () => {
+      try {
+        const nextState = await api.ingestPersonalWechatMessage({
+          customerId,
+          roomId,
+          roomName,
+          senderType,
+          senderName,
+          msgType: "text",
+          text,
+          messageId
+        });
+        setState(nextState, "个人微信外部群消息已写入");
+      } catch (error) {
+        showToast(`个人微信入站失败：${error.message}`);
+      }
+    });
+    return;
+  }
   if (event.target.closest("#ingestWecomMessage")) {
     const customerId = document.querySelector("#wecomInboundCustomer")?.value || state.selectedCustomerId;
     const channel = document.querySelector("#wecomInboundChannel")?.value || "VIP群";
@@ -3515,7 +3839,7 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("change", (event) => {
-  if (event.target.id === "agentCustomer" || event.target.id === "quoteCustomer" || event.target.id === "channelCustomer" || event.target.id === "wecomInboundCustomer") {
+  if (event.target.id === "agentCustomer" || event.target.id === "quoteCustomer" || event.target.id === "channelCustomer" || event.target.id === "wecomInboundCustomer" || event.target.id === "personalWechatInboundCustomer") {
     state.selectedCustomerId = event.target.value;
     render();
   }
@@ -3705,6 +4029,18 @@ document.addEventListener("submit", (event) => {
         setState(nextState, "企微配置已保存");
       } catch (error) {
         showToast(`保存企微配置失败：${error.message}`);
+      }
+    });
+    return;
+  }
+  if (event.target.id === "personalWechatConfigForm") {
+    event.preventDefault();
+    void withBusy("save-personal-wechat-config", async () => {
+      try {
+        const nextState = await api.updatePersonalWechatConfig(personalWechatConfigPayload(event.target));
+        setState(nextState, "个人微信配置已保存");
+      } catch (error) {
+        showToast(`保存个人微信配置失败：${error.message}`);
       }
     });
     return;

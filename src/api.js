@@ -55,6 +55,9 @@ export const api = {
   wecomConfig() {
     return request("/api/wecom/config");
   },
+  personalWechatConfig() {
+    return request("/api/personal-wechat/config");
+  },
   outboundDrafts() {
     return request("/api/outbound-drafts");
   },
@@ -93,6 +96,24 @@ export const api = {
   },
   ingestWecomMessage(payload) {
     return request("/api/wecom/inbound", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  updatePersonalWechatConfig(payload) {
+    return request("/api/personal-wechat/config", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  ingestPersonalWechatMessage(payload) {
+    return request("/api/personal-wechat/inbound", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  confirmPersonalWechatSendJob(jobId, payload = {}) {
+    return request(`/api/personal-wechat/send-jobs/${jobId}/confirm`, {
       method: "POST",
       body: JSON.stringify(payload)
     });
