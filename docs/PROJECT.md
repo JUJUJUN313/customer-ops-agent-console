@@ -98,6 +98,7 @@ flowchart LR
 
 每次功能更新必须同步维护：
 
+- `docs/USAGE_GUIDE.md`：完整使用文档，说明系统能力、业务链路、页面交互、验收流程、外部连接边界和常见问题。
 - `README.md`：面向使用者的入口说明。
 - `docs/PROJECT.md`：产品模块、业务链路、功能范围。
 - `docs/ARCHITECTURE.md`：系统结构、数据流、模块协作。

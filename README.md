@@ -88,6 +88,7 @@ npm test
 
 ## 项目文档
 
+- [完整使用文档](docs/USAGE_GUIDE.md)
 - [项目说明](docs/PROJECT.md)
 - [系统架构](docs/ARCHITECTURE.md)
 - [API 文档](docs/API.md)
@@ -96,7 +97,7 @@ npm test
 - [测试与验收](docs/TESTING.md)
 - [变更记录](docs/CHANGELOG.md)
 
-每次功能更新都需要同步维护上述文档，至少更新 README、对应专题文档和变更记录。
+每次功能更新都需要同步维护上述文档。涉及使用方式、业务流程、模型配置、企微/个人微信接入、Agent能力或外部动作边界变化时，必须同步更新完整使用文档。
 
 ## 本地 API
 
