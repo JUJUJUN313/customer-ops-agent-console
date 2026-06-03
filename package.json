@@ -1,0 +1,20 @@
+{
+  "name": "customer-ops-agent-console",
+  "version": "0.1.0",
+  "description": "本地可运行的智能客服与客户运营中台，支持客户档案、Agent工作台、触达草稿和企微智能机器人长连接。",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JUJUJUN313/customer-ops-agent-console.git"
+  },
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "wecom:bridge": "node scripts/wecom-aibot-bridge.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@wecom/aibot-node-sdk": "^1.0.7"
+  }
+}

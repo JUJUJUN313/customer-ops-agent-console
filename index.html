@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>智能客服与客户运营中台</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">AI</div>
+          <div>
+            <div class="brand-title">客户运营中台</div>
+            <div class="brand-subtitle">本地可运行版</div>
+          </div>
+        </div>
+        <nav class="nav" aria-label="主导航">
+          <button class="nav-group active" data-nav-group="overview">
+            <span>总览</span>
+            <span class="nav-chevron">›</span>
+          </button>
+          <div class="nav-subitems expanded" data-nav-panel="overview">
+            <button class="nav-item active" data-view="overview" data-nav-group="overview"><span class="nav-dot"></span>运营总览</button>
+            <button class="nav-item" data-view="workflow" data-nav-group="overview"><span class="nav-dot"></span>闭环编排</button>
+          </div>
+
+          <button class="nav-group" data-nav-group="customer">
+            <span>客户管理</span>
+            <span class="nav-chevron">›</span>
+          </button>
+          <div class="nav-subitems" data-nav-panel="customer">
+            <button class="nav-item" data-view="journey" data-nav-group="customer"><span class="nav-dot"></span>客户旅程</button>
+            <button class="nav-item" data-view="customers" data-nav-group="customer"><span class="nav-dot"></span>客户档案</button>
+            <button class="nav-item" data-view="quotes" data-nav-group="customer"><span class="nav-dot"></span>报价订阅</button>
+          </div>
+
+          <button class="nav-group" data-nav-group="telemarketing">
+            <span>电销管理</span>
+            <span class="nav-chevron">›</span>
+          </button>
+          <div class="nav-subitems" data-nav-panel="telemarketing">
+            <button class="nav-item" data-view="customers" data-nav-group="telemarketing" data-nav-preset="telemarketingCustomers"><span class="nav-dot"></span>电销客户池</button>
+            <button class="nav-item" data-view="channels" data-nav-group="telemarketing"><span class="nav-dot"></span>电销消息</button>
+            <button class="nav-item" data-view="tasks" data-nav-group="telemarketing" data-nav-preset="telemarketingTasks"><span class="nav-dot"></span>电销任务</button>
+          </div>
+
+          <button class="nav-group" data-nav-group="sales">
+            <span>销售管理</span>
+            <span class="nav-chevron">›</span>
+          </button>
+          <div class="nav-subitems" data-nav-panel="sales">
+            <button class="nav-item" data-view="agents" data-nav-group="sales"><span class="nav-dot"></span>销售Agent</button>
+            <button class="nav-item" data-view="learning" data-nav-group="sales"><span class="nav-dot"></span>销售学习</button>
+            <button class="nav-item" data-view="tasks" data-nav-group="sales" data-nav-preset="salesTasks"><span class="nav-dot"></span>销售任务</button>
+          </div>
+
+          <button class="nav-group" data-nav-group="groupchat">
+            <span>群聊管理</span>
+            <span class="nav-chevron">›</span>
+          </button>
+          <div class="nav-subitems" data-nav-panel="groupchat">
+            <button class="nav-item" data-view="channels" data-nav-group="groupchat" data-nav-preset="vipChannels"><span class="nav-dot"></span>群消息入站</button>
+            <button class="nav-item" data-view="wecom" data-nav-group="groupchat"><span class="nav-dot"></span>企微接入</button>
+            <button class="nav-item" data-view="drafts" data-nav-group="groupchat" data-nav-preset="vipDrafts"><span class="nav-dot"></span>群触达草稿</button>
+            <button class="nav-item" data-view="tasks" data-nav-group="groupchat" data-nav-preset="vipTasks"><span class="nav-dot"></span>群聊任务</button>
+          </div>
+
+          <button class="nav-group" data-nav-group="settings">
+            <span>设置</span>
+            <span class="nav-chevron">›</span>
+          </button>
+          <div class="nav-subitems" data-nav-panel="settings">
+            <button class="nav-item" data-view="modelConfig" data-nav-group="settings"><span class="nav-dot"></span>模型配置</button>
+            <button class="nav-item" data-view="wecom" data-nav-group="settings"><span class="nav-dot"></span>企微接入</button>
+            <button class="nav-item" data-view="templates" data-nav-group="settings"><span class="nav-dot"></span>模板与风控</button>
+            <button class="nav-item" data-view="system" data-nav-group="settings"><span class="nav-dot"></span>系统自检</button>
+          </div>
+        </nav>
+        <div class="sidebar-note">
+          <span class="note-label">运行模式</span>
+          <strong>本地运行 + 企微测试准备</strong>
+          <span>客户、任务、报价和审计真实写入本地；企微接入先走测试群与人工确认。</span>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Customer Journey Operating System</p>
+            <h1 id="viewTitle">总览</h1>
+          </div>
+          <div class="top-actions">
+            <button class="ghost-button" id="resetDemo" data-action-button title="恢复初始本地样例数据">重置数据</button>
+            <button class="ghost-button" id="runDiagnostics" data-action-button title="检查客户、任务、报价、模板和审计状态">运行系统自检</button>
+            <button class="primary-button" id="runDemo" data-action-button title="按当前客户阶段批量运行本地规则Agent">批量运行本地Agent</button>
+          </div>
+        </header>
+
+        <section id="viewRoot" class="view-root" aria-live="polite"></section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
