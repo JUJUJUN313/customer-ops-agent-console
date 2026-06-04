@@ -89,6 +89,7 @@ npm test
 ## 项目文档
 
 - [完整使用文档](docs/USAGE_GUIDE.md)
+- [贡献与版本发布规范](CONTRIBUTING.md)
 - [项目说明](docs/PROJECT.md)
 - [系统架构](docs/ARCHITECTURE.md)
 - [API 文档](docs/API.md)

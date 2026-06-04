@@ -405,7 +405,9 @@ ASR语音识别和TTS语音合成配置当前用于保存后续语音链路参�
 
 ## 10. 多人协作规范
 
-克隆仓库：
+完整制度见仓库根目录 `CONTRIBUTING.md`。本系统采用 **PR合并 + Tag/Release版本保留**：`main` 永远代表最新稳定版本，成员不得直接向 `main` 推送业务代码；每次重要更新通过Git Tag和GitHub Release保留历史版本，不在仓库里复制旧版本目录。
+
+首次克隆仓库：
 
 ```bash
 git clone https://github.com/JUJUJUN313/customer-ops-agent-console.git
@@ -413,14 +415,81 @@ cd customer-ops-agent-console
 npm install
 ```
 
-协作规则：
+开始任何任务前，先从线上最新 `main` 创建独立分支：
 
-- 不提交 `data/state.json`、`.env`、API Key、企微Webhook、Bot ID 或 Secret。
-- 每次功能更新必须同步更新文档，至少包含 README、相关专题文档、变更记录；涉及使用方式变化时同步更新本文档。
-- 提交前运行 `npm test`。
-- 修改JS后运行对应 `node --check`。
-- 涉及前端交互时补充浏览器验收记录或说明无法验收的原因。
-- 涉及外部连接时说明真实调用范围和不会触发的边界。
+```bash
+git checkout main
+git fetch origin
+git pull --ff-only origin main
+git checkout -b feature/your-task
+```
+
+分支命名规则：
+
+- 新功能：`feature/功能名`
+- 修复：`fix/问题名`
+- 文档：`docs/说明名`
+- Codex协作：`codex/任务名`
+- 紧急修复：`hotfix/问题名`
+
+提交或推送前必须核对线上线下差异：
+
+```bash
+git fetch origin
+git status -sb
+git log --oneline HEAD..origin/main
+git diff --stat origin/main...HEAD
+npm test
+```
+
+如果 `git log --oneline HEAD..origin/main` 有输出，说明线上已经有人更新，必须先同步：
+
+```bash
+git rebase origin/main
+npm test
+```
+
+只推送自己的分支：
+
+```bash
+git push -u origin feature/your-task
+```
+
+然后在GitHub创建Pull Request，目标分支必须是 `main`。
+
+PR合并前必须确认：
+
+- PR无冲突。
+- 自动测试通过。
+- 至少1名维护者Review通过。
+- GitHub比较页只包含本次任务相关文件。
+- PR说明写清功能、页面/API/数据结构变化、测试结果和文档同步情况。
+- 涉及模型Key、企微、个人微信、外部发送或安全边界时，必须在PR里明确说明。
+- 不提交 `data/state.json`、`.env`、API Key、企微Webhook、Bot ID、Secret、GitHub Token 或个人微信真实凭据。
+
+默认使用 **Squash and merge** 合并，让一次PR在 `main` 上只形成一个清晰提交。大型功能可以保留普通Merge，但必须有清楚PR标题和说明。禁止 force push 覆盖别人的分支或 `main`。
+
+版本保留规则：
+
+- `main` 只保留当前最新稳定代码。
+- 每次可测试版本或阶段性版本打 `vX.Y.Z` 标签。
+- 在GitHub Releases里基于该Tag创建Release，写明新增功能、修复问题、使用方式变化、已知风险和回退方式。
+- 回退旧版本时使用Release源码包或 `git checkout vX.Y.Z`。
+
+发布示例：
+
+```bash
+git checkout main
+git pull --ff-only origin main
+git tag -a v0.2.0 -m "v0.2.0: 企微接入与协作规范"
+git push origin v0.2.0
+```
+
+文档同步规则：
+
+- 每次功能更新必须同步更新 README、相关专题文档和 `docs/CHANGELOG.md`。
+- 涉及使用方式、业务流程、模型配置、企微/个人微信接入、Agent能力或外部动作边界变化时，必须同步更新本文档。
+- 新增协作、发布或安全规则时，必须同步更新 `CONTRIBUTING.md`。
 
 ## 11. 常见问题
 

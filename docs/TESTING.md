@@ -8,6 +8,8 @@
 npm test
 ```
 
+GitHub Actions 会在 Pull Request 和 `main` 推送时自动运行同一条 `npm test`，作为 `main` 合并保护的必需检查。
+
 当前覆盖 48 个用例：
 
 - 外呼筛选 Agent 将高价值客户升级到销售链路。
