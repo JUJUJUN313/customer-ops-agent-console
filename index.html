@@ -32,8 +32,7 @@
           </button>
           <div class="nav-subitems" data-nav-panel="customer">
             <button class="nav-item" data-view="journey" data-nav-group="customer"><span class="nav-dot"></span>客户旅程</button>
-            <button class="nav-item" data-view="customers" data-nav-group="customer"><span class="nav-dot"></span>客户档案</button>
-            <button class="nav-item" data-view="quotes" data-nav-group="customer"><span class="nav-dot"></span>报价订阅</button>
+            <button class="nav-item" data-view="customers" data-nav-group="customer" data-nav-preset="allCustomers"><span class="nav-dot"></span>客户档案</button>
           </div>
 
           <button class="nav-group" data-nav-group="telemarketing">
@@ -42,6 +41,7 @@
           </button>
           <div class="nav-subitems" data-nav-panel="telemarketing">
             <button class="nav-item" data-view="customers" data-nav-group="telemarketing" data-nav-preset="telemarketingCustomers"><span class="nav-dot"></span>电销客户池</button>
+            <button class="nav-item" data-view="chat" data-nav-group="telemarketing" data-nav-preset="telemarketingChat"><span class="nav-dot"></span>电销会话</button>
             <button class="nav-item" data-view="channels" data-nav-group="telemarketing"><span class="nav-dot"></span>电销消息</button>
             <button class="nav-item" data-view="tasks" data-nav-group="telemarketing" data-nav-preset="telemarketingTasks"><span class="nav-dot"></span>电销任务</button>
           </div>
@@ -51,18 +51,21 @@
             <span class="nav-chevron">›</span>
           </button>
           <div class="nav-subitems" data-nav-panel="sales">
+            <button class="nav-item" data-view="customers" data-nav-group="sales" data-nav-preset="salesCustomers"><span class="nav-dot"></span>销售客户</button>
             <button class="nav-item" data-view="agents" data-nav-group="sales"><span class="nav-dot"></span>销售Agent</button>
+            <button class="nav-item" data-view="chat" data-nav-group="sales" data-nav-preset="salesChat"><span class="nav-dot"></span>销售会话</button>
             <button class="nav-item" data-view="learning" data-nav-group="sales"><span class="nav-dot"></span>销售学习</button>
             <button class="nav-item" data-view="tasks" data-nav-group="sales" data-nav-preset="salesTasks"><span class="nav-dot"></span>销售任务</button>
           </div>
 
           <button class="nav-group" data-nav-group="groupchat">
-            <span>群聊管理</span>
+            <span>VIP群管理</span>
             <span class="nav-chevron">›</span>
           </button>
           <div class="nav-subitems" data-nav-panel="groupchat">
-            <button class="nav-item" data-view="channels" data-nav-group="groupchat" data-nav-preset="vipChannels"><span class="nav-dot"></span>群消息入站</button>
-            <button class="nav-item" data-view="wecom" data-nav-group="groupchat"><span class="nav-dot"></span>企微接入</button>
+            <button class="nav-item" data-view="customers" data-nav-group="groupchat" data-nav-preset="vipCustomers"><span class="nav-dot"></span>VIP客户</button>
+            <button class="nav-item" data-view="chat" data-nav-group="groupchat" data-nav-preset="vipChat"><span class="nav-dot"></span>VIP会话</button>
+            <button class="nav-item" data-view="quotes" data-nav-group="groupchat" data-nav-preset="vipQuotes"><span class="nav-dot"></span>报价订阅</button>
             <button class="nav-item" data-view="drafts" data-nav-group="groupchat" data-nav-preset="vipDrafts"><span class="nav-dot"></span>群触达草稿</button>
             <button class="nav-item" data-view="tasks" data-nav-group="groupchat" data-nav-preset="vipTasks"><span class="nav-dot"></span>群聊任务</button>
           </div>
@@ -74,6 +77,7 @@
           <div class="nav-subitems" data-nav-panel="settings">
             <button class="nav-item" data-view="modelConfig" data-nav-group="settings"><span class="nav-dot"></span>模型配置</button>
             <button class="nav-item" data-view="wecom" data-nav-group="settings"><span class="nav-dot"></span>企微接入</button>
+            <button class="nav-item" data-view="channels" data-nav-group="settings" data-nav-preset="settingsChannels"><span class="nav-dot"></span>消息入站</button>
             <button class="nav-item" data-view="templates" data-nav-group="settings"><span class="nav-dot"></span>模板与风控</button>
             <button class="nav-item" data-view="system" data-nav-group="settings"><span class="nav-dot"></span>系统自检</button>
           </div>

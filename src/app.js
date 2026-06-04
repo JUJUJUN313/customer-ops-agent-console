@@ -9,6 +9,7 @@ const viewTitles = {
   overview: "总览",
   journey: "客户旅程",
   customers: "客户管理",
+  chat: "会话工作台",
   agents: "Agent控制台",
   modelConfig: "模型配置",
   wecom: "企微接入",
@@ -116,7 +117,21 @@ const defaultWecomConfig = {
   archive: {
     enabled: false,
     provider: "企微会话内容存档",
+    corpId: "",
+    archiveSecret: "",
+    archiveSecretConfigured: false,
+    archiveSecretMasked: "",
+    privateKey: "",
+    privateKeyConfigured: false,
+    privateKeyMasked: "",
+    privateKeyVersion: "",
     cursor: "",
+    seq: 0,
+    pollIntervalSeconds: 10,
+    limit: 100,
+    gatewayMode: "sidecar",
+    sidecarUrl: "",
+    trustedStatus: "未验证",
     lastPulledAt: "",
     lastMessageAt: "",
     status: "未配置",
@@ -128,6 +143,15 @@ const defaultWecomConfig = {
 
 const defaultPersonalWechatState = {
   enabled: true,
+  gateway: {
+    mode: "mock",
+    sidecarUrl: "",
+    sendEndpoint: "/send",
+    status: "Mock待接",
+    lastConnectedAt: "",
+    lastEventAt: "",
+    lastError: ""
+  },
   account: {
     id: "personal_wx_default",
     name: "个人微信托管号",
@@ -167,6 +191,8 @@ let quoteMaxPrice = "";
 let customerSearchQuery = "";
 let customerStageFilter = "全部";
 let customerStageSetFilter = [];
+let customerBusinessScope = "all";
+let customerPanelMode = "list";
 let customerMemberFilter = "全部";
 let customerOwnerFilter = "全部";
 let taskSearchQuery = "";
@@ -180,6 +206,13 @@ let draftStatusFilter = "全部";
 let draftChannelFilter = "全部";
 let draftPriorityFilter = "全部";
 let draftRiskFilter = "全部";
+let chatSearchQuery = "";
+let chatSourceFilter = "全部";
+let chatStatusFilter = "全部";
+let chatBusinessScope = "vip";
+let activeChatSessionId = "";
+let wecomBindingSearchQuery = "";
+let wecomLogTypeFilter = "全部";
 let selectedTaskIds = new Set();
 let selectedDraftIds = new Set();
 let busyAction = null;
@@ -194,9 +227,10 @@ const defaultNavGroupByView = {
   workflow: "overview",
   journey: "customer",
   customers: "customer",
-  quotes: "customer",
-  channels: "groupchat",
-  wecom: "groupchat",
+  quotes: "groupchat",
+  chat: "groupchat",
+  channels: "settings",
+  wecom: "settings",
   drafts: "groupchat",
   tasks: "sales",
   agents: "sales",
@@ -204,6 +238,89 @@ const defaultNavGroupByView = {
   modelConfig: "settings",
   templates: "settings",
   system: "settings"
+};
+
+const customerScopeDefinitions = {
+  all: {
+    key: "all",
+    navTitle: "客户管理",
+    title: "客户档案",
+    subtitle: "查看和维护全量客户基础信息、交易数据、标签、关注型号和事件流。",
+    stages: []
+  },
+  telemarketing: {
+    key: "telemarketing",
+    navTitle: "电销客户池",
+    title: "电销客户池",
+    subtitle: "只看待筛选、待外呼和电销企微培育阶段客户，用于外呼筛选和企微培育。",
+    stages: ["待筛选", "待外呼", "电销企微培育"]
+  },
+  sales: {
+    key: "sales",
+    navTitle: "销售客户",
+    title: "销售客户档案",
+    subtitle: "只看销售企微承接和销售跟进阶段客户，用于会员卡承接、异议处理和成交推进。",
+    stages: ["销售企微承接", "销售跟进"]
+  },
+  vip: {
+    key: "vip",
+    navTitle: "VIP客户",
+    title: "VIP客户档案",
+    subtitle: "只看已购会员、VIP维护和续费复购阶段客户，用于群维护、报价订阅和复购运营。",
+    stages: ["已购会员", "VIP维护", "续费/复购"]
+  }
+};
+
+const chatScopeDefinitions = {
+  telemarketing: {
+    key: "telemarketing",
+    navTitle: "电销会话",
+    title: "电销会话工作台",
+    label: "电销培育",
+    subtitle: "只展示电销沉淀企微、个人微信托管号和本地电销私聊中归属电销流程的会话，用于继续筛选意向并转交销售。",
+    emptyTitle: "暂无电销会话",
+    emptyDetail: "电销企微、企微机器人或本地电销消息入站后，会在这里形成独立聊天窗口。",
+    channels: ["电销企微", "电销企微培育", "电销模拟私聊"],
+    stages: ["待筛选", "待外呼", "电销企微培育"],
+    keywords: ["电销", "外呼", "培育", "待筛选", "待外呼"]
+  },
+  sales: {
+    key: "sales",
+    navTitle: "销售会话",
+    title: "销售会话工作台",
+    label: "销售承接",
+    subtitle: "只展示销售企微、个人微信托管号和本地销售私聊中归属会员卡销售承接的会话，用于判断意图、沉淀话术并推进成交。",
+    emptyTitle: "暂无销售会话",
+    emptyDetail: "销售企微或本地销售消息入站后，会在这里形成独立聊天窗口。",
+    channels: ["销售企微", "销售企微承接", "销售模拟私聊", "企微私聊"],
+    stages: ["销售企微承接", "销售跟进"],
+    keywords: ["销售", "会员卡", "承接"]
+  },
+  vip: {
+    key: "vip",
+    navTitle: "VIP会话",
+    title: "VIP会话工作台",
+    label: "VIP群维护",
+    subtitle: "只展示已购会员和VIP小群相关会话，用于售前、售后、报价、投诉和群内问题分流。",
+    emptyTitle: "暂无VIP会话",
+    emptyDetail: "VIP群、会话存档或个人微信托管号入站后，会在这里形成独立聊天窗口。",
+    channels: ["VIP群", "VIP模拟群"],
+    stages: ["VIP维护"],
+    memberStatuses: ["金卡", "黑金卡", "已购卡"],
+    keywords: ["VIP", "会员", "群", "售后", "报价", "投诉"]
+  },
+  all: {
+    key: "all",
+    navTitle: "会话工作台",
+    title: "全量会话工作台",
+    label: "全部业务",
+    subtitle: "展示全部企微会话存档、智能机器人、个人微信AccountAgent和本地模拟消息，适合管理员排查跨业务链路。",
+    emptyTitle: "暂无会话",
+    emptyDetail: "会话存档、个人微信或本地消息入站后，会在这里形成独立聊天窗口。",
+    channels: [],
+    stages: [],
+    keywords: []
+  }
 };
 
 async function loadState() {
@@ -382,7 +499,16 @@ function normalizeWecomConfigState(config = {}) {
     },
     archive: {
       ...defaultWecomConfig.archive,
-      ...(config.archive || {})
+      ...(config.archive || {}),
+      archiveSecret: "",
+      privateKey: "",
+      archiveSecretConfigured: Boolean(config.archive?.archiveSecretConfigured),
+      archiveSecretMasked: config.archive?.archiveSecretMasked || "",
+      privateKeyConfigured: Boolean(config.archive?.privateKeyConfigured),
+      privateKeyMasked: config.archive?.privateKeyMasked || "",
+      seq: Number(config.archive?.seq || 0),
+      pollIntervalSeconds: Number(config.archive?.pollIntervalSeconds || defaultWecomConfig.archive.pollIntervalSeconds),
+      limit: Number(config.archive?.limit || defaultWecomConfig.archive.limit)
     }
   };
 }
@@ -392,10 +518,15 @@ function normalizePersonalWechatState(config = {}) {
     ...defaultPersonalWechatState.account,
     ...(config.account || {})
   };
+  const gateway = {
+    ...defaultPersonalWechatState.gateway,
+    ...(config.gateway || {})
+  };
   return {
     ...defaultPersonalWechatState,
     ...config,
     enabled: config.enabled === undefined ? defaultPersonalWechatState.enabled : Boolean(config.enabled),
+    gateway,
     account: {
       ...account,
       autoReply: Boolean(account.autoReply),
@@ -662,6 +793,33 @@ function resetCustomerFilters() {
   customerOwnerFilter = "全部";
 }
 
+function customerScopeDefinition(scope = customerBusinessScope) {
+  return customerScopeDefinitions[scope] || customerScopeDefinitions.all;
+}
+
+function ensureSelectedCustomerInVisibleScope() {
+  const visibleCustomers = filteredCustomers();
+  if (visibleCustomers.length && !visibleCustomers.some((customer) => customer.id === state.selectedCustomerId)) {
+    state.selectedCustomerId = visibleCustomers[0].id;
+  }
+}
+
+function applyCustomerScope(scope = "all") {
+  const definition = customerScopeDefinition(scope);
+  customerBusinessScope = definition.key;
+  customerPanelMode = "list";
+  resetCustomerFilters();
+  customerStageSetFilter = [...(definition.stages || [])];
+  ensureSelectedCustomerInVisibleScope();
+}
+
+function customerScopeForStage(stage = "") {
+  if (customerScopeDefinitions.telemarketing.stages.includes(stage)) return "telemarketing";
+  if (customerScopeDefinitions.sales.stages.includes(stage)) return "sales";
+  if (customerScopeDefinitions.vip.stages.includes(stage)) return "vip";
+  return "all";
+}
+
 function resetTaskFilters() {
   taskSearchQuery = "";
   taskRoleFilter = "全部";
@@ -681,21 +839,99 @@ function resetDraftFilters() {
   selectedDraftIds.clear();
 }
 
+function chatScopeDefinition(scope = chatBusinessScope) {
+  return chatScopeDefinitions[scope] || chatScopeDefinitions.vip;
+}
+
+function customerForChatSession(session) {
+  if (!session?.customerId) return null;
+  return state.customers.find((item) => item.id === session.customerId) || null;
+}
+
+function chatSessionTextBundle(session, customer) {
+  return [
+    session?.title,
+    session?.channel,
+    session?.sourceLabel,
+    session?.customerName,
+    session?.lastMessageText,
+    customer?.stage,
+    customer?.memberStatus,
+    ...(customer?.tags || []),
+    ...(customer?.watchedModels || [])
+  ].filter(Boolean).join(" ");
+}
+
+function textContainsAny(text, keywords = []) {
+  return keywords.some((keyword) => text.includes(keyword));
+}
+
+function sessionMatchesChatScope(session) {
+  const scope = chatScopeDefinition();
+  if (scope.key === "all") return true;
+  const customer = customerForChatSession(session);
+  const text = chatSessionTextBundle(session, customer);
+  const channel = String(session?.channel || "");
+  const stage = String(customer?.stage || "");
+  const memberStatus = String(customer?.memberStatus || "");
+  const channelMatch = (scope.channels || []).some((item) => channel === item || channel.includes(item));
+  const stageMatch = (scope.stages || []).includes(stage);
+  const isOtherBusinessChannel = (scope.key === "telemarketing" && (channel.includes("销售") || channel.includes("VIP")))
+    || (scope.key === "sales" && (channel.includes("电销") || channel.includes("VIP")))
+    || (scope.key === "vip" && (channel.includes("电销") || channel.includes("销售")));
+
+  if (scope.key === "vip") {
+    const memberMatch = (scope.memberStatuses || []).includes(memberStatus);
+    return channelMatch || stageMatch || memberMatch || (!isOtherBusinessChannel && text.includes("VIP"));
+  }
+
+  if (isOtherBusinessChannel) return stageMatch;
+  return channelMatch || stageMatch || textContainsAny(text, scope.keywords || []);
+}
+
+function resetChatFilters(scope = "vip") {
+  chatBusinessScope = scope;
+  chatSearchQuery = "";
+  chatSourceFilter = "全部";
+  chatStatusFilter = "全部";
+  activeChatSessionId = "";
+}
+
 function applyNavPreset(preset) {
   if (!preset) return;
+  if (preset === "allCustomers") {
+    applyCustomerScope("all");
+  }
   if (preset === "telemarketingCustomers") {
-    resetCustomerFilters();
-    customerStageSetFilter = ["待筛选", "待外呼", "电销企微培育"];
+    applyCustomerScope("telemarketing");
+  }
+  if (preset === "telemarketingChat") {
+    resetChatFilters("telemarketing");
   }
   if (preset === "telemarketingTasks") {
     resetTaskFilters();
     taskRoleFilter = "电销";
     taskStatusFilter = "全部";
   }
+  if (preset === "salesChat") {
+    resetChatFilters("sales");
+  }
+  if (preset === "salesCustomers") {
+    applyCustomerScope("sales");
+  }
   if (preset === "salesTasks") {
     resetTaskFilters();
     taskRoleFilter = "销售";
     taskStatusFilter = "全部";
+  }
+  if (preset === "vipCustomers") {
+    applyCustomerScope("vip");
+  }
+  if (preset === "vipChat") {
+    resetChatFilters("vip");
+  }
+  if (preset === "vipQuotes") {
+    applyCustomerScope("vip");
   }
   if (preset === "vipTasks") {
     resetTaskFilters();
@@ -710,6 +946,20 @@ function applyNavPreset(preset) {
   if (preset === "vipChannels") {
     selectedScenario = scenarios.vip;
   }
+  if (preset === "settingsChannels") {
+    selectedScenario = scenarios.nurture;
+  }
+}
+
+function viewTitleForCurrentContext() {
+  if (activeView === "customers") return customerScopeDefinition().navTitle;
+  if (activeView === "chat") return chatScopeDefinition().navTitle;
+  if (activeView === "quotes") return "报价订阅";
+  if (activeView === "channels") {
+    if (activeNavGroup === "telemarketing") return "电销消息";
+    return "消息入站";
+  }
+  return viewTitles[activeView];
 }
 
 function renderEmptyState(title, detail, action = "") {
@@ -1094,9 +1344,9 @@ function renderLoadError() {
   `;
 }
 
-function customerOptions(currentCustomer = selectedCustomer()) {
-  if (!state.customers.length) return `<option value="" disabled selected>暂无客户</option>`;
-  return state.customers.map((item) => `
+function customerOptions(currentCustomer = selectedCustomer(), customers = state.customers) {
+  if (!customers.length) return `<option value="" disabled selected>暂无客户</option>`;
+  return customers.map((item) => `
     <option value="${escapeHtml(item.id)}" ${currentCustomer?.id === item.id ? "selected" : ""}>
       ${escapeHtml(item.name)} · ${escapeHtml(item.stage || "待筛选")}
     </option>
@@ -1136,7 +1386,9 @@ function filteredCustomers() {
 }
 
 function customerFilterControls(scope) {
-  const stages = ["全部", ...STAGES];
+  const currentScope = customerScopeDefinition();
+  const availableStages = currentScope.stages?.length ? currentScope.stages : STAGES;
+  const stages = ["全部", ...availableStages];
   const members = ["全部", ...uniqueCustomerValues("memberStatus")];
   const owners = ["全部", ...uniqueCustomerValues("owner")];
   return `
@@ -1684,56 +1936,76 @@ function renderJourney() {
   `;
 }
 
-function renderCustomers() {
-  const currentCustomer = selectedCustomer();
-  const customer = currentCustomer || {
-    id: "",
-    name: "暂无客户",
-    contact: "请先新增客户",
-    phone: "",
-    stage: "无客户",
-    owner: "待分配",
-    memberStatus: "未购卡",
-    targetCard: "待推荐",
-    intentScore: 0,
-    risk: "低",
-    tags: [],
-    watchedModels: [],
-    notes: "新增客户后即可维护档案、记录销售结果并进入后续流程。"
-  };
-  const visibleCustomers = filteredCustomers();
+function renderCustomerCreatePage(scope) {
+  const defaultStage = scope.stages?.[0] || STAGES[0];
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">${escapeHtml(scope.title)} · 新增档案</h2>
+          <p class="panel-subtitle">${escapeHtml(scope.subtitle)} 新增客户会真实写入本地客户池。</p>
+        </div>
+        <button class="small-button" type="button" data-customer-page="list">返回客户列表</button>
+      </div>
+      <form id="newCustomerForm" class="form-grid">
+        <div class="field"><label>客户名称</label><input name="name" required placeholder="例：苏州云启通讯"></div>
+        <div class="field"><label>联系人</label><input name="contact" placeholder="例：张总"></div>
+        <div class="field"><label>手机号</label><input name="phone" placeholder="138****0000"></div>
+        <div class="field"><label>当前阶段</label><select name="stage">${STAGES.map((stage) => `<option value="${stage}" ${stage === defaultStage ? "selected" : ""}>${stage}</option>`).join("")}</select></div>
+        <div class="field"><label>负责人</label><input name="owner" placeholder="待分配"></div>
+        <div class="field"><label>交易额</label><input name="tradeVolume" type="number" value="300000"></div>
+        <div class="field"><label>采购频次</label><input name="purchaseFrequency" type="number" value="6"></div>
+        <div class="field"><label>最近交易天数</label><input name="lastTradeDays" type="number" value="15"></div>
+        <div class="field"><label>会员状态</label><input name="memberStatus" value="未购卡"></div>
+        <div class="field"><label>推荐卡种</label><input name="targetCard" value="平台银卡"></div>
+        <div class="field full-span"><label>标签</label><input name="tags" placeholder="iPhone 13, 潜在意向, 高频采购"></div>
+        <div class="field full-span"><label>关注型号</label><input name="watchedModels" placeholder="iPhone 13, Mate60"></div>
+        <div class="field full-span"><label>备注</label><textarea name="notes" placeholder="补充客户背景、采购偏好或运营判断。"></textarea></div>
+        <button class="primary-button full-span" type="submit" ${actionAttrs("create-customer")}>新增客户</button>
+      </form>
+    </section>
+  `;
+}
+
+function renderCustomerDetailPage(scope, customer) {
+  if (!customer) {
+    customerPanelMode = "list";
+    return renderCustomerListPage(scope, filteredCustomers());
+  }
   return `
     <section class="grid two">
       <article class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">新增客户档案</h2>
-            <p class="panel-subtitle">用于从平台交易数据、导表或人工线索建立本地客户池。</p>
+            <h2 class="panel-title">${escapeHtml(customer.name)}</h2>
+            <p class="panel-subtitle">${escapeHtml(customer.contact)} ${escapeHtml(customer.phone)} · ${escapeHtml(customer.stage)}</p>
           </div>
+          <button class="small-button" type="button" data-customer-page="list">返回客户列表</button>
         </div>
-        <form id="newCustomerForm" class="form-grid">
-          <div class="field"><label>客户名称</label><input name="name" required placeholder="例：苏州云启通讯"></div>
-          <div class="field"><label>联系人</label><input name="contact" placeholder="例：张总"></div>
-          <div class="field"><label>手机号</label><input name="phone" placeholder="138****0000"></div>
-          <div class="field"><label>当前阶段</label><select name="stage">${STAGES.map((stage) => `<option value="${stage}">${stage}</option>`).join("")}</select></div>
-          <div class="field"><label>负责人</label><input name="owner" placeholder="待分配"></div>
-          <div class="field"><label>交易额</label><input name="tradeVolume" type="number" value="300000"></div>
-          <div class="field"><label>采购频次</label><input name="purchaseFrequency" type="number" value="6"></div>
-          <div class="field"><label>最近交易天数</label><input name="lastTradeDays" type="number" value="15"></div>
-          <div class="field"><label>会员状态</label><input name="memberStatus" value="未购卡"></div>
-          <div class="field"><label>推荐卡种</label><input name="targetCard" value="平台银卡"></div>
-          <div class="field full-span"><label>标签</label><input name="tags" placeholder="iPhone 13, 潜在意向, 高频采购"></div>
-          <div class="field full-span"><label>关注型号</label><input name="watchedModels" placeholder="iPhone 13, Mate60"></div>
-          <div class="field full-span"><label>备注</label><textarea name="notes" placeholder="补充客户背景、采购偏好或运营判断。"></textarea></div>
-          <button class="primary-button full-span" type="submit" ${actionAttrs("create-customer")}>新增客户</button>
-        </form>
+        <div class="profile-grid">
+          <div class="profile-item"><span>会员状态</span><strong>${escapeHtml(customer.memberStatus)}</strong></div>
+          <div class="profile-item"><span>推荐卡种</span><strong>${escapeHtml(customer.targetCard)}</strong></div>
+          <div class="profile-item"><span>意向分</span><strong>${customer.intentScore || 0}</strong></div>
+          <div class="profile-item"><span>负责人</span><strong>${escapeHtml(customer.owner || "待分配")}</strong></div>
+        </div>
+        <h3 style="margin-top:14px">标签</h3>
+        <div class="tag-list">${(customer.tags || []).map(tagPill).join("") || `<span class="muted">暂无标签</span>`}</div>
+        <h3 style="margin-top:14px">事件流</h3>
+        <div class="event-list">
+          ${eventsFor(customer.id).map((event) => `
+            <div class="event-item">
+              <div class="event-meta">${escapeHtml(event.time)} · ${escapeHtml(event.channel)} · ${escapeHtml(event.type)}</div>
+              <div class="event-text">${escapeHtml(event.text)}</div>
+            </div>
+          `).join("") || `<div class="muted">暂无事件。</div>`}
+        </div>
       </article>
 
       <article class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">维护当前客户</h2>
-            <p class="panel-subtitle">${escapeHtml(customer.name)} · ${escapeHtml(customer.contact)} · ${escapeHtml(customer.stage)}</p>
+            <h2 class="panel-title">维护客户档案</h2>
+            <p class="panel-subtitle">${escapeHtml(scope.title)}内的客户维护会同步回写事件流、任务和会话上下文。</p>
           </div>
         </div>
         <form id="updateCustomerForm" class="form-grid">
@@ -1746,7 +2018,7 @@ function renderCustomers() {
           <div class="field full-span"><label>标签</label><input name="tags" value="${escapeHtml(customer.tags.join(", "))}"></div>
           <div class="field full-span"><label>关注型号</label><input name="watchedModels" value="${escapeHtml(customer.watchedModels.join(", "))}"></div>
           <div class="field full-span"><label>备注</label><textarea name="notes">${escapeHtml(customer.notes)}</textarea></div>
-          <button class="primary-button full-span" type="submit" ${actionAttrs("update-customer")} ${currentCustomer ? "" : "disabled"}>保存档案</button>
+          <button class="primary-button full-span" type="submit" ${actionAttrs("update-customer")}>保存档案</button>
         </form>
 
         <div class="divider"></div>
@@ -1754,18 +2026,23 @@ function renderCustomers() {
           <div class="field"><label>销售结果</label><select name="outcome"><option>成交</option><option>继续培育</option><option>暂缓</option><option>无效</option></select></div>
           <div class="field"><label>成交/会员状态</label><input name="memberStatus" value="${escapeHtml(customer.targetCard)}"></div>
           <div class="field full-span"><label>结果备注</label><input name="note" placeholder="例：客户确认购买金卡，待安排VIP小群。"></div>
-          <button class="small-button full-span" type="submit" ${actionAttrs("record-outcome")} ${currentCustomer ? "" : "disabled"}>记录销售结果</button>
+          <button class="small-button full-span" type="submit" ${actionAttrs("record-outcome")}>记录销售结果</button>
         </form>
-        ${currentCustomer ? "" : renderEmptyState("暂无可维护客户", "请先新增客户或重置本地样例数据。")}
       </article>
     </section>
+  `;
+}
 
+function renderCustomerListPage(scope, visibleCustomers) {
+  const currentCustomer = selectedCustomer();
+  return `
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">客户列表</h2>
-          <p class="panel-subtitle">点击客户可切换当前维护对象。当前筛选结果 ${visibleCustomers.length}/${state.customers.length} 个。</p>
+          <h2 class="panel-title">${escapeHtml(scope.title)} · 客户列表</h2>
+          <p class="panel-subtitle">单击客户只切换当前选中对象，双击客户行进入详情维护。当前筛选结果 ${visibleCustomers.length}/${state.customers.length} 个。</p>
         </div>
+        <button class="primary-button" type="button" data-customer-page="new">新增档案</button>
       </div>
       ${customerFilterControls("customers")}
       <div class="table-wrap">
@@ -1773,7 +2050,7 @@ function renderCustomers() {
           <thead><tr><th>客户</th><th>阶段</th><th>标签</th><th>会员</th><th>意向</th><th>负责人</th></tr></thead>
           <tbody>
             ${visibleCustomers.map((item) => `
-              <tr class="customer-row ${item.id === customer.id ? "active" : ""}" data-customer="${item.id}">
+              <tr class="customer-row ${item.id === currentCustomer?.id ? "active" : ""}" data-customer="${item.id}" title="双击进入客户详情">
                 <td><strong>${escapeHtml(item.name)}</strong><br><span class="muted">${escapeHtml(item.contact)} ${escapeHtml(item.phone)}</span></td>
                 <td><span class="status-pill">${escapeHtml(item.stage)}</span></td>
                 <td>${(item.tags || []).slice(0, 3).map(tagPill).join(" ")}</td>
@@ -1781,12 +2058,21 @@ function renderCustomers() {
                 <td>${item.intentScore || 0}</td>
                 <td>${escapeHtml(item.owner)}</td>
               </tr>
-            `).join("") || `<tr><td colspan="6">${renderEmptyState("没有匹配客户", "请调整搜索词或筛选条件。")}</td></tr>`}
+            `).join("") || `<tr><td colspan="6">${renderEmptyState("没有匹配客户", "请调整搜索词或筛选条件，或点击右上角新增档案。")}</td></tr>`}
           </tbody>
         </table>
       </div>
     </section>
   `;
+}
+
+function renderCustomers() {
+  const scope = customerScopeDefinition();
+  const visibleCustomers = filteredCustomers();
+  const currentCustomer = selectedCustomer();
+  if (customerPanelMode === "new") return renderCustomerCreatePage(scope);
+  if (customerPanelMode === "detail") return renderCustomerDetailPage(scope, currentCustomer);
+  return renderCustomerListPage(scope, visibleCustomers);
 }
 
 function renderAgents() {
@@ -2073,10 +2359,22 @@ function wecomConfigPayload(form) {
   const archive = {
     enabled: Boolean(data["archive.enabled"]),
     provider: data["archive.provider"] || currentConfig.archive.provider,
+    corpId: data["archive.corpId"] || currentConfig.archive.corpId || "",
+    archiveSecret: data["archive.archiveSecret"] || "",
+    privateKey: data["archive.privateKey"] || "",
+    privateKeyVersion: data["archive.privateKeyVersion"] || currentConfig.archive.privateKeyVersion || "",
     cursor: data["archive.cursor"] || currentConfig.archive.cursor || "",
+    seq: data["archive.seq"] || currentConfig.archive.seq || 0,
+    pollIntervalSeconds: data["archive.pollIntervalSeconds"] || currentConfig.archive.pollIntervalSeconds || 10,
+    limit: data["archive.limit"] || currentConfig.archive.limit || 100,
+    gatewayMode: data["archive.gatewayMode"] || currentConfig.archive.gatewayMode || "sidecar",
+    sidecarUrl: data["archive.sidecarUrl"] || currentConfig.archive.sidecarUrl || "",
+    trustedStatus: currentConfig.archive.trustedStatus || "未验证",
     defaultCustomerId: data["archive.defaultCustomerId"] || currentConfig.archive.defaultCustomerId || state.selectedCustomerId || "",
     defaultChannel: data["archive.defaultChannel"] || currentConfig.archive.defaultChannel || "VIP群"
   };
+  if (data["archive.clearArchiveSecret"]) archive.clearArchiveSecret = true;
+  if (data["archive.clearPrivateKey"]) archive.clearPrivateKey = true;
   return {
     enabled: Boolean(data.enabled),
     sendMode: data.sendMode || "manualApproval",
@@ -2105,10 +2403,22 @@ function wecomAibotCredentialPlaceholder(config = {}, field = "botId") {
   return field === "botId" ? "企业微信智能机器人 Bot ID" : "企业微信智能机器人 Secret";
 }
 
+function wecomArchiveCredentialPlaceholder(config = {}, field = "archiveSecret") {
+  const configured = field === "privateKey" ? config.privateKeyConfigured : config.archiveSecretConfigured;
+  const masked = field === "privateKey" ? config.privateKeyMasked : config.archiveSecretMasked;
+  if (configured) return `已配置：${masked || "********"}，留空保持不变`;
+  return field === "privateKey" ? "会话存档RSA私钥" : "会话存档Secret";
+}
+
 function personalWechatConfigPayload(form) {
   const data = formData(form);
   return {
     enabled: Boolean(data.enabled),
+    gateway: {
+      mode: data["gateway.mode"] || defaultPersonalWechatState.gateway.mode,
+      sidecarUrl: data["gateway.sidecarUrl"] || "",
+      sendEndpoint: data["gateway.sendEndpoint"] || defaultPersonalWechatState.gateway.sendEndpoint
+    },
     account: {
       id: data["account.id"] || defaultPersonalWechatState.account.id,
       name: data["account.name"] || defaultPersonalWechatState.account.name,
@@ -2131,6 +2441,7 @@ function personalWechatJobLabel(status = "") {
     queued: "待自动发送",
     sending: "发送中",
     sent: "已发送待回显",
+    sent_pending_confirm: "已提交待回读",
     confirmed: "已确认",
     failed: "失败",
     cancelled: "已取消",
@@ -2147,8 +2458,9 @@ function personalWechatJobClass(status = "") {
 }
 
 function renderPersonalWechatJob(job) {
-  const canConfirm = ["manual_required", "sent"].includes(job.status);
-  const canFail = ["queued", "sent", "sending"].includes(job.status);
+  const canApprove = job.status === "manual_required";
+  const canConfirm = ["sent", "sent_pending_confirm", "sending"].includes(job.status);
+  const canFail = ["queued", "sent", "sent_pending_confirm", "sending"].includes(job.status);
   return `
     <div class="business-card ${personalWechatJobClass(job.status)}">
       <div class="agent-customer-head">
@@ -2167,11 +2479,15 @@ function renderPersonalWechatJob(job) {
         ${(job.triggerMessageIds || []).length ? `<span class="tag">触发 ${(job.triggerMessageIds || []).length} 条</span>` : ""}
         ${job.attempts ? `<span class="tag">尝试 ${escapeHtml(job.attempts)}</span>` : ""}
         ${job.createdAt ? `<span class="tag">创建 ${escapeHtml(formatDateTime(job.createdAt))}</span>` : ""}
+        ${job.approvedAt ? `<span class="tag">放行 ${escapeHtml(formatDateTime(job.approvedAt))}</span>` : ""}
+        ${job.gatewayMode ? `<span class="tag">网关 ${escapeHtml(job.gatewayMode)}</span>` : ""}
+        ${job.gatewayRequestId ? `<span class="tag">请求 ${escapeHtml(job.gatewayRequestId)}</span>` : ""}
         ${job.sentAt ? `<span class="tag">已发 ${escapeHtml(formatDateTime(job.sentAt))}</span>` : ""}
         ${job.confirmedAt ? `<span class="tag">确认 ${escapeHtml(formatDateTime(job.confirmedAt))}</span>` : ""}
       </div>
       <div class="button-row">
-        ${canConfirm ? `<button class="small-button" type="button" data-personal-wechat-confirm-job="${escapeHtml(job.jobId)}" ${actionAttrs(`pwx-confirm-${job.jobId}`)}>${job.status === "manual_required" ? "人工确认并发送" : "回读确认"}</button>` : ""}
+        ${canApprove ? `<button class="small-button" type="button" data-personal-wechat-approve-job="${escapeHtml(job.jobId)}" ${actionAttrs(`pwx-approve-${job.jobId}`)}>人工放行</button>` : ""}
+        ${canConfirm ? `<button class="small-button" type="button" data-personal-wechat-confirm-job="${escapeHtml(job.jobId)}" ${actionAttrs(`pwx-confirm-${job.jobId}`)}>回读确认</button>` : ""}
         ${canFail ? `<button class="ghost-button" type="button" data-personal-wechat-fail-job="${escapeHtml(job.jobId)}" ${actionAttrs(`pwx-fail-${job.jobId}`)}>标记失败</button>` : ""}
       </div>
     </div>
@@ -2229,6 +2545,26 @@ function sendableWecomDrafts() {
   return sortedDrafts().filter((draft) => draft.status === "已确认" && ["VIP群", "企微私聊", "人工触达"].includes(draft.channel));
 }
 
+function renderIntegrationCard({ title, subtitle, status, tone = "", body = "", tags = [], action = "" }) {
+  const className = tone === "success" ? "success-card" : tone === "warning" ? "warning-card" : "";
+  return `
+    <article class="integration-card ${className}">
+      <div class="agent-customer-head">
+        <div>
+          <strong>${escapeHtml(title)}</strong>
+          <span>${escapeHtml(subtitle || "")}</span>
+        </div>
+        <span class="status-pill">${escapeHtml(status || "待配置")}</span>
+      </div>
+      ${body ? `<p class="event-text">${escapeHtml(body)}</p>` : ""}
+      <div class="tag-list">
+        ${tags.filter(Boolean).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
+      </div>
+      ${action ? `<div class="button-row">${action}</div>` : ""}
+    </article>
+  `;
+}
+
 function renderWecom() {
   const config = normalizeWecomConfigState(state.wecomConfig);
   const aibot = config.aibot;
@@ -2251,17 +2587,37 @@ function renderWecom() {
   const personalAccount = personalWechat.account;
   const personalJobs = personalWechat.sendJobs || [];
   const personalContexts = personalWechat.groupContexts || [];
+  const personalGateway = personalWechat.gateway || defaultPersonalWechatState.gateway;
   const personalQueuedJobs = personalJobs.filter((job) => job.status === "queued");
-  const personalSentJobs = personalJobs.filter((job) => job.status === "sent");
+  const personalSendingJobs = personalJobs.filter((job) => job.status === "sending");
+  const personalSentJobs = personalJobs.filter((job) => ["sent", "sent_pending_confirm"].includes(job.status));
   const personalManualJobs = personalJobs.filter((job) => job.status === "manual_required");
   const personalConfirmedJobs = personalJobs.filter((job) => job.status === "confirmed");
   const personalFailedJobs = personalJobs.filter((job) => job.status === "failed");
   const personalDefaultCustomer = state.customers.find((customer) => customer.id === personalAccount.defaultCustomerId) || selectedCustomer();
+  const archiveConfigured = archive.enabled && archive.gatewayMode === "sidecar" && archive.sidecarUrl && archive.corpId && archive.archiveSecretConfigured && archive.privateKeyConfigured;
+  const routeReady = config.enabled && readyRoutes.length > 0;
+  const personalGatewayReady = personalGateway.mode === "mock" || (personalGateway.mode === "sidecar" && personalGateway.sidecarUrl && personalGateway.sendEndpoint);
+  const normalizedBindingSearch = wecomBindingSearchQuery.trim().toLowerCase();
+  const filteredBindings = bindings.filter((binding) => {
+    if (!normalizedBindingSearch) return true;
+    const haystack = [
+      binding.chatName,
+      binding.chatId,
+      binding.source,
+      binding.status,
+      binding.channel,
+      customerName(binding.customerId)
+    ].join(" ").toLowerCase();
+    return haystack.includes(normalizedBindingSearch);
+  });
+  const wecomLogTypes = ["全部", ...new Set(logs.map((log) => log.type).filter(Boolean))];
+  const filteredWecomLogs = logs.filter((log) => wecomLogTypeFilter === "全部" || log.type === wecomLogTypeFilter);
   return `
     <section class="grid four">
       ${cardKpi("会话存档", archive.status || (archiveReady ? "已启用" : "未启用"), archiveReady ? "外部群主读取入口" : "等待配置")}
       ${cardKpi("群聊归档", boundGroups.length, `待绑定 ${pendingGroups.length} 个`)}
-      ${cardKpi("发送待确认", personalQueuedJobs.length + personalSentJobs.length, `人工 ${personalManualJobs.length} 条`)}
+      ${cardKpi("发送待确认", personalQueuedJobs.length + personalSendingJobs.length + personalSentJobs.length, `人工 ${personalManualJobs.length} 条`)}
       ${cardKpi("失败记录", failedLogs.length + personalFailedJobs.length, "配置、Webhook或Gateway错误")}
     </section>
 
@@ -2274,10 +2630,82 @@ function renderWecom() {
       </div>
     </section>
 
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">接入总控</h2>
+          <p class="panel-subtitle">先看这里判断企微/个微当前能做什么：读取、归档、测试发送、个微出站是否具备运行条件。</p>
+        </div>
+      </div>
+      <div class="integration-grid">
+        ${renderIntegrationCard({
+          title: "企微会话存档",
+          subtitle: "生产外部群主读取入口",
+          status: archiveConfigured ? archive.trustedStatus || "配置可检查" : "配置未完成",
+          tone: archiveConfigured ? "success" : "warning",
+          body: archiveConfigured ? "配置已满足Sidecar拉取条件，可检查Sidecar /health；真实消息由Gateway写入标准入站。" : "需要启用存档入口，并补齐CorpID、Secret、RSA私钥和Sidecar URL。",
+          tags: [
+            archive.enabled ? "已启用" : "未启用",
+            `模式 ${archive.gatewayMode || "sidecar"}`,
+            archive.sidecarUrl ? "Sidecar URL已填" : "缺Sidecar URL",
+            archive.archiveSecretConfigured ? "Secret已保存" : "缺Secret",
+            archive.privateKeyConfigured ? "私钥已保存" : "缺私钥",
+            archive.cursor ? `游标 ${archive.cursor}` : "无游标"
+          ],
+          action: `<button class="small-button" id="checkWecomArchiveSidecar" type="button" ${actionAttrs("wecom-archive-check")} ${archive.enabled ? "" : "disabled"}>检查存档Sidecar</button>`
+        })}
+        ${renderIntegrationCard({
+          title: "企微智能机器人",
+          subtitle: "测试/辅助读取入口",
+          status: aibotReady ? aibot.bridgeStatus || "凭据已配置" : "凭据未完成",
+          tone: aibotReady ? "success" : "warning",
+          body: aibotReady ? "Bot ID 和 Secret 已保存，可运行长连接bridge读取机器人可见消息。" : "保存Bot ID和Secret后，再运行 npm run wecom:bridge。",
+          tags: [
+            aibot.enabled ? "已启用" : "未启用",
+            aibot.botIdConfigured ? "Bot ID已保存" : "缺Bot ID",
+            aibot.secretConfigured ? "Secret已保存" : "缺Secret",
+            aibot.autoReply ? "自动回复开启" : "只读分流"
+          ],
+          action: `<button class="small-button" id="checkWecomAibotTop" type="button" ${actionAttrs("wecom-aibot-check-top")}>检查机器人配置</button>`
+        })}
+        ${renderIntegrationCard({
+          title: "企微测试群发送",
+          subtitle: "Webhook只负责发送测试消息",
+          status: routeReady ? "可发送测试群" : "发送未配置",
+          tone: routeReady ? "success" : "warning",
+          body: routeReady ? "已确认草稿和测试消息可发送到测试群机器人；这不是群消息读取链路。" : "需要启用企微连接、启用路由并保存Webhook。",
+          tags: [
+            config.enabled ? "连接器已启用" : "连接器未启用",
+            `${readyRoutes.length} 个可用路由`,
+            `模式 ${config.sendMode}`,
+            drafts.length ? `${drafts.length} 条可发送草稿` : "无已确认草稿"
+          ],
+          action: `<button class="small-button" type="button" data-jump-wecom-section="wecom-send-test">查看发送测试</button>`
+        })}
+        ${renderIntegrationCard({
+          title: "个人微信出站",
+          subtitle: "单账号AccountAgent + SendScheduler",
+          status: personalGatewayReady ? personalGateway.status || "可检查" : "Gateway未完成",
+          tone: personalGatewayReady ? "success" : "warning",
+          body: personalGateway.mode === "mock" ? "当前为Mock验证模式，不会触发外部发送；用于验证队列、风控和回读闭环。" : "Sidecar模式会把发送中任务交给外部个微Gateway，回读确认前不算闭环完成。",
+          tags: [
+            personalWechat.enabled ? "已启用" : "已停用",
+            `模式 ${personalGateway.mode || "mock"}`,
+            personalGateway.sidecarUrl ? "Sidecar URL已填" : "无Sidecar URL",
+            `待发 ${personalQueuedJobs.length}`,
+            `发送中 ${personalSendingJobs.length}`,
+            `待回读 ${personalSentJobs.length}`,
+            `人工 ${personalManualJobs.length}`
+          ],
+          action: `<button class="small-button" id="checkPersonalWechatGateway" type="button" ${actionAttrs("personal-wechat-gateway-check")}>检查个微Gateway</button>`
+        })}
+      </div>
+    </section>
+
     <section class="grid four">
       ${cardKpi("个人微信账号", personalAccount.status || "未连接", personalWechat.enabled ? "单账号单Agent" : "已停用")}
       ${cardKpi("外部群上下文", personalContexts.length, "按roomId隔离")}
-      ${cardKpi("待发送队列", personalQueuedJobs.length, `已发送待确认 ${personalSentJobs.length} 条`)}
+      ${cardKpi("待发送队列", personalQueuedJobs.length, `发送中 ${personalSendingJobs.length}，待回读 ${personalSentJobs.length}`)}
       ${cardKpi("已确认回显", personalConfirmedJobs.length, "Mock自回显/存档确认")}
     </section>
 
@@ -2299,6 +2727,10 @@ function renderWecom() {
           <div class="field"><label>账号名称</label><input name="account.name" value="${escapeHtml(personalAccount.name)}"></div>
           <div class="field"><label>群内显示名</label><input name="account.displayName" value="${escapeHtml(personalAccount.displayName)}"></div>
           <div class="field"><label>默认客户</label><select name="account.defaultCustomerId">${customerOptions(personalDefaultCustomer)}</select></div>
+          <div class="field"><label>出站Gateway模式</label><select name="gateway.mode"><option value="mock" ${personalGateway.mode === "mock" ? "selected" : ""}>Mock本地验证</option><option value="sidecar" ${personalGateway.mode === "sidecar" ? "selected" : ""}>Sidecar真实发送</option><option value="disabled" ${personalGateway.mode === "disabled" ? "selected" : ""}>停用出站</option></select></div>
+          <div class="field"><label>Sidecar URL</label><input name="gateway.sidecarUrl" value="${escapeHtml(personalGateway.sidecarUrl || "")}" placeholder="http://127.0.0.1:8788"></div>
+          <div class="field"><label>发送端点</label><input name="gateway.sendEndpoint" value="${escapeHtml(personalGateway.sendEndpoint || "/send")}"></div>
+          <div class="field"><label>Gateway状态</label><input value="${escapeHtml(personalGateway.status || "未配置")}" disabled></div>
           <label class="inline-check compact-check"><input name="account.autoReply" type="checkbox" value="true" ${personalAccount.autoReply ? "checked" : ""}><span>低风险自动排队</span></label>
           <label class="inline-check compact-check"><input name="account.requireApprovalForRisk" type="checkbox" value="true" ${personalAccount.requireApprovalForRisk ? "checked" : ""}><span>高风险人工确认</span></label>
           <div class="field"><label>最小发送间隔秒</label><input name="account.minSendIntervalSeconds" type="number" min="1" max="60" value="${escapeHtml(personalAccount.minSendIntervalSeconds)}"></div>
@@ -2315,7 +2747,7 @@ function renderWecom() {
         <div class="panel-header">
           <div>
             <h2 class="panel-title">运行边界</h2>
-            <p class="panel-subtitle">当前实现为Mock个人微信Gateway，用于验证消息理解、风控、排队和确认闭环；生产网关接入后复用同一动作层。</p>
+            <p class="panel-subtitle">Mock模式只做本地验证；Sidecar模式会等待真实出站网关回调，回调前不会标记真实已发送。</p>
           </div>
         </div>
         <div class="event-list">
@@ -2329,6 +2761,9 @@ function renderWecom() {
             </div>
             <p class="event-text">发消息由SendScheduler受控调度：同群FIFO，单账号默认并发1，可灰度到2-3；超过队列时效会要求重新判断。</p>
             <div class="tag-list">
+              <span class="tag">Gateway ${escapeHtml(personalGateway.mode)}</span>
+              ${personalGateway.sidecarUrl ? `<span class="tag">${escapeHtml(personalGateway.sidecarUrl)}${escapeHtml(personalGateway.sendEndpoint || "/send")}</span>` : ""}
+              <span class="tag">${escapeHtml(personalGateway.status || "未配置")}</span>
               <span class="tag">限频 ${escapeHtml(personalAccount.minSendIntervalSeconds)} 秒</span>
               <span class="tag">并发 ${escapeHtml(personalAccount.concurrency)}</span>
               <span class="tag">分钟 ${escapeHtml(personalAccount.maxSendsPerMinute)} 条</span>
@@ -2338,6 +2773,7 @@ function renderWecom() {
             </div>
           </div>
           ${personalAccount.lastError ? `<div class="business-card warning-card"><p class="event-text">最近错误：${escapeHtml(personalAccount.lastError)}</p></div>` : ""}
+          ${personalGateway.lastError ? `<div class="business-card warning-card"><p class="event-text">Gateway错误：${escapeHtml(personalGateway.lastError)}</p></div>` : ""}
         </div>
       </article>
     </section>
@@ -2456,14 +2892,27 @@ function renderWecom() {
             <span>启用会话存档入站</span>
           </label>
           <div class="field"><label>存档服务</label><input name="archive.provider" value="${escapeHtml(archive.provider || "企微会话内容存档")}"></div>
+          <div class="field"><label>企业ID CorpID</label><input name="archive.corpId" value="${escapeHtml(archive.corpId || "")}" placeholder="ww..."></div>
+          <div class="field"><label>Secret</label><input name="archive.archiveSecret" type="password" value="" placeholder="${escapeHtml(wecomArchiveCredentialPlaceholder(archive, "archiveSecret"))}"></div>
+          <div class="field"><label>私钥版本</label><input name="archive.privateKeyVersion" value="${escapeHtml(archive.privateKeyVersion || "")}" placeholder="公钥版本号"></div>
+          <div class="field"><label>Gateway模式</label><select name="archive.gatewayMode"><option value="sidecar" ${archive.gatewayMode === "sidecar" ? "selected" : ""}>Sidecar拉取</option><option value="manual" ${archive.gatewayMode === "manual" ? "selected" : ""}>手动标准入站</option><option value="disabled" ${archive.gatewayMode === "disabled" ? "selected" : ""}>停用</option></select></div>
+          <div class="field full-span"><label>Sidecar URL</label><input name="archive.sidecarUrl" value="${escapeHtml(archive.sidecarUrl || "")}" placeholder="http://127.0.0.1:8787"></div>
+          <div class="field full-span"><label>RSA私钥</label><textarea name="archive.privateKey" placeholder="${escapeHtml(wecomArchiveCredentialPlaceholder(archive, "privateKey"))}"></textarea></div>
+          ${(archive.archiveSecretConfigured || archive.privateKeyConfigured) ? `
+            <label class="inline-check compact-check"><input name="archive.clearArchiveSecret" type="checkbox" value="true"><span>清空已保存Secret</span></label>
+            <label class="inline-check compact-check"><input name="archive.clearPrivateKey" type="checkbox" value="true"><span>清空已保存私钥</span></label>
+          ` : ""}
           <div class="field"><label>默认客户</label><select name="archive.defaultCustomerId">${customerOptions(defaultArchiveCustomer)}</select></div>
           <div class="field"><label>默认渠道</label><select name="archive.defaultChannel"><option ${archive.defaultChannel === "VIP群" ? "selected" : ""}>VIP群</option><option ${archive.defaultChannel === "销售企微" ? "selected" : ""}>销售企微</option><option ${archive.defaultChannel === "电销企微" ? "selected" : ""}>电销企微</option></select></div>
           <div class="field"><label>读取游标</label><input name="archive.cursor" value="${escapeHtml(archive.cursor || "")}" placeholder="由存档Gateway回写"></div>
+          <div class="field"><label>Seq</label><input name="archive.seq" type="number" min="0" value="${escapeHtml(archive.seq || 0)}"></div>
+          <div class="field"><label>轮询间隔秒</label><input name="archive.pollIntervalSeconds" type="number" min="3" max="300" value="${escapeHtml(archive.pollIntervalSeconds || 10)}"></div>
+          <div class="field"><label>单次上限</label><input name="archive.limit" type="number" min="1" max="1000" value="${escapeHtml(archive.limit || 100)}"></div>
           <div class="business-card full-span ${archive.enabled ? "success-card" : "warning-card"}">
             <div class="agent-customer-head">
               <div>
                 <strong>${escapeHtml(archive.status || (archive.enabled ? "已启用" : "未启用"))}</strong>
-                <span>${archive.lastPulledAt ? `最近拉取 ${escapeHtml(formatDateTime(archive.lastPulledAt))}` : "等待会话存档Gateway接入"}</span>
+                <span>${archive.lastPulledAt ? `最近拉取 ${escapeHtml(formatDateTime(archive.lastPulledAt))}` : "等待会话存档Gateway接入"} · ${escapeHtml(archive.trustedStatus || "未验证")}</span>
               </div>
               <span class="status-pill">${archive.enabled ? "主读取入口" : "未启用"}</span>
             </div>
@@ -2558,7 +3007,7 @@ function renderWecom() {
     </form>
 
     <section class="grid two">
-      <article class="panel">
+      <article class="panel" id="wecom-send-test">
         <div class="panel-header">
           <div>
             <h2 class="panel-title">发送测试</h2>
@@ -2591,8 +3040,15 @@ function renderWecom() {
             <p class="panel-subtitle">真实企微入站会按chatid生成或更新绑定；每个群只归档到一个客户档案。</p>
           </div>
         </div>
+        <div class="filter-bar compact-filter">
+          <div class="field">
+            <label>搜索群/客户/chatid</label>
+            <input id="wecomBindingSearch" value="${escapeHtml(wecomBindingSearchQuery)}" placeholder="输入群名、客户名、chatid、来源">
+          </div>
+          <div class="filter-summary">显示 ${escapeHtml(filteredBindings.length)} / ${escapeHtml(bindings.length)} 个群</div>
+        </div>
         <div class="event-list">
-          ${bindings.slice(0, 8).map((binding) => {
+          ${filteredBindings.slice(0, 8).map((binding) => {
             const currentCustomer = state.customers.find((customer) => customer.id === binding.customerId) || selectedCustomer();
             return `
               <div class="business-card ${binding.status === "已绑定" ? "success-card" : "warning-card"}" data-wecom-binding-card>
@@ -2616,7 +3072,7 @@ function renderWecom() {
                 </div>
               </div>
             `;
-          }).join("") || renderEmptyState("暂无企微群入站", "启动长连接桥接并收到群消息后，这里会出现待绑定群。")}
+          }).join("") || renderEmptyState("暂无匹配企微群", bindings.length ? "调整搜索条件后再查看。" : "启动长连接桥接并收到群消息后，这里会出现待绑定群。")}
         </div>
       </article>
     </section>
@@ -2648,8 +3104,15 @@ function renderWecom() {
             <p class="panel-subtitle">发送测试、草稿发送和模拟入站都会写入这里，方便排查配置与Webhook返回。</p>
           </div>
         </div>
+        <div class="filter-bar compact-filter">
+          <div class="field">
+            <label>日志类型</label>
+            <select id="wecomLogTypeFilter">${wecomLogTypes.map((type) => `<option value="${escapeHtml(type)}" ${wecomLogTypeFilter === type ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}</select>
+          </div>
+          <div class="filter-summary">显示 ${escapeHtml(filteredWecomLogs.length)} / ${escapeHtml(logs.length)} 条记录</div>
+        </div>
         <div class="event-list">
-          ${logs.slice(0, 8).map(renderWecomLog).join("") || renderEmptyState("暂无企微记录", "保存Webhook后先发送一条测试消息，或使用模拟入站验证分流。")}
+          ${filteredWecomLogs.slice(0, 8).map(renderWecomLog).join("") || renderEmptyState("暂无匹配企微记录", logs.length ? "调整日志类型筛选后再查看。" : "保存Webhook后先发送一条测试消息，或使用模拟入站验证分流。")}
         </div>
       </article>
     </section>
@@ -2768,7 +3231,21 @@ function renderConversationCard(conversation) {
   `;
 }
 
+function channelsPageMeta() {
+  if (activeNavGroup === "telemarketing") {
+    return {
+      title: "电销消息入口",
+      subtitle: "用于本地模拟电销私聊入站，验证电销培育Agent、客户阶段和任务流转。"
+    };
+  }
+  return {
+    title: "消息入站测试",
+    subtitle: "用于模拟电销、销售和VIP群消息入站，验证路由、会话上下文、Agent分流和任务闭环；真实企微读取请在企微接入中配置Gateway。"
+  };
+}
+
 function renderChannels() {
+  const meta = channelsPageMeta();
   const customer = selectedCustomer();
   if (!customer) {
     return `
@@ -2776,8 +3253,8 @@ function renderChannels() {
       <section class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">本地消息入口</h2>
-            <p class="panel-subtitle">渠道消息需要绑定到一个客户档案。</p>
+            <h2 class="panel-title">${escapeHtml(meta.title)}</h2>
+            <p class="panel-subtitle">${escapeHtml(meta.subtitle)} 渠道消息需要绑定到一个客户档案。</p>
           </div>
         </div>
         ${renderEmptyState("暂无客户可写入消息", "请先新增客户或重置本地样例数据，再验证电销、销售和VIP群消息入站。")}
@@ -2791,8 +3268,8 @@ function renderChannels() {
       <article class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">本地消息入口</h2>
-            <p class="panel-subtitle">这里会真实写入本地会话、事件、任务和Agent结果；不会读取或发送真实企微消息。</p>
+            <h2 class="panel-title">${escapeHtml(meta.title)}</h2>
+            <p class="panel-subtitle">${escapeHtml(meta.subtitle)} 这里会真实写入本地会话、事件、任务和Agent结果；不会读取或发送真实企微消息。</p>
           </div>
         </div>
         <div class="toolbar">
@@ -2866,6 +3343,338 @@ function renderChannels() {
           `).join("") || `<div class="muted">暂无事件。</div>`}
         </div>
       </article>
+    </section>
+  `;
+}
+
+function chatSessionIdForRoom(roomId = "") {
+  return `room:${String(roomId || "")}`;
+}
+
+function chatSessionIdForConversation(conversationId = "") {
+  return `conv:${String(conversationId || "")}`;
+}
+
+function chatSourceMeta(messages = []) {
+  const sources = new Set(messages.map((message) => message.source).filter(Boolean));
+  if (sources.has("wecom-archive")) return { source: "wecom-archive", label: "企微会话存档" };
+  if ([...sources].some((source) => source.includes("wecom-aibot") || source.includes("local-chatid"))) return { source: "wecom-aibot", label: "企微机器人" };
+  if (sources.has("personal-wechat")) return { source: "personal-wechat", label: "个人微信" };
+  return { source: "external", label: "外部会话" };
+}
+
+function chatMessageDirection(senderType = "", senderRole = "") {
+  if (senderType === "system" || senderRole === "系统") return "system";
+  if (senderType === "customer" || senderRole === "客户") return "inbound";
+  return "outbound";
+}
+
+function chatMessageTime(value = "") {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "";
+  return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function chatSessionsFromState() {
+  const personal = normalizePersonalWechatState(state.personalWechat);
+  const bindings = Array.isArray(state.wecomBindings?.groups) ? state.wecomBindings.groups : [];
+  const bindingByRoom = new Map(bindings.map((binding) => [binding.chatId, binding]));
+  const sessions = [];
+  const roomIds = new Set();
+
+  for (const context of personal.groupContexts || []) {
+    const binding = bindingByRoom.get(context.roomId);
+    const customer = state.customers.find((item) => item.id === (binding?.customerId || context.customerId));
+    const messages = (context.messages || []).map((message) => ({
+      id: message.messageId,
+      messageId: message.messageId,
+      senderName: message.senderName || "未知发送人",
+      senderRole: message.senderType === "customer" ? "客户" : message.senderType === "managed_account" || message.senderType === "bot" ? "托管号" : message.senderType === "staff" ? "员工" : "未知",
+      senderType: message.senderType || "unknown",
+      text: message.text || "",
+      msgType: message.msgType || "text",
+      source: message.source || "external",
+      createdAt: message.sendAt || "",
+      direction: chatMessageDirection(message.senderType)
+    }));
+    const activeJobs = (personal.sendJobs || []).filter((job) => job.roomId === context.roomId && ["queued", "sending", "sent", "manual_required"].includes(job.status));
+    const lastDecision = (personal.decisions || []).find((decision) => decision.roomId === context.roomId) || null;
+    const source = chatSourceMeta(context.messages || []);
+    const placeholder = customer?.tags?.includes("企微群待绑定");
+    const bound = Boolean(customer && !placeholder && (!binding || binding.status === "已绑定"));
+    const riskLevel = activeJobs.some((job) => job.riskLevel === "high" || job.status === "manual_required") || lastDecision?.riskLevel === "high" ? "high" : "low";
+    const lastMessage = messages.at(-1);
+    sessions.push({
+      sessionId: chatSessionIdForRoom(context.roomId),
+      kind: "room",
+      roomId: context.roomId,
+      title: context.roomName || binding?.chatName || `外部群 ${String(context.roomId).slice(-6)}`,
+      source: source.source,
+      sourceLabel: source.label,
+      customerId: customer?.id || "",
+      customerName: customer?.name || "待绑定客户",
+      bound,
+      channel: binding?.channel || "VIP群",
+      binding,
+      messages,
+      activeJobs,
+      lastDecision,
+      riskLevel,
+      needsReply: activeJobs.length > 0,
+      lastMessageAt: context.lastMessageAt || lastMessage?.createdAt || "",
+      lastMessageText: lastMessage?.text || "",
+      messageCount: context.messageCount || messages.length
+    });
+    roomIds.add(context.roomId);
+  }
+
+  for (const binding of bindings) {
+    if (roomIds.has(binding.chatId)) continue;
+    const customer = state.customers.find((item) => item.id === binding.customerId);
+    sessions.push({
+      sessionId: chatSessionIdForRoom(binding.chatId),
+      kind: "room",
+      roomId: binding.chatId,
+      title: binding.chatName || `外部群 ${String(binding.chatId).slice(-6)}`,
+      source: binding.source || "wecom-archive",
+      sourceLabel: String(binding.source || "").includes("aibot") ? "企微机器人" : "企微会话存档",
+      customerId: customer?.id || "",
+      customerName: customer?.name || "待绑定客户",
+      bound: Boolean(customer && binding.status === "已绑定" && !customer.tags?.includes("企微群待绑定")),
+      channel: binding.channel || "VIP群",
+      binding,
+      messages: [],
+      activeJobs: [],
+      lastDecision: null,
+      riskLevel: "low",
+      needsReply: false,
+      lastMessageAt: binding.lastMessageAt || "",
+      lastMessageText: "",
+      messageCount: binding.messageCount || 0
+    });
+  }
+
+  for (const conversation of state.conversations || []) {
+    const customer = state.customers.find((item) => item.id === conversation.customerId);
+    const messages = (conversation.messages || []).map((message) => ({
+      id: message.id,
+      messageId: message.id,
+      senderName: message.sender || "匿名",
+      senderRole: message.senderRole || "未知",
+      senderType: message.senderRole === "客户" ? "customer" : "staff",
+      text: message.text || "",
+      msgType: "text",
+      source: "local",
+      createdAt: message.createdAt || message.time || "",
+      direction: chatMessageDirection("", message.senderRole),
+      mentions: message.mentions || []
+    }));
+    const lastMessage = messages.at(-1);
+    sessions.push({
+      sessionId: chatSessionIdForConversation(conversation.id),
+      kind: "conversation",
+      conversationId: conversation.id,
+      title: conversation.title || conversation.channel,
+      source: "local",
+      sourceLabel: "本地模拟",
+      customerId: customer?.id || "",
+      customerName: customer?.name || "未知客户",
+      bound: Boolean(customer),
+      channel: conversation.channel || "",
+      members: conversation.members || [],
+      messages,
+      activeJobs: [],
+      lastDecision: null,
+      riskLevel: "low",
+      needsReply: false,
+      lastMessageAt: lastMessage?.createdAt || "",
+      lastMessageText: lastMessage?.text || "",
+      messageCount: messages.length
+    });
+  }
+
+  return sessions.sort((a, b) => new Date(b.lastMessageAt || 0) - new Date(a.lastMessageAt || 0));
+}
+
+function filteredChatSessions() {
+  const query = chatSearchQuery.trim().toLowerCase();
+  return chatSessionsFromState().filter((session) => {
+    const matchesScope = sessionMatchesChatScope(session);
+    const matchesSearch = !query || [session.title, session.customerName, session.lastMessageText, session.roomId, session.channel]
+      .some((value) => String(value || "").toLowerCase().includes(query));
+    const matchesSource = chatSourceFilter === "全部" || session.sourceLabel === chatSourceFilter;
+    const matchesStatus = chatStatusFilter === "全部"
+      || (chatStatusFilter === "待绑定" && !session.bound)
+      || (chatStatusFilter === "待回复" && session.needsReply)
+      || (chatStatusFilter === "高风险" && session.riskLevel === "high");
+    return matchesScope && matchesSearch && matchesSource && matchesStatus;
+  });
+}
+
+function renderChatMessage(message) {
+  return `
+    <div class="chat-message ${escapeHtml(message.direction || "inbound")}">
+      <div class="chat-bubble">
+        <div class="chat-meta">${escapeHtml(message.senderName || "未知")} · ${escapeHtml(message.senderRole || "未知")} · ${escapeHtml(chatMessageTime(message.createdAt))}</div>
+        <div class="chat-text">${escapeHtml(message.text || "")}</div>
+        ${(message.mentions || []).length ? `<div class="chat-tags">${message.mentions.map((mention) => `<span>@${escapeHtml(mention)}</span>`).join("")}</div>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderChatSessionRow(session) {
+  const active = session.sessionId === activeChatSessionId;
+  const statusTags = [
+    !session.bound ? "待绑定" : "",
+    session.needsReply ? `待回复 ${session.activeJobs?.length || 0}` : "",
+    session.riskLevel === "high" ? "高风险" : ""
+  ].filter(Boolean);
+  return `
+    <button class="chat-session ${active ? "active" : ""}" data-chat-session="${escapeHtml(session.sessionId)}" type="button">
+      <div class="chat-avatar">${escapeHtml((session.title || "?").slice(0, 1))}</div>
+      <div class="chat-session-main">
+        <div class="chat-session-title"><strong>${escapeHtml(session.title)}</strong><span>${escapeHtml(chatMessageTime(session.lastMessageAt))}</span></div>
+        <div class="chat-session-preview">${escapeHtml(session.lastMessageText || "暂无消息")}</div>
+        ${statusTags.length ? `<div class="chat-session-tags">${statusTags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+      </div>
+    </button>
+  `;
+}
+
+function chatSessionTasks(session) {
+  if (!session?.customerId) return [];
+  return (state.tasks || []).filter((task) => task.customerId === session.customerId && task.status !== "已完成").slice(0, 5);
+}
+
+function chatSessionQuotes(session) {
+  const customer = state.customers.find((item) => item.id === session?.customerId);
+  if (!customer) return [];
+  const watched = customer.watchedModels || [];
+  return (state.quotes || []).filter((quote) => watched.some((model) => quote.model.includes(model) || model.includes(quote.model))).slice(0, 5);
+}
+
+function renderChatSidePanel(session) {
+  const customer = state.customers.find((item) => item.id === session?.customerId);
+  const tasks = chatSessionTasks(session);
+  const quotes = chatSessionQuotes(session);
+  const latestRun = session?.customerId ? state.agentRuns.find((run) => run.customerId === session.customerId) : null;
+  return `
+    <aside class="chat-detail-panel">
+      <section>
+        <h3>客户档案</h3>
+        ${customer ? `
+          <div class="detail-list">
+            <div><span>客户</span><strong>${escapeHtml(customer.name)}</strong></div>
+            <div><span>阶段</span><strong>${escapeHtml(customer.stage)}</strong></div>
+            <div><span>会员</span><strong>${escapeHtml(customer.memberStatus || "未记录")}</strong></div>
+            <div><span>负责人</span><strong>${escapeHtml(customer.owner || "待分配")}</strong></div>
+          </div>
+          <div class="tag-list">${(customer.tags || []).slice(0, 8).map(tagPill).join("")}</div>
+        ` : renderEmptyState("未绑定客户", "选择客户后，这个会话才会进入客户档案和任务闭环。")}
+      </section>
+      ${session?.kind === "room" ? `
+        <section>
+          <h3>群绑定</h3>
+          <div class="field"><label>绑定客户</label><select id="chatBindCustomer">${customerOptions(customer || selectedCustomer())}</select></div>
+          <div class="field"><label>业务渠道</label><select id="chatBindChannel"><option ${session.channel === "VIP群" ? "selected" : ""}>VIP群</option><option ${session.channel === "销售企微" ? "selected" : ""}>销售企微</option><option ${session.channel === "电销企微" ? "selected" : ""}>电销企微</option></select></div>
+          <button class="small-button full-span" data-chat-bind-customer="${escapeHtml(session.sessionId)}" type="button" ${actionAttrs(`chat-bind-${session.sessionId}`)}>保存绑定</button>
+        </section>
+      ` : ""}
+      <section>
+        <h3>Agent判断</h3>
+        ${latestRun ? `
+          <div class="business-card">
+            <strong>${escapeHtml(latestRun.agent || "Agent")}</strong>
+            <p class="event-text">${escapeHtml(summarizeAgentRun(latestRun))}</p>
+          </div>
+        ` : renderEmptyState("暂无判断", "会话入站后会自动生成客户判断和任务建议。")}
+      </section>
+      <section>
+        <h3>发送队列</h3>
+        <div class="event-list">
+          ${(session?.activeJobs || []).map(renderPersonalWechatJob).join("") || renderEmptyState("暂无待发送", "低风险回复会排队，高风险回复会停在人工确认。")}
+        </div>
+      </section>
+      <section>
+        <h3>未完成任务</h3>
+        <div class="event-list">
+          ${tasks.map((task) => `<div class="event-item"><div class="event-meta">${escapeHtml(task.ownerRole)} · ${escapeHtml(task.priority)} · ${escapeHtml(task.status)}</div><div class="event-text">${escapeHtml(task.title)}</div></div>`).join("") || `<div class="muted">暂无未完成任务。</div>`}
+        </div>
+      </section>
+      <section>
+        <h3>关注报价</h3>
+        <div class="event-list">
+          ${quotes.map((quote) => `<div class="event-item"><div class="event-meta">${escapeHtml(quote.brand)} · ${escapeHtml(quote.stock)}</div><div class="event-text">${escapeHtml(quote.model)} ${escapeHtml(quote.config)} · ${currency(quote.price)}</div></div>`).join("") || `<div class="muted">暂无匹配报价。</div>`}
+        </div>
+      </section>
+    </aside>
+  `;
+}
+
+function renderChatWorkbench() {
+  const scope = chatScopeDefinition();
+  const scopedSessions = chatSessionsFromState().filter(sessionMatchesChatScope);
+  const sessions = filteredChatSessions();
+  if (!sessions.some((session) => session.sessionId === activeChatSessionId)) {
+    activeChatSessionId = sessions[0]?.sessionId || "";
+  }
+  const activeSession = sessions.find((session) => session.sessionId === activeChatSessionId) || sessions[0];
+  const sources = ["全部", "企微会话存档", "企微机器人", "个人微信", "本地模拟"];
+  const statuses = ["全部", "待绑定", "待回复", "高风险"];
+  return `
+    <section class="panel chat-workbench-panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">${escapeHtml(scope.title)}</h2>
+          <p class="panel-subtitle">${escapeHtml(scope.subtitle)} 回复先进入发送队列或人工确认，不会伪造成已发送。</p>
+        </div>
+      </div>
+      <div class="chat-scope-strip">
+        <span><strong>${escapeHtml(scope.label)}</strong></span>
+        <span>当前范围 ${sessions.length}/${scopedSessions.length} 个会话</span>
+        <span>来源：企微会话存档 / 企微机器人 / 个人微信 / 本地模拟</span>
+      </div>
+      <div class="chat-workbench">
+        <aside class="chat-list-panel">
+          <div class="chat-search">
+            <input id="chatSearchInput" value="${escapeHtml(chatSearchQuery)}" placeholder="搜索会话、客户、消息">
+            <select id="chatSourceFilter">${sources.map((source) => `<option value="${escapeHtml(source)}" ${source === chatSourceFilter ? "selected" : ""}>${escapeHtml(source)}</option>`).join("")}</select>
+            <select id="chatStatusFilter">${statuses.map((status) => `<option value="${escapeHtml(status)}" ${status === chatStatusFilter ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}</select>
+          </div>
+          <div class="chat-session-list">
+            ${sessions.map(renderChatSessionRow).join("") || renderEmptyState(scope.emptyTitle, scope.emptyDetail)}
+          </div>
+        </aside>
+
+        <main class="chat-main-panel">
+          ${activeSession ? `
+            <header class="chat-room-header">
+              <div>
+                <h2>${escapeHtml(activeSession.title)}</h2>
+                <p>${escapeHtml(activeSession.sourceLabel)} · ${escapeHtml(activeSession.customerName)} · ${escapeHtml(activeSession.bound ? "已绑定" : "待绑定")}</p>
+              </div>
+              <div class="tag-list">
+                <span class="tag">${escapeHtml(activeSession.channel || "会话")}</span>
+                ${activeSession.needsReply ? `<span class="tag">待回复 ${escapeHtml(activeSession.activeJobs.length)}</span>` : ""}
+                ${activeSession.riskLevel === "high" ? `<span class="tag">高风险</span>` : ""}
+              </div>
+            </header>
+            <div class="chat-message-stream">
+              ${(activeSession.messages || []).map(renderChatMessage).join("") || `<div class="chat-empty">${renderEmptyState("暂无消息", "这个会话只有绑定记录，还没有消息内容。")}</div>`}
+            </div>
+            <footer class="chat-composer">
+              <textarea id="chatReplyText" placeholder="输入回复。低风险会进入发送队列，高风险会进入人工确认。"></textarea>
+              <div class="chat-composer-actions">
+                <span>${activeSession.kind === "room" ? "外部会话回复会进入SendScheduler，不直接标记已发送。" : "本地会话回复会保存为触达草稿。"}</span>
+                <button class="primary-button" id="sendChatReply" data-chat-reply-session="${escapeHtml(activeSession.sessionId)}" type="button" ${actionAttrs(`chat-reply-${activeSession.sessionId}`)}>发送/入队</button>
+              </div>
+            </footer>
+          ` : renderEmptyState("暂无可处理会话", "先接入会话存档或写入本地消息。")}
+        </main>
+
+        ${activeSession ? renderChatSidePanel(activeSession) : `<aside class="chat-detail-panel">${renderEmptyState("暂无详情", "选择一个会话查看客户档案和队列。")}</aside>`}
+      </div>
     </section>
   `;
 }
@@ -3058,7 +3867,10 @@ function renderTasks() {
 }
 
 function renderQuotes() {
-  const customer = selectedCustomer();
+  const quoteCustomers = activeNavGroup === "groupchat"
+    ? state.customers.filter((item) => customerScopeDefinitions.vip.stages.includes(item.stage))
+    : state.customers;
+  const customer = quoteCustomers.find((item) => item.id === state.selectedCustomerId) || quoteCustomers[0] || null;
   if (!customer) {
     return `
       ${renderLoadError()}
@@ -3092,7 +3904,7 @@ function renderQuotes() {
           <div class="field">
             <label for="quoteCustomer">客户</label>
             <select id="quoteCustomer">
-              ${customerOptions(customer)}
+              ${customerOptions(customer, quoteCustomers)}
             </select>
           </div>
         </div>
@@ -3391,7 +4203,7 @@ function render() {
   if (!navPanelContainsView(activeNavGroup, activeView)) {
     activeNavGroup = defaultNavGroupForView(activeView);
   }
-  viewTitle.textContent = viewTitles[activeView];
+  viewTitle.textContent = viewTitleForCurrentContext();
   document.querySelectorAll(".nav-group").forEach((button) => {
     button.classList.toggle("active", button.dataset.navGroup === activeNavGroup);
   });
@@ -3405,6 +4217,7 @@ function render() {
     overview: renderOverview,
     journey: renderJourney,
     customers: renderCustomers,
+    chat: renderChatWorkbench,
     agents: renderAgents,
     modelConfig: renderModelConfig,
     wecom: renderWecom,
@@ -3516,6 +4329,29 @@ function showWecomMutationResult(nextState, successMessage) {
   showToast(successMessage);
 }
 
+function jumpToSection(sectionId) {
+  const target = document.getElementById(sectionId);
+  if (!target) return false;
+  const topbarHeight = document.querySelector(".topbar")?.offsetHeight || 0;
+  const targetTop = Math.max(0, Math.round(target.getBoundingClientRect().top + window.scrollY - topbarHeight - 12));
+  window.scrollTo(0, targetTop);
+  document.documentElement.scrollTop = targetTop;
+  document.body.scrollTop = targetTop;
+  window.requestAnimationFrame(() => {
+    window.scrollTo(0, targetTop);
+    document.documentElement.scrollTop = targetTop;
+    document.body.scrollTop = targetTop;
+  });
+  if (window.history?.replaceState) {
+    window.history.replaceState(null, "", `#${sectionId}`);
+  }
+  target.classList.remove("section-jump-highlight");
+  void target.offsetWidth;
+  target.classList.add("section-jump-highlight");
+  window.setTimeout(() => target.classList.remove("section-jump-highlight"), 1600);
+  return true;
+}
+
 document.addEventListener("click", (event) => {
   const navGroupButton = event.target.closest(".nav-group[data-nav-group]");
   if (navGroupButton) {
@@ -3538,14 +4374,72 @@ document.addEventListener("click", (event) => {
     if (activeView === "workflow" && !lastCapabilities) void loadCapabilities();
     return;
   }
-  const row = event.target.closest("[data-customer]");
-  if (row) {
-    state.selectedCustomerId = row.dataset.customer;
+  const customerPageButton = event.target.closest("[data-customer-page]");
+  if (customerPageButton) {
+    customerPanelMode = customerPageButton.dataset.customerPage || "list";
     render();
     return;
   }
+  const row = event.target.closest("[data-customer]");
+  if (row) {
+    state.selectedCustomerId = row.dataset.customer;
+    if (activeView === "customers" && customerPanelMode === "list") {
+      if (event.detail >= 2) {
+        customerPanelMode = "detail";
+        render();
+      } else {
+        document.querySelectorAll(".customer-row").forEach((item) => {
+          item.classList.toggle("active", item.dataset.customer === state.selectedCustomerId);
+        });
+      }
+      return;
+    }
+    render();
+    return;
+  }
+  const chatSessionButton = event.target.closest("[data-chat-session]");
+  if (chatSessionButton) {
+    activeChatSessionId = chatSessionButton.dataset.chatSession;
+    render();
+    return;
+  }
+  const chatBindButton = event.target.closest("[data-chat-bind-customer]");
+  if (chatBindButton) {
+    const sessionId = chatBindButton.dataset.chatBindCustomer;
+    const customerId = document.querySelector("#chatBindCustomer")?.value || state.selectedCustomerId;
+    const channel = document.querySelector("#chatBindChannel")?.value || "VIP群";
+    void withBusy(`chat-bind-${sessionId}`, async () => {
+      try {
+        const nextState = await api.bindChatSessionCustomer(sessionId, { customerId, channel });
+        activeChatSessionId = sessionId;
+        setState(nextState, "会话已绑定客户");
+      } catch (error) {
+        showToast(`会话绑定失败：${error.message}`);
+      }
+    });
+    return;
+  }
+  if (event.target.closest("#sendChatReply")) {
+    const sessionId = event.target.closest("#sendChatReply")?.dataset.chatReplySession || activeChatSessionId;
+    const text = document.querySelector("#chatReplyText")?.value || "";
+    if (!text.trim()) {
+      showToast("请输入回复内容");
+      return;
+    }
+    void withBusy(`chat-reply-${sessionId}`, async () => {
+      try {
+        const nextState = await api.replyChatSession(sessionId, { text });
+        activeChatSessionId = sessionId;
+        const latestJob = nextState.personalWechat?.sendJobs?.[0];
+        setState(nextState, latestJob?.status === "manual_required" ? "高风险回复已进入人工确认" : "回复已进入发送队列或草稿");
+      } catch (error) {
+        showToast(`回复处理失败：${error.message}`);
+      }
+    });
+    return;
+  }
   if (event.target.closest("[data-reset-customer-filters]")) {
-    resetCustomerFilters();
+    applyCustomerScope(customerBusinessScope);
     render();
     return;
   }
@@ -3584,13 +4478,12 @@ document.addEventListener("click", (event) => {
   }
   const workbenchCustomerButton = event.target.closest("[data-workbench-customer-stage]");
   if (workbenchCustomerButton) {
-    customerStageFilter = workbenchCustomerButton.dataset.workbenchCustomerStage;
-    customerStageSetFilter = [];
-    customerSearchQuery = "";
-    customerMemberFilter = "全部";
-    customerOwnerFilter = "全部";
+    const nextStage = workbenchCustomerButton.dataset.workbenchCustomerStage;
+    const nextScope = customerScopeForStage(nextStage);
+    applyCustomerScope(nextScope);
+    customerStageFilter = nextStage;
     activeView = "customers";
-    activeNavGroup = workbenchCustomerButton.dataset.workbenchCustomerStage === "待外呼" ? "telemarketing" : "customer";
+    activeNavGroup = nextScope === "telemarketing" ? "telemarketing" : nextScope === "sales" ? "sales" : nextScope === "vip" ? "groupchat" : "customer";
     render();
     return;
   }
@@ -3814,6 +4707,35 @@ document.addEventListener("click", (event) => {
     void runWorkflow();
     return;
   }
+  const jumpTarget = event.target.closest("[data-jump-wecom-section]");
+  if (jumpTarget) {
+    jumpToSection(jumpTarget.dataset.jumpWecomSection);
+    return;
+  }
+  if (event.target.closest("#checkWecomArchiveSidecar")) {
+    void withBusy("wecom-archive-check", async () => {
+      try {
+        const result = await api.checkWecomArchiveSidecar();
+        if (result.state) setState(result.state);
+        showToast(result.ok ? "会话存档Sidecar检查通过" : `会话存档Sidecar检查未通过：${(result.missing || []).join("、") || result.error || "请查看状态"}`);
+      } catch (error) {
+        showToast(`会话存档Sidecar检查失败：${error.message}`);
+      }
+    });
+    return;
+  }
+  if (event.target.closest("#checkPersonalWechatGateway")) {
+    void withBusy("personal-wechat-gateway-check", async () => {
+      try {
+        const result = await api.checkPersonalWechatGateway();
+        if (result.state) setState(result.state);
+        showToast(result.ok ? "个人微信Gateway检查通过" : `个人微信Gateway检查未通过：${(result.missing || []).join("、") || result.error || "请查看状态"}`);
+      } catch (error) {
+        showToast(`个人微信Gateway检查失败：${error.message}`);
+      }
+    });
+    return;
+  }
   if (event.target.closest("#sendWecomTest")) {
     const routeId = document.querySelector("#wecomTestRoute")?.value || wecomPrimaryRoute()?.id || "";
     const content = document.querySelector("#wecomTestContent")?.value || "";
@@ -3846,7 +4768,7 @@ document.addEventListener("click", (event) => {
     });
     return;
   }
-  if (event.target.closest("#checkWecomAibot")) {
+  if (event.target.closest("#checkWecomAibot") || event.target.closest("#checkWecomAibotTop")) {
     void withBusy("wecom-aibot-check", async () => {
       try {
         const result = await api.checkWecomAibot();
@@ -3873,6 +4795,19 @@ document.addEventListener("click", (event) => {
         setState(nextState, "企微群绑定已保存");
       } catch (error) {
         showToast(`保存企微群绑定失败：${error.message}`);
+      }
+    });
+    return;
+  }
+  const personalWechatApproveButton = event.target.closest("[data-personal-wechat-approve-job]");
+  if (personalWechatApproveButton) {
+    const jobId = personalWechatApproveButton.dataset.personalWechatApproveJob;
+    void withBusy(`pwx-approve-${jobId}`, async () => {
+      try {
+        const nextState = await api.approvePersonalWechatSendJob(jobId);
+        setState(nextState, "高风险回复已人工放行，等待发送调度");
+      } catch (error) {
+        showToast(`人工放行失败：${error.message}`);
       }
     });
     return;
@@ -3998,6 +4933,14 @@ document.addEventListener("click", (event) => {
   }
 });
 
+document.addEventListener("dblclick", (event) => {
+  const row = event.target.closest("[data-customer]");
+  if (!row || activeView !== "customers") return;
+  state.selectedCustomerId = row.dataset.customer;
+  customerPanelMode = "detail";
+  render();
+});
+
 document.addEventListener("change", (event) => {
   if (event.target.id === "agentCustomer" || event.target.id === "quoteCustomer" || event.target.id === "channelCustomer" || event.target.id === "wecomInboundCustomer" || event.target.id === "personalWechatInboundCustomer" || event.target.id === "wecomArchiveInboundCustomer") {
     state.selectedCustomerId = event.target.value;
@@ -4040,7 +4983,6 @@ document.addEventListener("change", (event) => {
   const filter = event.target.dataset.customerFilter;
   if (filter) {
     if (filter === "stage") customerStageFilter = event.target.value;
-    if (filter === "stage") customerStageSetFilter = [];
     if (filter === "member") customerMemberFilter = event.target.value;
     if (filter === "owner") customerOwnerFilter = event.target.value;
     if (filter === "search") customerSearchQuery = event.target.value;
@@ -4075,6 +5017,23 @@ document.addEventListener("change", (event) => {
     render();
     return;
   }
+  if (event.target.id === "chatSourceFilter") {
+    chatSourceFilter = event.target.value;
+    activeChatSessionId = "";
+    render();
+    return;
+  }
+  if (event.target.id === "chatStatusFilter") {
+    chatStatusFilter = event.target.value;
+    activeChatSessionId = "";
+    render();
+    return;
+  }
+  if (event.target.id === "wecomLogTypeFilter") {
+    wecomLogTypeFilter = event.target.value;
+    render();
+    return;
+  }
 });
 
 document.addEventListener("input", (event) => {
@@ -4103,6 +5062,17 @@ document.addEventListener("input", (event) => {
     window.clearTimeout(customerFilterTimer);
     customerFilterTimer = window.setTimeout(render, 180);
   }
+  if (event.target.id === "chatSearchInput") {
+    chatSearchQuery = event.target.value;
+    activeChatSessionId = "";
+    window.clearTimeout(customerFilterTimer);
+    customerFilterTimer = window.setTimeout(render, 180);
+  }
+  if (event.target.id === "wecomBindingSearch") {
+    wecomBindingSearchQuery = event.target.value;
+    window.clearTimeout(customerFilterTimer);
+    customerFilterTimer = window.setTimeout(render, 180);
+  }
 });
 
 function formData(form) {
@@ -4115,6 +5085,7 @@ document.addEventListener("submit", (event) => {
     void withBusy("create-customer", async () => {
       try {
         const nextState = await api.createCustomer(formData(event.target));
+        customerPanelMode = "list";
         setState(nextState, "客户已新增");
       } catch (error) {
         showToast(`新增客户失败：${error.message}`);
@@ -4132,6 +5103,7 @@ document.addEventListener("submit", (event) => {
     void withBusy("update-customer", async () => {
       try {
         const nextState = await api.updateCustomer(customer.id, formData(event.target));
+        customerPanelMode = "detail";
         setState(nextState, "客户档案已保存");
       } catch (error) {
         showToast(`保存客户失败：${error.message}`);
@@ -4149,6 +5121,7 @@ document.addEventListener("submit", (event) => {
     void withBusy("record-outcome", async () => {
       try {
         const nextState = await api.recordOutcome(customer.id, formData(event.target));
+        customerPanelMode = "detail";
         setState(nextState, "销售结果已记录");
       } catch (error) {
         showToast(`记录结果失败：${error.message}`);
@@ -4255,6 +5228,8 @@ document.querySelector("#resetDemo").addEventListener("click", async () => {
       customerSearchQuery = "";
       customerStageFilter = "全部";
       customerStageSetFilter = [];
+      customerBusinessScope = "all";
+      customerPanelMode = "list";
       customerMemberFilter = "全部";
       customerOwnerFilter = "全部";
       taskSearchQuery = "";

@@ -17,6 +17,15 @@ export const initialState = {
   wecomLogs: [],
   personalWechat: {
     enabled: true,
+    gateway: {
+      mode: "mock",
+      sidecarUrl: "",
+      sendEndpoint: "/send",
+      status: "Mock待接",
+      lastConnectedAt: "",
+      lastEventAt: "",
+      lastError: ""
+    },
     account: {
       id: "personal_wx_default",
       name: "个人微信托管号",
@@ -80,12 +89,22 @@ export const initialState = {
     archive: {
       enabled: false,
       provider: "企微会话内容存档",
+      corpId: "",
+      archiveSecret: "",
+      privateKey: "",
+      privateKeyVersion: "",
       cursor: "",
+      seq: 0,
+      pollIntervalSeconds: 10,
+      limit: 100,
+      gatewayMode: "sidecar",
+      sidecarUrl: "",
+      trustedStatus: "未验证",
       lastPulledAt: "",
       lastMessageAt: "",
       status: "未配置",
       lastError: "",
-      defaultCustomerId: "c003",
+      defaultCustomerId: "",
       defaultChannel: "VIP群"
     }
   },

@@ -31,6 +31,12 @@ export const api = {
   capabilities() {
     return request("/api/capabilities");
   },
+  chatSessions() {
+    return request("/api/chat/sessions");
+  },
+  chatSession(sessionId) {
+    return request(`/api/chat/sessions/${encodeURIComponent(sessionId)}`);
+  },
   reset() {
     return request("/api/reset", { method: "POST" });
   },
@@ -88,8 +94,32 @@ export const api = {
   checkWecomAibot() {
     return request("/api/wecom/aibot/check");
   },
+  checkWecomArchiveSidecar() {
+    return request("/api/wecom/archive/check-sidecar", { method: "POST" });
+  },
+  checkPersonalWechatGateway() {
+    return request("/api/personal-wechat/gateway/check", { method: "POST" });
+  },
   updateWecomGroupBinding(payload) {
     return request("/api/wecom/group-bindings", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  updateWecomArchiveStatus(payload) {
+    return request("/api/wecom/archive/status", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  replyChatSession(sessionId, payload) {
+    return request(`/api/chat/sessions/${encodeURIComponent(sessionId)}/reply`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  bindChatSessionCustomer(sessionId, payload) {
+    return request(`/api/chat/sessions/${encodeURIComponent(sessionId)}/bind-customer`, {
       method: "POST",
       body: JSON.stringify(payload)
     });
@@ -120,6 +150,18 @@ export const api = {
   },
   confirmPersonalWechatSendJob(jobId, payload = {}) {
     return request(`/api/personal-wechat/send-jobs/${jobId}/confirm`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  approvePersonalWechatSendJob(jobId, payload = {}) {
+    return request(`/api/personal-wechat/send-jobs/${jobId}/approve`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  markPersonalWechatSendJobDispatched(jobId, payload = {}) {
+    return request(`/api/personal-wechat/send-jobs/${jobId}/dispatched`, {
       method: "POST",
       body: JSON.stringify(payload)
     });

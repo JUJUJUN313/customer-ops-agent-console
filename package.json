@@ -1,7 +1,7 @@
 {
   "name": "customer-ops-agent-console",
   "version": "0.1.0",
-  "description": "本地可运行的智能客服与客户运营中台，支持客户档案、Agent工作台、触达草稿和企微智能机器人长连接。",
+  "description": "本地可运行的智能客服与客户运营中台，支持客户档案、Agent工作台、会话工作台、触达草稿、企微会话存档Gateway和企微智能机器人长连接。",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -12,6 +12,8 @@
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "wecom:bridge": "node scripts/wecom-aibot-bridge.mjs",
+    "wecom:archive": "node scripts/wecom-archive-gateway.mjs",
+    "personal-wechat:gateway": "node scripts/personal-wechat-send-gateway.mjs",
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {

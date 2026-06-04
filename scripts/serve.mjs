@@ -8,11 +8,13 @@ import {
   batchUpdateOutboundDraftsAction,
   batchUpdateTasksAction,
   buildCapabilityAudit,
+  buildChatSessionsReport,
   buildModelConfigReport,
   buildOutboundDraftReport,
   buildPersonalWechatReport,
   buildTaskSlaReport,
   buildWecomConfigReport,
+  bindChatSessionCustomerAction,
   createCustomerAction,
   createOutboundDraftAction,
   createSalesSampleAction,
@@ -20,13 +22,16 @@ import {
   diagnoseState,
   escalateOverdueTasksAction,
   enhanceLatestAgentRunWithLlmAction,
+  approvePersonalWechatSendJobAction,
   confirmPersonalWechatSendJobAction,
   failPersonalWechatSendJobAction,
+  getChatSessionReport,
   ingestMessageAction,
   ingestPersonalWechatMessageAction,
   ingestWecomArchiveMessageAction,
   ingestWecomMessageAction,
   recordOutcomeAction,
+  markPersonalWechatSendJobDispatchedAction,
   runAgentAction,
   runDemoAction,
   runWorkflowAction,
@@ -40,12 +45,15 @@ import {
   updateCustomerAction,
   updateModelConfigAction,
   updatePersonalWechatConfigAction,
+  updatePersonalWechatGatewayStatusAction,
   updateWecomBridgeStatusAction,
+  updateWecomArchiveStatusAction,
   updateWecomGroupBindingAction,
   updateOutboundDraftStatusAction,
   updateTaskAction,
   updateTemplateAction,
   updateWecomConfigAction,
+  replyChatSessionAction,
   upsertQuoteAction
 } from "../src/systemActions.js";
 
@@ -69,6 +77,34 @@ const mime = {
   ".svg": "image/svg+xml",
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 };
+
+function endpointWithPath(base = "", path = "/health") {
+  const cleanBase = String(base || "").replace(/\/+$/, "");
+  if (!cleanBase) throw new Error("Sidecar URL is empty");
+  return `${cleanBase}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+async function checkHttpEndpoint(url, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      signal: controller.signal,
+      headers: { Accept: "application/json,text/plain,*/*" }
+    });
+    const text = await response.text();
+    return {
+      ok: response.ok || response.status === 404,
+      httpStatus: response.status,
+      latencyMs: Date.now() - startedAt,
+      bodyPreview: text.slice(0, 180)
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function ensureStore() {
   mkdirSync(dataDir, { recursive: true });
@@ -220,6 +256,15 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, buildCapabilityAudit(readState()));
   }
 
+  if (req.method === "GET" && pathname === "/api/chat/sessions") {
+    return json(res, 200, buildChatSessionsReport(readState()));
+  }
+
+  const chatSessionMatch = pathname.match(/^\/api\/chat\/sessions\/([^/]+)$/);
+  if (req.method === "GET" && chatSessionMatch) {
+    return json(res, 200, getChatSessionReport(readState(), chatSessionMatch[1]));
+  }
+
   if (req.method === "GET" && pathname === "/api/tasks/sla") {
     return json(res, 200, buildTaskSlaReport(readState()));
   }
@@ -238,6 +283,105 @@ async function handleApi(req, res, pathname) {
 
   if (req.method === "GET" && pathname === "/api/wecom/aibot/check") {
     return json(res, 200, testWecomAibotConfigAction(readState()));
+  }
+
+  if (req.method === "POST" && pathname === "/api/wecom/archive/check-sidecar") {
+    const currentState = readState();
+    const archive = currentState.wecomConfig?.archive || {};
+    const missing = [];
+    if (!archive.enabled) missing.push("enabled");
+    if (archive.gatewayMode !== "sidecar") missing.push("gatewayMode=sidecar");
+    if (!archive.sidecarUrl) missing.push("sidecarUrl");
+    if (!archive.corpId) missing.push("corpId");
+    if (!archive.archiveSecret) missing.push("archiveSecret");
+    if (!archive.privateKey) missing.push("privateKey");
+    if (missing.length) {
+      const detail = `会话存档配置未完成：${missing.join("、")}`;
+      const nextState = await mutateState((state) => updateWecomArchiveStatusAction(state, {
+        status: "检查失败",
+        trustedStatus: "配置未完成",
+        detail,
+        error: detail
+      }));
+      return json(res, 200, { ok: false, missing, state: publicState(nextState) });
+    }
+    try {
+      const healthUrl = endpointWithPath(archive.sidecarUrl, "/health");
+      const result = await checkHttpEndpoint(healthUrl, 5000);
+      const ok = Boolean(result.ok);
+      const nextState = await mutateState((state) => updateWecomArchiveStatusAction(state, {
+        status: ok ? "检查通过" : "检查失败",
+        trustedStatus: ok ? "sidecar可达" : "sidecar异常",
+        detail: ok
+          ? `Sidecar健康检查 ${result.httpStatus}，${result.latencyMs}ms`
+          : `Sidecar健康检查失败 HTTP ${result.httpStatus}`,
+        error: ok ? "" : `Sidecar健康检查失败 HTTP ${result.httpStatus}`
+      }));
+      return json(res, 200, { ok, url: healthUrl, result, state: publicState(nextState) });
+    } catch (error) {
+      const nextState = await mutateState((state) => updateWecomArchiveStatusAction(state, {
+        status: "检查失败",
+        trustedStatus: "sidecar不可达",
+        detail: "会话存档Sidecar不可达",
+        error: error.message
+      }));
+      return json(res, 200, { ok: false, error: error.message, state: publicState(nextState) });
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/personal-wechat/gateway/check") {
+    const currentState = readState();
+    const personalWechat = currentState.personalWechat || {};
+    const gateway = personalWechat.gateway || {};
+    if (gateway.mode === "disabled") {
+      const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
+        status: "检查失败",
+        detail: "个人微信出站Gateway已停用",
+        error: "个人微信出站Gateway已停用"
+      }));
+      return json(res, 200, { ok: false, missing: ["gateway.mode"], state: publicState(nextState) });
+    }
+    if (gateway.mode === "mock" || !gateway.mode) {
+      const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
+        status: "Mock检查通过",
+        connected: true,
+        detail: "当前为Mock本地验证模式，不会调用外部Sidecar"
+      }));
+      return json(res, 200, { ok: true, mode: "mock", state: publicState(nextState) });
+    }
+    const missing = [];
+    if (!gateway.sidecarUrl) missing.push("sidecarUrl");
+    if (!gateway.sendEndpoint) missing.push("sendEndpoint");
+    if (missing.length) {
+      const detail = `个人微信Gateway配置未完成：${missing.join("、")}`;
+      const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
+        status: "检查失败",
+        detail,
+        error: detail
+      }));
+      return json(res, 200, { ok: false, missing, state: publicState(nextState) });
+    }
+    try {
+      const healthUrl = endpointWithPath(gateway.sidecarUrl, "/health");
+      const result = await checkHttpEndpoint(healthUrl, 5000);
+      const ok = Boolean(result.ok);
+      const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
+        status: ok ? "Sidecar可达" : "检查失败",
+        connected: ok,
+        detail: ok
+          ? `Sidecar健康检查 ${result.httpStatus}，${result.latencyMs}ms`
+          : `Sidecar健康检查失败 HTTP ${result.httpStatus}`,
+        error: ok ? "" : `Sidecar健康检查失败 HTTP ${result.httpStatus}`
+      }));
+      return json(res, 200, { ok, url: healthUrl, result, state: publicState(nextState) });
+    } catch (error) {
+      const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
+        status: "检查失败",
+        detail: "个人微信出站Sidecar不可达",
+        error: error.message
+      }));
+      return json(res, 200, { ok: false, error: error.message, state: publicState(nextState) });
+    }
   }
 
   if (req.method === "POST" && pathname === "/api/model-config/test") {
@@ -365,9 +509,29 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, publicState(nextState));
   }
 
+  if (req.method === "POST" && pathname === "/api/wecom/archive/status") {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => updateWecomArchiveStatusAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
   if (req.method === "POST" && pathname === "/api/wecom/group-bindings") {
     const body = await readBody(req);
     const nextState = await mutateState((currentState) => updateWecomGroupBindingAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  const chatReplyMatch = pathname.match(/^\/api\/chat\/sessions\/([^/]+)\/reply$/);
+  if (req.method === "POST" && chatReplyMatch) {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => replyChatSessionAction(currentState, chatReplyMatch[1], body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  const chatBindMatch = pathname.match(/^\/api\/chat\/sessions\/([^/]+)\/bind-customer$/);
+  if (req.method === "POST" && chatBindMatch) {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => bindChatSessionCustomerAction(currentState, chatBindMatch[1], body));
     return json(res, 200, publicState(nextState));
   }
 
@@ -411,6 +575,20 @@ async function handleApi(req, res, pathname) {
   if (req.method === "POST" && personalWechatConfirmMatch) {
     const body = await readBody(req);
     const nextState = await mutateState((currentState) => confirmPersonalWechatSendJobAction(currentState, personalWechatConfirmMatch[1], body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  const personalWechatApproveMatch = pathname.match(/^\/api\/personal-wechat\/send-jobs\/([^/]+)\/approve$/);
+  if (req.method === "POST" && personalWechatApproveMatch) {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => approvePersonalWechatSendJobAction(currentState, personalWechatApproveMatch[1], body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  const personalWechatDispatchedMatch = pathname.match(/^\/api\/personal-wechat\/send-jobs\/([^/]+)\/dispatched$/);
+  if (req.method === "POST" && personalWechatDispatchedMatch) {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => markPersonalWechatSendJobDispatchedAction(currentState, personalWechatDispatchedMatch[1], body));
     return json(res, 200, publicState(nextState));
   }
 
