@@ -7,11 +7,27 @@
 - 新增 `CONTRIBUTING.md`，正式定义 PR 合并、分支命名、提交前差异核对、文档同步、敏感信息检查、Tag/Release 版本保留和维护者职责。
 - 新增 `.github/pull_request_template.md`，要求 PR 填写变更说明、测试结果、文档同步、安全检查和合并前确认。
 - 新增 `.github/workflows/ci.yml`，在 Pull Request 和 `main` 推送时自动运行 `npm test`。
+- 新增企微会话内容存档标准入站骨架：`wecomConfig.archive` 保存启用状态、服务名、游标、最近拉取时间和错误；`POST /api/wecom/archive/inbound` 接收WeComArchiveGateway标准化后的外部群消息。
+- 新增统一入站消息结构：企微会话存档和个人微信Mock消息都会归一为 `InboundGroupMessage`，按 `roomId/chatId` 隔离上下文，并按 `messageId` 去重。
+- 新增个人微信 SendScheduler：`POST /api/personal-wechat/send-scheduler/run` 按同群FIFO、账号并发、分钟上限、队列过期重判和失败退避调度低风险 `queued` 任务。
+- 新增个人微信发送失败接口：`POST /api/personal-wechat/send-jobs/:jobId/fail` 记录失败次数、失败原因、退避时间和人工接管日志。
+- 新增连续客户消息合并：同一群在合并窗口内的连续客户消息会更新同一个活跃发送任务，避免多次排队和旧回复刷屏。
 
 ### 改进
 
 - 升级 `docs/USAGE_GUIDE.md` 的“多人协作规范”，补齐开始工作、提交前线上线下差异核对、rebase同步、PR合并和版本发布流程。
 - README 和项目说明新增贡献与版本发布规范入口。
+- 企微接入页调整为“会话存档主读取、智能机器人辅助/测试读取、测试群Webhook发送”的三层结构。
+- 个人微信区域新增账号并发、分钟上限、失败退避、消息合并窗口配置，并把低风险回复从“确认即发送”改成“调度发送、回读确认”。
+- 个人微信任务卡片区分 `queued`、`sent`、`manual_required`、`failed` 等状态；已发送任务等待自回显或会话存档回读确认，高风险任务仍需人工确认。
+- 能力审计、稳定性审计、API文档、架构文档、项目说明、测试文档和完整使用文档同步更新会话存档、AccountAgent和SendScheduler边界。
+
+### 验证
+
+- `npm test`：52 个用例通过，新增企微会话存档入站去重、同群连续客户消息合并、SendScheduler并发调度/回读确认、分钟上限和发送失败退避断言。
+- `node --check src/app.js`
+- `node --check src/systemActions.js`
+- `node --check scripts/serve.mjs`
 
 ## 2026-06-03
 

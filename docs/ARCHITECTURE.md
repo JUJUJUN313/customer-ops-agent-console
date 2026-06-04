@@ -10,8 +10,10 @@ flowchart TB
   Agents["Agent规则层<br/>src/agentEngine.js"]
   LLM["LLM调用客户端<br/>src/llmClient.js"]
   WeComClient["企微群机器人客户端<br/>src/wecomClient.js"]
+  WeComArchive["企微会话内容存档Gateway<br/>标准化入站接口"]
   WeComBridge["企微智能机器人长连接<br/>scripts/wecom-aibot-bridge.mjs"]
   PersonalWechat["个人微信Gateway Mock<br/>/api/personal-wechat/*"]
+  Scheduler["SendScheduler<br/>同群FIFO/账号限流"]
   Data["初始数据模型<br/>src/data.js"]
   Store["本地状态文件<br/>data/state.json"]
 
@@ -20,7 +22,9 @@ flowchart TB
   Actions --> Agents
   Actions --> LLM
   Actions --> WeComClient
+  WeComArchive --> API
   Actions --> PersonalWechat
+  Actions --> Scheduler
   Actions --> Store
   WeComBridge --> API
   Agents --> Data
@@ -38,13 +42,14 @@ flowchart TB
 - `SalesSample`：销售话术样本，记录场景、阶段、卡种、异议、结果、质检分和可复用话术。
 - `OutboundDraft`：本地触达草稿，保存客户、渠道、来源Agent、文案、优先级、状态和外部副作用边界。
 - `ModelConfig`：模型连接配置对象，包含全局LLM API URL/API Key/模型名、ASR/TTS语音模型和各Agent独立LLM覆盖；Agent覆盖为空时继承全局配置。
-- `WeComConfig`：企微连接配置，保存测试群机器人Webhook发送路由、智能机器人 Bot ID/Secret、长连接状态、默认入站渠道和本地入站设置。前端公开状态只返回是否配置和掩码。
+- `WeComConfig`：企微连接配置，保存会话内容存档入口、测试群机器人Webhook发送路由、智能机器人 Bot ID/Secret、长连接状态、默认入站渠道和本地入站设置。前端公开状态只返回是否配置和掩码。
+- `WeComArchive`：会话内容存档标准化入口，保存启用状态、读取游标、最近拉取时间、最近消息时间和错误；当前不做真实拉取/解密，只接收生产Gateway已经标准化后的消息。
 - `WeComBinding`：企微群绑定表，按 `chatid` 记录群名、客户档案、业务渠道、消息数、最近消息和绑定状态；未知群首次入站会生成待绑定客户群档案，避免不同客户群消息混档。
 - `WeComLog`：企微测试发送、草稿发送、智能机器人入站、桥接状态和去重记录，包含成功/失败、路由、客户、草稿、`chatid`、`msgid`、耗时、错误和是否触发外部发送。
 - `PersonalWechat`：个人微信单账号 AccountAgent 配置，保存账号、群上下文、回复决策、发送队列和运行日志；当前 Gateway 为本地 Mock。
 - `PersonalWechatGroupContext`：按 `roomId` 保存外部群名、客户绑定、最近消息、最近回复、最近员工回复和待发送任务，避免不同外部群串话。
 - `AccountAgentDecision`：保存触发消息、动作 `ignore/auto_reply/require_approval/create_task`、回复文本、风险等级和判断理由。
-- `PersonalWechatSendJob`：保存单账号发送任务、触发消息、回复文本、状态、发送/确认时间和确认回显消息ID；同账号串行、同群只保留一个活跃任务。
+- `PersonalWechatSendJob`：保存单账号发送任务、触发消息、回复文本、状态、调度/发送/确认时间、失败退避、尝试次数和确认回显消息ID；同群FIFO、同账号受控并发、同群只保留一个活跃任务。
 - `WorkflowPlan`：闭环编排Agent生成的客户下一步动作、渠道、负责人、成功指标和任务建议。
 - `AgentRun`：最近 Agent 输出，用于运营复盘和前端展示；包含 `modelConfig` 生效连接配置和 `execution` 执行边界。
 - `AuditLog`：服务端关键动作审计。
@@ -90,8 +95,11 @@ flowchart TB
 - 企微草稿发送：只有 `已确认` 草稿可以调用 `/api/outbound-drafts/:draftId/send-wecom`。成功后草稿状态更新为 `企微已发送`，`externalSideEffects=true`，写入 `wecomDelivery`、客户事件、`WeComLog` 和审计。普通草稿状态接口不能伪造 `企微已发送`。
 - 企微长连接入站：`scripts/wecom-aibot-bridge.mjs` 使用 `@wecom/aibot-node-sdk` 连接 `wss://openws.work.weixin.qq.com`，认证成功后监听企微智能机器人消息，把 `chatid`、`msgid`、`req_id`、发送人和文本内容写入 `/api/wecom/inbound`。
 - 企微入站适配：`/api/wecom/inbound` 同时支持本地模拟和长连接真实入站。系统先按 `externalMessageId/msgid` 去重，再按 `chatid` 查找群绑定；未知群自动生成待绑定档案，之后写入本地 `Conversation` 并路由到电销、销售或VIP Agent。
-- 个人微信单账号入站：`/api/personal-wechat/inbound` 当前模拟 PersonalWechatGateway 收到外部群消息。系统按 `messageId` 去重，按 `roomId` 更新 `PersonalWechatGroupContext`，再由单个 `AccountAgent` 生成 `AccountAgentDecision`；低风险内容进入 `queued`，高风险内容进入 `manual_required`，员工或托管号消息会取消同群待发。
+- 企微会话存档入站：`/api/wecom/archive/inbound` 当前模拟 WeComArchiveGateway 已完成拉取和解密后的标准化消息。系统按 `messageId` 去重，回写存档游标，再复用个人微信AccountAgent的群上下文、风控和发送调度链路。
+- 个人微信单账号入站：`/api/personal-wechat/inbound` 当前模拟 PersonalWechatGateway 收到外部群消息。系统按 `messageId` 去重，按 `roomId` 更新 `PersonalWechatGroupContext`，连续客户消息会合并到同一个活跃发送任务；低风险内容进入 `queued`，高风险内容进入 `manual_required`，员工或托管号消息会取消同群待发。
+- SendScheduler：`/api/personal-wechat/send-scheduler/run` 扫描 `queued` 任务，执行同群FIFO、账号并发 `concurrency`、最小发送间隔、分钟发送上限、队列过期重判和失败退避；通过后任务变为 `sent`，等待回读确认。
 - 个人微信发送确认：`/api/personal-wechat/send-jobs/:jobId/confirm` 当前模拟发送成功后的自回显或企微存档回读确认。确认前先执行 `maxQueueAgeSeconds` 过期重判和 `minSendIntervalSeconds` 单账号限频；通过后把 `PersonalWechatSendJob` 标记为 `confirmed`，并写入本地 `VIP模拟群` 会话、客户事件和运行日志。生产接入真实 Gateway 后，仍复用这条确认闭环。
+- 个人微信发送失败：`/api/personal-wechat/send-jobs/:jobId/fail` 记录真实Gateway失败回调或本地模拟失败，写入 `failed/retryAfterAt`、账号错误、日志和审计。
 - 批量任务处理：任务中心的批量跟进中/完成调用 `/api/tasks/batch-status`，逐条复用任务状态更新逻辑，写入客户事件、完成时间和汇总审计。
 - 批量草稿处理：触达草稿队列的批量确认/处理/废弃调用 `/api/outbound-drafts/batch-status`，逐条写入状态时间、客户事件和汇总审计，并保持 `externalSideEffects=false`。
 - 草稿风险边界：前端按草稿内容识别投诉、赔偿、退款、锁价、付款等高风险文案，高风险草稿需要单条复核，不能批量确认。
@@ -134,23 +142,28 @@ flowchart TB
 
 ## 企微接入位置
 
-当前已接入两条企微链路：智能机器人长连接用于读取真实消息并按 `chatid` 独立归档；测试群机器人Webhook用于发送测试消息和已确认草稿灰度推送。后续生产级企微接入时，需要在当前长连接基础上补齐客户联系、通讯录、权限、审批、幂等、失败重试和合规审计。
+当前企微链路分三层：会话内容存档是生产主读取入口；智能机器人长连接保留为辅助/测试读取；测试群机器人Webhook用于发送测试消息和已确认草稿灰度推送。后续生产级企微接入时，需要在当前标准化入站基础上补齐会话存档SDK拉取、消息解密、客户同意校验、权限、审批、幂等、失败重试和合规审计。
 
 ```mermaid
 flowchart LR
+  Archive["企微会话内容存档"] --> Gateway["WeComArchiveGateway"]
+  Gateway --> Inbound["/api/wecom/archive/inbound"]
   WeCom["企微智能机器人消息"] --> Bridge["长连接bridge"]
   Bridge --> API["/api/wecom/inbound"]
-  API --> Binding["chatid群绑定"]
+  Inbound --> Binding["roomId/chatid群绑定"]
+  API --> Binding
   Binding --> Profile["客户档案"]
-  API --> Agents["Agent规则/大模型层"]
+  Inbound --> Agents["AccountAgent/规则层"]
+  API --> Agents
   Agents --> Tasks["统一任务中心"]
+  Agents --> Queue["SendScheduler"]
   Drafts["已确认触达草稿"] --> Sender["企微发送执行器"]
   Sender --> Robot["企微测试群机器人"]
 ```
 
 ## 个人微信单账号 AccountAgent
 
-当前实现用于验证“一个个人微信号加入多个外部群，一个账号只绑定一个 AccountAgent”的产品链路。真实 Gateway 接入前，前端和 API 提供 Mock 入站与 Mock 发送确认。
+当前实现用于验证“一个个人微信号加入多个外部群，一个账号只绑定一个 AccountAgent”的产品链路。真实 Gateway 接入前，前端和 API 提供 Mock 入站、Mock调度、Mock失败和Mock回读确认。
 
 ```mermaid
 flowchart LR
@@ -159,7 +172,7 @@ flowchart LR
   Inbound --> Context["GroupContextManager<br/>按roomId隔离"]
   Context --> Agent["AccountAgent<br/>单账号单Agent"]
   Agent --> Policy["ReplyPolicy<br/>低风险/高风险"]
-  Policy --> Queue["SendQueue<br/>单账号串行"]
+  Policy --> Queue["SendScheduler<br/>同群FIFO/账号并发"]
   Queue --> Confirm["/api/personal-wechat/send-jobs/:id/confirm"]
   Confirm --> Echo["自回显/企微存档确认"]
 ```
@@ -167,10 +180,10 @@ flowchart LR
 运行规则：
 
 - 一个个人微信账号只对应一个 `AccountAgent` 和一个发送队列。
-- Agent 可同时维护多个群上下文，但发消息必须按账号串行。
-- 同一外部群同一时间只保留一个活跃待发送任务。
+- Agent 可同时维护多个群上下文；发送层由 SendScheduler 控制，同账号默认 `concurrency=1`，真实网关稳定后可灰度到2-3。
+- 同一外部群同一时间只保留一个活跃任务，连续客户消息会合并到当前活跃任务。
 - 低风险消息自动排队，高风险消息进入人工确认。
 - 员工或托管号已回复时，取消同群待发送任务。
 - 超过队列过期秒数的任务会取消，要求重新判断。
-- 同账号连续发送未满足最小间隔时，任务保持待发送并提示限频等待。
-- 所有自动回复都记录触发消息、判断理由、回复内容和发送确认结果。
+- 同群必须FIFO，同账号会执行最小间隔、分钟上限、失败退避和超时重判。
+- 所有自动回复都记录触发消息、判断理由、调度结果、失败结果、回复内容和回读确认结果。

@@ -44,9 +44,12 @@
 | POST | `/api/wecom/group-bindings` | 把企微 `chatid` 绑定到客户档案和业务渠道 |
 | POST | `/api/wecom/test-send` | 真实调用企微群机器人Webhook发送测试消息，结果写入 `wecomLogs` |
 | POST | `/api/wecom/inbound` | 写入企微模拟或长连接入站消息，按 `chatid` 独立归档并路由到本地Agent |
+| POST | `/api/wecom/archive/inbound` | 写入企微会话内容存档标准化入站消息，按 `roomId/chatId` 去重、归档并进入AccountAgent和SendScheduler链路 |
 | POST | `/api/personal-wechat/config` | 保存个人微信单账号 AccountAgent 配置 |
 | POST | `/api/personal-wechat/inbound` | 写入个人微信外部群入站消息，按 `roomId` 维护群上下文、决策和发送队列 |
+| POST | `/api/personal-wechat/send-scheduler/run` | 运行个人微信 SendScheduler，将符合并发、限流和同群FIFO条件的 `queued` 任务调度为 `sent` |
 | POST | `/api/personal-wechat/send-jobs/:jobId/confirm` | 模拟个人微信发送成功后的自回显或企微存档确认 |
+| POST | `/api/personal-wechat/send-jobs/:jobId/fail` | 标记个人微信Gateway发送失败，写入失败退避、账号错误和运行日志 |
 | POST | `/api/quotes` | 新增或更新报价 |
 | POST | `/api/quotes/subscribe` | 订阅报价型号 |
 | POST | `/api/sales-samples` | 新增销售话术样本，供销售承接Agent引用 |
@@ -243,6 +246,37 @@ npm run wecom:bridge -- --check --timeout=20000
 
 `/api/personal-wechat/inbound` 会把个人微信外部群消息写入 `personalWechat.groupContexts`，同时复用本地 `VIP模拟群` 会话和VIP分流Agent。低风险客户消息生成 `queued` 发送任务，高风险报价、锁价、退款、赔偿、付款、合同和责任承诺类内容生成 `manual_required` 任务；员工或托管号消息只更新上下文并取消同群待发任务。重复 `messageId` 只写去重日志，不重复生成决策或队列。
 
+企微会话内容存档标准入站：
+
+```json
+{
+  "messageId": "archive-msg-001",
+  "roomId": "archive_room_alpha",
+  "roomName": "成都VIP企微外部群",
+  "senderId": "external_customer_1",
+  "senderName": "周总",
+  "senderType": "customer",
+  "msgType": "text",
+  "text": "今天售后进度同步一下",
+  "sendAt": "2026-06-04T10:00:00+08:00",
+  "source": "wecom-archive",
+  "cursor": "seq-001"
+}
+```
+
+`/api/wecom/archive/inbound` 当前是生产会话存档Gateway的本地可验证入口：它不执行真实企微拉取或解密，只接收已标准化的存档消息，回写 `wecomConfig.archive.cursor/status/lastPulledAt`，再复用AccountAgent的群上下文、去重、风控和发送调度链路。
+
+运行个人微信发送调度：
+
+```json
+{
+  "now": "2026-06-04T10:10:00.000Z",
+  "maxJobs": 2
+}
+```
+
+`/api/personal-wechat/send-scheduler/run` 只调度 `queued` 低风险任务。调度会执行同群FIFO、账号并发 `concurrency`、最小发送间隔、分钟发送上限、队列过期重判和失败退避检查；通过后任务状态变为 `sent`，等待自回显或会话存档回读确认。
+
 确认个人微信发送任务：
 
 ```json
@@ -252,6 +286,17 @@ npm run wecom:bridge -- --check --timeout=20000
 ```
 
 `/api/personal-wechat/send-jobs/:jobId/confirm` 当前用于 Mock 自回显/企微存档回读确认，会把发送任务标记为 `confirmed`，把回复写入本地会话和客户事件；当前不触发真实个人微信外部发送。确认前会按账号配置执行 `maxQueueAgeSeconds` 过期重判和 `minSendIntervalSeconds` 单账号限频：过期任务会被取消，限频任务会保持 `queued` 并写入错误提示。
+
+标记个人微信发送失败：
+
+```json
+{
+  "error": "Gateway掉线",
+  "now": "2026-06-04T11:00:10.000Z"
+}
+```
+
+`/api/personal-wechat/send-jobs/:jobId/fail` 会把任务标记为 `failed`，写入 `retryAfterAt`、账号错误、运行日志和审计。生产Gateway接入后，该接口可由发送网关在失败回调中调用。
 
 绑定企微群到真实客户：
 

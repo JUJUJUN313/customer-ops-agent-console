@@ -18,11 +18,14 @@ import {
   diagnoseState,
   enhanceLatestAgentRunWithLlmAction,
   escalateOverdueTasksAction,
+  failPersonalWechatSendJobAction,
   ingestMessageAction,
   ingestPersonalWechatMessageAction,
+  ingestWecomArchiveMessageAction,
   recordOutcomeAction,
   runAgentAction,
   runDemoAction,
+  runPersonalWechatSendSchedulerAction,
   runWorkflowAction,
   seedState,
   sendOutboundDraftToWecomAction,
@@ -1079,6 +1082,209 @@ test("个人微信发送队列会执行单账号限频", () => {
   secondJob = state.personalWechat.sendJobs.find((job) => job.jobId === secondJobId);
   assert.equal(secondJob.status, "confirmed");
   assert.equal(secondJob.error, "");
+});
+
+test("企微会话存档入站会进入统一群上下文并去重", () => {
+  let state = updateWecomConfigAction(seedState(), {
+    archive: {
+      enabled: true,
+      provider: "企微会话内容存档",
+      defaultCustomerId: "c003",
+      defaultChannel: "VIP群"
+    }
+  });
+
+  state = ingestWecomArchiveMessageAction(state, {
+    customerId: "c003",
+    roomId: "archive_room_alpha",
+    roomName: "成都VIP企微外部群",
+    messageId: "archive-msg-001",
+    senderId: "external_customer_1",
+    senderName: "周总",
+    senderType: "customer",
+    msgType: "text",
+    text: "今天售后进度同步一下",
+    sendAt: "2026-06-04T10:00:00+08:00",
+    cursor: "seq-001"
+  });
+
+  assert.equal(state.wecomConfig.archive.status, "运行中");
+  assert.equal(state.wecomConfig.archive.cursor, "seq-001");
+  assert.equal(state.personalWechat.groupContexts[0].roomId, "archive_room_alpha");
+  assert.equal(state.personalWechat.groupContexts[0].messages[0].source, "wecom-archive");
+  assert.equal(state.personalWechat.sendJobs[0].source, "wecom-archive");
+  assert.equal(state.wecomLogs[0].type, "会话存档入站");
+
+  const jobCount = state.personalWechat.sendJobs.length;
+  const decisionCount = state.personalWechat.decisions.length;
+  state = ingestWecomArchiveMessageAction(state, {
+    customerId: "c003",
+    roomId: "archive_room_alpha",
+    messageId: "archive-msg-001",
+    senderType: "customer",
+    text: "今天售后进度同步一下"
+  });
+
+  assert.equal(state.personalWechat.sendJobs.length, jobCount);
+  assert.equal(state.personalWechat.decisions.length, decisionCount);
+  assert.equal(state.personalWechat.logs[0].type, "重复入站");
+  assert.equal(diagnoseState(state).ok, true);
+});
+
+test("同一群连续客户消息会合并为一个活跃发送任务", () => {
+  let state = updatePersonalWechatConfigAction(seedState(), {
+    enabled: true,
+    account: {
+      id: "pwx_merge",
+      name: "个人微信托管号F",
+      displayName: "VIP群助手",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      mergeWindowSeconds: 60
+    }
+  });
+
+  state = ingestPersonalWechatMessageAction(state, {
+    customerId: "c003",
+    roomId: "pwx_room_merge",
+    roomName: "合并测试VIP外部群",
+    messageId: "pwx-merge-001",
+    senderType: "customer",
+    senderName: "周总",
+    text: "我先看一下",
+    sendAt: "2026-06-04T10:00:00+08:00"
+  });
+  state = ingestPersonalWechatMessageAction(state, {
+    customerId: "c003",
+    roomId: "pwx_room_merge",
+    roomName: "合并测试VIP外部群",
+    messageId: "pwx-merge-002",
+    senderType: "customer",
+    senderName: "周总",
+    text: "另外流程也发我一下",
+    sendAt: "2026-06-04T10:00:20+08:00"
+  });
+
+  const activeJobs = state.personalWechat.sendJobs.filter((job) => ["queued", "manual_required", "sent"].includes(job.status));
+  assert.equal(activeJobs.length, 1);
+  assert.equal(activeJobs[0].triggerMessageIds.length, 2);
+  assert.ok(activeJobs[0].reason.includes("连续客户消息已合并"));
+
+  state = ingestPersonalWechatMessageAction(state, {
+    customerId: "c003",
+    roomId: "pwx_room_merge",
+    roomName: "合并测试VIP外部群",
+    messageId: "pwx-merge-003",
+    senderType: "customer",
+    senderName: "周总",
+    text: "今天报价能不能锁价？",
+    sendAt: "2026-06-04T10:00:30+08:00"
+  });
+
+  const mergedJob = state.personalWechat.sendJobs.find((job) => job.roomId === "pwx_room_merge" && ["queued", "manual_required"].includes(job.status));
+  assert.equal(mergedJob.status, "manual_required");
+  assert.equal(mergedJob.riskLevel, "high");
+  assert.equal(mergedJob.triggerMessageIds.length, 3);
+  assert.equal(diagnoseState(state).ok, true);
+});
+
+test("SendScheduler按账号并发调度并等待回读确认", () => {
+  let state = updatePersonalWechatConfigAction(seedState(), {
+    enabled: true,
+    account: {
+      id: "pwx_scheduler",
+      name: "个人微信托管号G",
+      displayName: "VIP群助手",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      concurrency: 2,
+      minSendIntervalSeconds: 30,
+      maxSendsPerMinute: 10
+    }
+  });
+
+  for (const suffix of ["a", "b", "c"]) {
+    state = ingestPersonalWechatMessageAction(state, {
+      customerId: "c003",
+      roomId: `pwx_room_scheduler_${suffix}`,
+      roomName: `调度测试${suffix}群`,
+      messageId: `pwx-scheduler-${suffix}`,
+      senderType: "customer",
+      senderName: "客户",
+      text: "收到，我确认一下流程"
+    });
+  }
+  state.personalWechat.sendJobs.forEach((job, index) => {
+    job.createdAt = `2026-06-04T10:09:5${index}.000Z`;
+  });
+
+  state = runPersonalWechatSendSchedulerAction(state, { now: "2026-06-04T10:10:00.000Z" });
+
+  assert.equal(state.personalWechat.schedulerResult.dispatched.length, 2);
+  assert.equal(state.personalWechat.sendJobs.filter((job) => job.status === "sent").length, 2);
+  assert.equal(state.personalWechat.sendJobs.filter((job) => job.status === "queued").length, 1);
+  assert.equal(state.personalWechat.logs[0].type, "调度发送");
+
+  const sentJob = state.personalWechat.sendJobs.find((job) => job.status === "sent");
+  state = confirmPersonalWechatSendJobAction(state, sentJob.jobId, {
+    now: "2026-06-04T10:10:05.000Z",
+    confirmedMessageId: "archive-confirm-001"
+  });
+
+  const confirmedJob = state.personalWechat.sendJobs.find((job) => job.jobId === sentJob.jobId);
+  assert.equal(confirmedJob.status, "confirmed");
+  assert.equal(confirmedJob.confirmedMessageId, "archive-confirm-001");
+  assert.equal(buildPersonalWechatReport(state).summary.sentJobs, 1);
+  assert.equal(diagnoseState(state).ok, true);
+});
+
+test("SendScheduler会执行分钟上限并记录发送失败退避", () => {
+  let state = updatePersonalWechatConfigAction(seedState(), {
+    enabled: true,
+    account: {
+      id: "pwx_limit",
+      name: "个人微信托管号H",
+      displayName: "VIP群助手",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      concurrency: 3,
+      minSendIntervalSeconds: 1,
+      maxSendsPerMinute: 1,
+      failureBackoffSeconds: 45
+    }
+  });
+
+  for (const suffix of ["a", "b"]) {
+    state = ingestPersonalWechatMessageAction(state, {
+      customerId: "c003",
+      roomId: `pwx_room_limit_${suffix}`,
+      roomName: `限流测试${suffix}群`,
+      messageId: `pwx-limit-${suffix}`,
+      senderType: "customer",
+      senderName: "客户",
+      text: "收到，我看一下"
+    });
+  }
+  state.personalWechat.sendJobs.forEach((job, index) => {
+    job.createdAt = `2026-06-04T10:59:5${index}.000Z`;
+  });
+
+  state = runPersonalWechatSendSchedulerAction(state, { now: "2026-06-04T11:00:00.000Z" });
+  assert.equal(state.personalWechat.schedulerResult.dispatched.length, 1);
+  assert.equal(state.personalWechat.schedulerResult.skipped.length, 1);
+  assert.equal(state.personalWechat.logs[0].type, "分钟限流");
+
+  const sentJob = state.personalWechat.sendJobs.find((job) => job.status === "sent");
+  state = failPersonalWechatSendJobAction(state, sentJob.jobId, {
+    now: "2026-06-04T11:00:10.000Z",
+    error: "Gateway掉线"
+  });
+  const failedJob = state.personalWechat.sendJobs.find((job) => job.jobId === sentJob.jobId);
+  assert.equal(failedJob.status, "failed");
+  assert.equal(failedJob.error, "Gateway掉线");
+  assert.ok(failedJob.retryAfterAt);
+  assert.equal(state.personalWechat.logs[0].type, "发送失败");
+  assert.equal(diagnoseState(state).ok, true);
 });
 
 test("销售样本能写入并进入能力审计", () => {

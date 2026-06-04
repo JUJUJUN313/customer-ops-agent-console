@@ -297,6 +297,13 @@ h3 {
   border-color: #f4b8b3;
 }
 
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .warning-panel {
   border-color: #f2c3bf;
   background: #fffafa;
