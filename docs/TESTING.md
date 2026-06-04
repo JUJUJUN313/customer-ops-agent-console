@@ -10,7 +10,7 @@ npm test
 
 GitHub Actions 会在 Pull Request 和 `main` 推送时自动运行同一条 `npm test`，作为 `main` 合并保护的必需检查。
 
-当前覆盖 48 个用例：
+当前覆盖 52 个用例：
 
 - 外呼筛选 Agent 将高价值客户升级到销售链路。
 - VIP群分流 Agent 将售后问题路由给售后。
@@ -46,12 +46,15 @@ GitHub Actions 会在 Pull Request 和 `main` 推送时自动运行同一条 `np
 - 企微模拟入站会写入本地会话窗口，并按渠道路由到对应Agent。
 - 企微长连接入站会按 `chatid` 独立建档，未知群进入待绑定档案。
 - 企微长连接入站会按 `msgid/externalMessageId` 去重，不重复生成任务和Agent输出。
+- 企微会话内容存档入站会转成统一群消息，进入 `roomId/chatId` 独立上下文并按 `messageId` 去重。
 - 企微群绑定可以改绑到已有客户并通过系统自检。
 - 个人微信 AccountAgent 低风险入站会生成单账号发送队列，并可通过 Mock 自回显确认发送。
 - 个人微信 AccountAgent 高风险报价/锁价内容会进入人工确认队列。
 - 个人微信 AccountAgent 会对重复 `messageId` 去重，员工回复后取消同群待发。
-- 个人微信发送队列会取消超过队列过期秒数的任务，并要求重新判断。
-- 个人微信发送队列会执行单账号最小发送间隔，限频期间保留队列并提示等待。
+- 个人微信 AccountAgent 会把同一群连续客户消息合并到一个活跃发送任务。
+- 个人微信 SendScheduler 会按账号并发、同群FIFO和分钟上限调度低风险 `queued` 任务。
+- 个人微信 SendScheduler 会取消超过队列过期秒数的任务，并要求重新判断。
+- 个人微信发送失败会写入失败退避、错误日志和人工接管提示。
 - 系统诊断能发现正常状态和异常引用。
 - 销售承接Agent会输出销售交接包和话术建议。
 - 闭环编排Agent会为每个客户生成下一步动作和任务。
@@ -106,18 +109,21 @@ node --check scripts/wecom-aibot-bridge.mjs
 20. `GET /api/personal-wechat/config`
 21. `POST /api/personal-wechat/config`
 22. `POST /api/personal-wechat/inbound`
-23. `POST /api/personal-wechat/send-jobs/:jobId/confirm`
-24. `GET /api/outbound-drafts`
-25. `POST /api/outbound-drafts`
-26. `POST /api/outbound-drafts/:draftId/status`
-27. `POST /api/outbound-drafts/:draftId/send-wecom`
-28. `POST /api/outbound-drafts/batch-status`
-29. `POST /api/tasks/escalate`
-30. `POST /api/tasks/:taskId/status`
-31. `POST /api/tasks/batch-status`
-32. `POST /api/sales-samples`
-33. `npm run wecom:bridge -- --check --timeout=20000`
-34. 异常输入：非法客户阶段、客户风险、任务状态、任务优先级、负责人角色、消息发送角色、SLA参考时间、空全局模型、非法API URL、非法销售结果、重复报价、非法销售样本、空渠道消息、非法触达草稿渠道、非法触达草稿状态、伪造企微已发送、未确认草稿发送企微、空草稿内容、空批量任务ID、空批量草稿ID、重复个人微信消息ID、未知个人微信群ID
+23. `POST /api/wecom/archive/inbound`
+24. `POST /api/personal-wechat/send-scheduler/run`
+25. `POST /api/personal-wechat/send-jobs/:jobId/confirm`
+26. `POST /api/personal-wechat/send-jobs/:jobId/fail`
+27. `GET /api/outbound-drafts`
+28. `POST /api/outbound-drafts`
+29. `POST /api/outbound-drafts/:draftId/status`
+30. `POST /api/outbound-drafts/:draftId/send-wecom`
+31. `POST /api/outbound-drafts/batch-status`
+32. `POST /api/tasks/escalate`
+33. `POST /api/tasks/:taskId/status`
+34. `POST /api/tasks/batch-status`
+35. `POST /api/sales-samples`
+36. `npm run wecom:bridge -- --check --timeout=20000`
+37. 异常输入：非法客户阶段、客户风险、任务状态、任务优先级、负责人角色、消息发送角色、SLA参考时间、空全局模型、非法API URL、非法销售结果、重复报价、非法销售样本、空渠道消息、非法触达草稿渠道、非法触达草稿状态、伪造企微已发送、未确认草稿发送企微、空草稿内容、空批量任务ID、空批量草稿ID、重复企微会话存档消息ID、重复个人微信消息ID、未知个人微信群ID
 
 期望结果：
 
@@ -146,10 +152,14 @@ node --check scripts/wecom-aibot-bridge.mjs
 - 企微模拟入站会写入本地会话并生成对应Agent输出。
 - 企微长连接认证检查成功时，bridge 状态应记录为 `认证成功`，且不会在终端输出明文 Secret。
 - 带 `chatId` 的企微入站会写入 `wecomBindings.groups`，未知群状态为 `待绑定`；重复 `externalMessageId` 不会重复生成任务或Agent输出。
+- 企微会话存档标准入站会回写 `wecomConfig.archive.cursor/status/lastPulledAt/lastMessageAt`，并复用AccountAgent群上下文、去重、风控和发送队列。
 - 个人微信 Mock 入站会写入 `personalWechat.groupContexts`；低风险客户消息生成 `queued` 任务，高风险消息生成 `manual_required` 任务，重复 `messageId` 不会重复生成决策或发送任务。
-- 个人微信发送确认后，任务状态应为 `confirmed`，本地 `VIP模拟群` 会话和客户事件应出现 AccountAgent 回复；当前 `externalSideEffects` 保持 `false`。
-- 个人微信待发送任务超过 `maxQueueAgeSeconds` 后再次确认会被取消，不能继续发送旧回复。
-- 个人微信同账号连续发送未满足 `minSendIntervalSeconds` 时，任务保持 `queued` 并写入限频日志。
+- 同一群连续客户消息会合并到一个活跃任务，`triggerMessageIds` 应包含多条消息。
+- 运行 SendScheduler 后，符合并发、同群FIFO和分钟上限的 `queued` 任务应变为 `sent`，等待自回显或会话存档回读确认。
+- 个人微信回读确认后，任务状态应为 `confirmed`，本地 `VIP模拟群` 会话和客户事件应出现 AccountAgent 回复；当前 `externalSideEffects` 保持 `false`。
+- 个人微信待发送任务超过 `maxQueueAgeSeconds` 后运行调度会被取消，不能继续发送旧回复。
+- 个人微信同账号达到 `maxSendsPerMinute` 或存在同群更早活跃任务时，任务保持 `queued` 并写入限流或FIFO等待日志。
+- 个人微信发送失败接口会把任务写入 `failed`、记录 `retryAfterAt`，并生成需要人工接管的日志。
 - 销售样本写入后，销售承接Agent输出可看到 `learnedTactics` 和 `winningPhrase`。
 - 异常输入返回明确错误，不写入脏状态。
 - 直接访问 `/data/state.json` 返回 `404`，本地状态文件只能通过受控 API 读取。
@@ -168,7 +178,8 @@ node --check scripts/wecom-aibot-bridge.mjs
 - 在企微接入页确认Webhook不回显明文；未配置时发送按钮禁用，配置Webhook并启用后可发送测试消息。
 - 在企微接入页发送已确认草稿后，确认草稿状态变为 `企微已发送`，最近企微记录出现成功日志。
 - 在企微接入页写入模拟企微入站，确认会话和Agent输出刷新。
-- 在企微接入页个人微信区域写入低风险外部群消息，确认出现待自动发送任务；点击“模拟发送回显”后，确认任务变为已确认。
+- 在企微接入页写入企微会话内容存档模拟入站，确认会话存档状态、群上下文和发送队列刷新。
+- 在企微接入页个人微信区域写入低风险外部群消息，确认出现待自动发送任务；点击“运行发送调度”后任务变为已发送待确认；点击“模拟回读确认”后，确认任务变为已确认。
 - 在企微接入页个人微信区域写入包含报价/锁价的高风险消息，确认任务停在人工确认；再写入员工回复，确认同群待发被取消。
 - 在模型配置页点击“测试全局连接”或“测试销售Agent连接”，确认缺Key时出现配置缺失；配置真实Key后会展示模型返回内容和耗时。
 - 在Agent控制台勾选“本次使用真实LLM增强”后运行销售承接，确认右侧出现“真实LLM增强”卡片，并在触达草稿里生成LLM增强草稿。
@@ -208,13 +219,13 @@ node --check scripts/wecom-aibot-bridge.mjs
 
 ## 本轮P0/P1验收记录
 
-- `npm test`：48 个用例通过。
+- `npm test`：52 个用例通过。
 - `node --check src/app.js`、`src/systemActions.js`、`scripts/serve.mjs` 通过。
 - 使用当前已配置的全局LLM完成 `/api/model-config/test`，返回“连接成功”，耗时约1.6秒。
 - 使用当前已配置的全局LLM运行销售承接Agent增强，`execution.modelInvocation` 为“已调用”，生成本地LLM增强草稿且 `externalSideEffects=false`。
 - API冒烟创建2个P0任务并批量完成，确认 `completedAt` 写入；创建2条P0草稿并批量废弃，确认 `discardedAt` 写入且不触发外部发送。
 - 新增企微P1单元验收：Webhook脱敏保留、fake fetch测试发送、已确认草稿发送、自检接受 `企微已发送`、企微模拟入站均通过。
-- 新增个人微信单账号 AccountAgent 单元验收：低风险自动队列、高风险人工确认、重复消息去重、员工回复取消待发、发送确认、队列过期取消和单账号限频均通过。
+- 新增会话存档和个人微信单账号 AccountAgent 单元验收：企微会话存档统一入站、同群连续客户消息合并、低风险自动队列、高风险人工确认、重复消息去重、员工回复取消待发、SendScheduler并发调度、同群FIFO、分钟上限、队列过期取消、失败退避和回读确认均通过。
 - 浏览器自动化验收：业务分组导航曾完成基础点击验证；本轮最终企微接入页验证被应用内浏览器URL安全策略阻止，已改用 `node --check`、`npm test` 和本地API冒烟验证，待浏览器策略允许后补截图。
 - 最终 `/api/diagnostics`：`ok=true`，失败0，警告0。
 

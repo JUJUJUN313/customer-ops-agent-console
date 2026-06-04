@@ -25,7 +25,11 @@ export const initialState = {
       autoReply: true,
       requireApprovalForRisk: true,
       minSendIntervalSeconds: 3,
+      concurrency: 1,
+      maxSendsPerMinute: 20,
       maxQueueAgeSeconds: 60,
+      failureBackoffSeconds: 30,
+      mergeWindowSeconds: 45,
       status: "未连接",
       lastEventAt: "",
       lastError: ""
@@ -72,6 +76,17 @@ export const initialState = {
       lastConnectedAt: "",
       lastEventAt: "",
       lastError: ""
+    },
+    archive: {
+      enabled: false,
+      provider: "企微会话内容存档",
+      cursor: "",
+      lastPulledAt: "",
+      lastMessageAt: "",
+      status: "未配置",
+      lastError: "",
+      defaultCustomerId: "c003",
+      defaultChannel: "VIP群"
     }
   },
   modelConfig: {

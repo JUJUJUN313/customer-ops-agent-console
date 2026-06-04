@@ -21,8 +21,10 @@ import {
   escalateOverdueTasksAction,
   enhanceLatestAgentRunWithLlmAction,
   confirmPersonalWechatSendJobAction,
+  failPersonalWechatSendJobAction,
   ingestMessageAction,
   ingestPersonalWechatMessageAction,
+  ingestWecomArchiveMessageAction,
   ingestWecomMessageAction,
   recordOutcomeAction,
   runAgentAction,
@@ -31,6 +33,7 @@ import {
   seedState,
   sendOutboundDraftToWecomAction,
   sendWecomTestAction,
+  runPersonalWechatSendSchedulerAction,
   subscribeQuoteAction,
   testWecomAibotConfigAction,
   testModelConnectionAction,
@@ -380,6 +383,12 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, publicState(nextState));
   }
 
+  if (req.method === "POST" && pathname === "/api/wecom/archive/inbound") {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => ingestWecomArchiveMessageAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
   if (req.method === "POST" && pathname === "/api/personal-wechat/config") {
     const body = await readBody(req);
     const nextState = await mutateState((currentState) => updatePersonalWechatConfigAction(currentState, body));
@@ -392,10 +401,23 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, publicState(nextState));
   }
 
+  if (req.method === "POST" && pathname === "/api/personal-wechat/send-scheduler/run") {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => runPersonalWechatSendSchedulerAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
   const personalWechatConfirmMatch = pathname.match(/^\/api\/personal-wechat\/send-jobs\/([^/]+)\/confirm$/);
   if (req.method === "POST" && personalWechatConfirmMatch) {
     const body = await readBody(req);
     const nextState = await mutateState((currentState) => confirmPersonalWechatSendJobAction(currentState, personalWechatConfirmMatch[1], body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  const personalWechatFailMatch = pathname.match(/^\/api\/personal-wechat\/send-jobs\/([^/]+)\/fail$/);
+  if (req.method === "POST" && personalWechatFailMatch) {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => failPersonalWechatSendJobAction(currentState, personalWechatFailMatch[1], body));
     return json(res, 200, publicState(nextState));
   }
 

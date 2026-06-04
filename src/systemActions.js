@@ -101,6 +101,17 @@ const DEFAULT_WECOM_CONFIG = {
     lastConnectedAt: "",
     lastEventAt: "",
     lastError: ""
+  },
+  archive: {
+    enabled: false,
+    provider: "企微会话内容存档",
+    cursor: "",
+    lastPulledAt: "",
+    lastMessageAt: "",
+    status: "未配置",
+    lastError: "",
+    defaultCustomerId: "",
+    defaultChannel: "VIP群"
   }
 };
 const DEFAULT_WECOM_BINDINGS = { groups: [] };
@@ -114,7 +125,11 @@ const DEFAULT_PERSONAL_WECHAT = {
     autoReply: true,
     requireApprovalForRisk: true,
     minSendIntervalSeconds: 3,
+    concurrency: 1,
+    maxSendsPerMinute: 20,
     maxQueueAgeSeconds: 60,
+    failureBackoffSeconds: 30,
+    mergeWindowSeconds: 45,
     status: "未连接",
     lastEventAt: "",
     lastError: ""
@@ -125,6 +140,7 @@ const DEFAULT_PERSONAL_WECHAT = {
   logs: []
 };
 const ACTIVE_PERSONAL_WECHAT_JOB_STATUSES = new Set(["queued", "sending", "sent", "manual_required"]);
+const DISPATCHABLE_PERSONAL_WECHAT_JOB_STATUSES = new Set(["queued"]);
 const HIGH_RISK_REPLY_PATTERNS = [
   /报价|价格|多少钱|锁价|保价|今日价|底价|优惠/,
   /退款|退货|赔偿|补偿|投诉|维权/,
@@ -497,6 +513,20 @@ function normalizeWecomAibotConfig(config = {}, current = DEFAULT_WECOM_CONFIG.a
   };
 }
 
+function normalizeWecomArchiveConfig(config = {}, current = DEFAULT_WECOM_CONFIG.archive) {
+  return {
+    enabled: config.enabled === undefined ? Boolean(current.enabled) : config.enabled === true || config.enabled === "true",
+    provider: cleanLimitedText(config.provider, current.provider || DEFAULT_WECOM_CONFIG.archive.provider, 120),
+    cursor: cleanLimitedText(config.cursor, current.cursor || "", 220),
+    lastPulledAt: cleanLimitedText(config.lastPulledAt, current.lastPulledAt || "", 80),
+    lastMessageAt: cleanLimitedText(config.lastMessageAt, current.lastMessageAt || "", 80),
+    status: cleanLimitedText(config.status, current.status || "未配置", 40),
+    lastError: cleanLimitedText(config.lastError, current.lastError || "", 400),
+    defaultCustomerId: cleanLimitedText(config.defaultCustomerId, current.defaultCustomerId || "", 80),
+    defaultChannel: cleanLimitedText(config.defaultChannel, current.defaultChannel || "VIP群", 40)
+  };
+}
+
 function normalizeWecomConfig(config = {}, current = DEFAULT_WECOM_CONFIG) {
   const currentRoutes = Array.isArray(current.routes) && current.routes.length ? current.routes : DEFAULT_WECOM_CONFIG.routes;
   const inputRoutes = Array.isArray(config.routes) && config.routes.length ? config.routes : currentRoutes;
@@ -517,13 +547,15 @@ function normalizeWecomConfig(config = {}, current = DEFAULT_WECOM_CONFIG) {
         : current.inbound?.secret || ""
   };
   const aibot = normalizeWecomAibotConfig(config.aibot || {}, current.aibot || DEFAULT_WECOM_CONFIG.aibot);
+  const archive = normalizeWecomArchiveConfig(config.archive || {}, current.archive || DEFAULT_WECOM_CONFIG.archive);
   return {
     enabled: config.enabled === undefined ? Boolean(current.enabled) : config.enabled === true || config.enabled === "true",
     sendMode: normalizeWecomSendMode(config.sendMode, current.sendMode || "manualApproval"),
     defaultRouteId,
     routes,
     inbound,
-    aibot
+    aibot,
+    archive
   };
 }
 
@@ -793,7 +825,11 @@ function hasRecentWecomInbound(state, externalMessageId = "") {
 
 function normalizePersonalWechatAccount(account = {}, current = DEFAULT_PERSONAL_WECHAT.account) {
   const minSendIntervalSeconds = Math.round(finiteNumber(account.minSendIntervalSeconds, current.minSendIntervalSeconds || 3));
+  const concurrency = Math.round(finiteNumber(account.concurrency, current.concurrency || 1));
+  const maxSendsPerMinute = Math.round(finiteNumber(account.maxSendsPerMinute, current.maxSendsPerMinute || 20));
   const maxQueueAgeSeconds = Math.round(finiteNumber(account.maxQueueAgeSeconds, current.maxQueueAgeSeconds || 60));
+  const failureBackoffSeconds = Math.round(finiteNumber(account.failureBackoffSeconds, current.failureBackoffSeconds || 30));
+  const mergeWindowSeconds = Math.round(finiteNumber(account.mergeWindowSeconds, current.mergeWindowSeconds || 45));
   return {
     id: cleanLimitedText(account.id, current.id || DEFAULT_PERSONAL_WECHAT.account.id, 80),
     name: cleanLimitedText(account.name, current.name || DEFAULT_PERSONAL_WECHAT.account.name, 120),
@@ -802,7 +838,11 @@ function normalizePersonalWechatAccount(account = {}, current = DEFAULT_PERSONAL
     autoReply: account.autoReply === undefined ? Boolean(current.autoReply) : account.autoReply === true || account.autoReply === "true",
     requireApprovalForRisk: account.requireApprovalForRisk === undefined ? Boolean(current.requireApprovalForRisk ?? true) : account.requireApprovalForRisk === true || account.requireApprovalForRisk === "true",
     minSendIntervalSeconds: Math.max(1, Math.min(60, minSendIntervalSeconds)),
+    concurrency: Math.max(1, Math.min(3, concurrency)),
+    maxSendsPerMinute: Math.max(1, Math.min(60, maxSendsPerMinute)),
     maxQueueAgeSeconds: Math.max(15, Math.min(600, maxQueueAgeSeconds)),
+    failureBackoffSeconds: Math.max(5, Math.min(600, failureBackoffSeconds)),
+    mergeWindowSeconds: Math.max(5, Math.min(300, mergeWindowSeconds)),
     status: cleanLimitedText(account.status, current.status || "未连接", 40),
     lastEventAt: cleanLimitedText(account.lastEventAt, current.lastEventAt || "", 80),
     lastError: cleanLimitedText(account.lastError, current.lastError || "", 400)
@@ -829,7 +869,8 @@ function normalizePersonalWechatContext(context = {}) {
       senderType: normalizePersonalWechatSenderType(message.senderType),
       text: cleanLimitedText(message.text, "", 500),
       msgType: cleanLimitedText(message.msgType, "text", 40),
-      sendAt: cleanLimitedText(message.sendAt, new Date().toISOString(), 80)
+      sendAt: cleanLimitedText(message.sendAt, new Date().toISOString(), 80),
+      source: cleanLimitedText(message.source, "personal-wechat", 60)
     }))
   };
 }
@@ -849,10 +890,14 @@ function normalizePersonalWechatSendJob(job = {}) {
     riskLevel: ["low", "medium", "high"].includes(job.riskLevel) ? job.riskLevel : "low",
     reason: cleanLimitedText(job.reason, "", 400),
     gatewayMode: cleanLimitedText(job.gatewayMode, "mock", 40),
+    source: cleanLimitedText(job.source, "personal-wechat", 60),
+    attempts: Math.max(0, Math.round(finiteNumber(job.attempts, 0))),
     createdAt: cleanLimitedText(job.createdAt, new Date().toISOString(), 80),
+    scheduledAt: cleanLimitedText(job.scheduledAt, "", 80),
     sentAt: cleanLimitedText(job.sentAt, "", 80),
     confirmedAt: cleanLimitedText(job.confirmedAt, "", 80),
     confirmedMessageId: cleanLimitedText(job.confirmedMessageId, "", 180),
+    retryAfterAt: cleanLimitedText(job.retryAfterAt, "", 80),
     error: cleanLimitedText(job.error, "", 400)
   };
 }
@@ -867,6 +912,7 @@ function normalizePersonalWechatDecision(decision = {}) {
     action,
     replyText: cleanLimitedText(decision.replyText, "", 1800),
     riskLevel: ["low", "medium", "high"].includes(decision.riskLevel) ? decision.riskLevel : "low",
+    source: cleanLimitedText(decision.source, "personal-wechat", 60),
     reason: cleanLimitedText(decision.reason, "", 400),
     createdAt: cleanLimitedText(decision.createdAt, new Date().toISOString(), 80)
   };
@@ -883,7 +929,8 @@ function normalizePersonalWechatConfig(config = {}, current = DEFAULT_PERSONAL_W
     groupContexts: contexts.slice(0, 500),
     sendJobs: (Array.isArray(config.sendJobs) ? config.sendJobs : current.sendJobs || []).map(normalizePersonalWechatSendJob).slice(0, 200),
     decisions: (Array.isArray(config.decisions) ? config.decisions : current.decisions || []).map(normalizePersonalWechatDecision).slice(0, 200),
-    logs: (Array.isArray(config.logs) ? config.logs : current.logs || []).slice(0, 200)
+    logs: (Array.isArray(config.logs) ? config.logs : current.logs || []).slice(0, 200),
+    schedulerResult: config.schedulerResult || current.schedulerResult || null
   };
 }
 
@@ -901,17 +948,20 @@ function publicPersonalWechat(config = DEFAULT_PERSONAL_WECHAT) {
     sendJobs: (config.sendJobs || []).slice(0, 100),
     decisions: (config.decisions || []).slice(0, 100),
     groupContexts: (config.groupContexts || []).slice(0, 100),
-    logs: (config.logs || []).slice(0, 100)
+    logs: (config.logs || []).slice(0, 100),
+    schedulerResult: config.schedulerResult || null
   };
 }
 
 function normalizePersonalWechatSenderType(value = "customer") {
   const senderType = cleanLimitedText(value, "customer", 40);
-  return ["customer", "staff", "bot", "unknown"].includes(senderType) ? senderType : "unknown";
+  return ["customer", "staff", "managed_account", "bot", "unknown"].includes(senderType) ? senderType : "unknown";
 }
 
 function appendPersonalWechatLog(state, log = {}) {
-  const config = ensurePersonalWechat(state);
+  const config = state.personalWechat?.account && Array.isArray(state.personalWechat.logs)
+    ? state.personalWechat
+    : ensurePersonalWechat(state);
   const nextLog = {
     id: id("pwx_log"),
     type: cleanLimitedText(log.type, "记录", 40),
@@ -965,12 +1015,13 @@ function upsertPersonalWechatContext(state, payload = {}) {
       senderType: normalizePersonalWechatSenderType(payload.message.senderType),
       text: cleanLimitedText(payload.message.text, "", 500),
       msgType: cleanLimitedText(payload.message.msgType, "text", 40),
-      sendAt: cleanLimitedText(payload.message.sendAt, new Date().toISOString(), 80)
+      sendAt: cleanLimitedText(payload.message.sendAt, new Date().toISOString(), 80),
+      source: cleanLimitedText(payload.message.source, "personal-wechat", 60)
     });
     context.messages = context.messages.slice(-20);
     context.messageCount = Math.max(0, Number(context.messageCount || 0) + 1);
     context.lastMessageAt = payload.message.sendAt || new Date().toISOString();
-    if (["staff", "bot"].includes(payload.message.senderType)) context.lastStaffReplyAt = context.lastMessageAt;
+    if (["staff", "bot", "managed_account"].includes(payload.message.senderType)) context.lastStaffReplyAt = context.lastMessageAt;
   }
   return context;
 }
@@ -980,15 +1031,68 @@ function personalWechatMessageText(payload = {}) {
   return cleanLimitedText(payload.text || payload.message, "", 4000);
 }
 
+function normalizeInboundGroupMessage(payload = {}, sourceFallback = "personal-wechat") {
+  const source = cleanLimitedText(payload.source, sourceFallback, 60);
+  const roomId = cleanLimitedText(payload.roomId || payload.chatId || payload.chatid, "", 180);
+  if (!roomId) throw new Error("Inbound group roomId is required");
+  const senderType = normalizePersonalWechatSenderType(payload.senderType || payload.senderRoleType);
+  const messageId = cleanLimitedText(
+    payload.messageId || payload.externalMessageId || payload.msgid || `${source}_${roomId}_${Date.now()}`,
+    "",
+    180
+  );
+  const msgType = cleanLimitedText(payload.msgType, "text", 40);
+  const text = personalWechatMessageText({ ...payload, msgType });
+  if (!text) throw new Error("Inbound group message text is required");
+  return {
+    messageId,
+    roomId,
+    roomName: cleanLimitedText(payload.roomName || payload.chatName || payload.groupName, `外部群 ${roomId.slice(-6)}`, 160),
+    customerId: cleanLimitedText(payload.customerId, "", 80),
+    senderId: cleanLimitedText(payload.senderId || payload.userid || payload.fromUserId, "", 180),
+    senderName: cleanLimitedText(payload.senderName, senderType === "managed_account" || senderType === "bot" ? "托管号" : "客户", 120),
+    senderType,
+    msgType,
+    text,
+    sendAt: cleanLimitedText(payload.sendAt, new Date().toISOString(), 80),
+    source
+  };
+}
+
 function isHighRiskPersonalWechatMessage(text = "") {
   return HIGH_RISK_REPLY_PATTERNS.some((pattern) => pattern.test(String(text || "")));
+}
+
+function recentConsecutiveCustomerMessages(context = {}, latestMessageId = "", windowSeconds = 45) {
+  const messages = Array.isArray(context.messages) ? context.messages : [];
+  const latest = messages.find((message) => message.messageId === latestMessageId) || messages.at(-1);
+  const latestMs = personalWechatJobTimeMs(latest?.sendAt, Date.now());
+  const windowMs = Math.max(5, Number(windowSeconds || 45)) * 1000;
+  const merged = [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.senderType !== "customer") break;
+    const sentMs = personalWechatJobTimeMs(message.sendAt, latestMs);
+    if (latestMs - sentMs > windowMs) break;
+    merged.unshift(message);
+  }
+  return merged.length ? merged : latest ? [latest] : [];
 }
 
 function createPersonalWechatDecision(state, payload = {}, context = {}) {
   const config = ensurePersonalWechat(state);
   const text = personalWechatMessageText(payload);
   const senderType = normalizePersonalWechatSenderType(payload.senderType);
-  const triggerMessageIds = [cleanLimitedText(payload.messageId || payload.externalMessageId, "", 180)].filter(Boolean);
+  const latestMessageId = cleanLimitedText(payload.messageId || payload.externalMessageId, "", 180);
+  const mergedMessages = senderType === "customer"
+    ? recentConsecutiveCustomerMessages(context, latestMessageId, config.account.mergeWindowSeconds)
+    : [];
+  const triggerMessageIds = senderType === "customer"
+    ? mergedMessages.map((message) => message.messageId).filter(Boolean)
+    : [latestMessageId].filter(Boolean);
+  const mergedText = mergedMessages.length
+    ? mergedMessages.map((message) => message.text).join("\n")
+    : text;
   if (senderType !== "customer") {
     return normalizePersonalWechatDecision({
       roomId: context.roomId,
@@ -996,10 +1100,11 @@ function createPersonalWechatDecision(state, payload = {}, context = {}) {
       triggerMessageIds,
       action: "ignore",
       riskLevel: "low",
+      source: payload.source,
       reason: "员工或机器人消息只进入上下文，不触发AccountAgent自动回复。"
     });
   }
-  const highRisk = isHighRiskPersonalWechatMessage(text);
+  const highRisk = isHighRiskPersonalWechatMessage(mergedText);
   const action = highRisk && config.account.requireApprovalForRisk ? "require_approval" : config.account.autoReply ? "auto_reply" : "require_approval";
   const replyText = highRisk
     ? "收到，我先同步给负责同事确认后再回复您。"
@@ -1011,9 +1116,10 @@ function createPersonalWechatDecision(state, payload = {}, context = {}) {
     action,
     replyText,
     riskLevel: highRisk ? "high" : "low",
+    source: payload.source,
     reason: highRisk
       ? "命中报价、退款、赔偿、付款或承诺类高风险词，需人工确认。"
-      : "低风险收到确认或流程说明，可由单账号AccountAgent自动回复。"
+      : `低风险收到确认或流程说明，可由单账号AccountAgent自动回复。${triggerMessageIds.length > 1 ? `已合并${triggerMessageIds.length}条连续客户消息。` : ""}`
   });
 }
 
@@ -1024,6 +1130,26 @@ function cancelActivePersonalWechatJobsForRoom(config, roomId = "", reason = "")
       job.error = cleanLimitedText(reason, "同群新消息触发，取消旧发送任务。", 400);
     }
   }
+}
+
+function mergeIntoActivePersonalWechatJob(config, decision = {}) {
+  const activeJob = (config.sendJobs || []).find((job) =>
+    job.roomId === decision.roomId && ["queued", "manual_required"].includes(job.status)
+  );
+  if (!activeJob) return null;
+  activeJob.triggerMessageIds = [...new Set([...(activeJob.triggerMessageIds || []), ...(decision.triggerMessageIds || [])])];
+  activeJob.replyText = decision.replyText || activeJob.replyText;
+  activeJob.riskLevel = activeJob.riskLevel === "high" || decision.riskLevel === "high" ? "high" : decision.riskLevel || activeJob.riskLevel;
+  activeJob.status = activeJob.riskLevel === "high" || decision.action === "require_approval" ? "manual_required" : "queued";
+  activeJob.reason = cleanLimitedText(`连续客户消息已合并；${decision.reason || activeJob.reason || ""}`, "", 400);
+  activeJob.source = cleanLimitedText(decision.source, activeJob.source || "personal-wechat", 60);
+  activeJob.createdAt = new Date().toISOString();
+  activeJob.scheduledAt = "";
+  activeJob.retryAfterAt = "";
+  activeJob.error = "";
+  const context = (config.groupContexts || []).find((item) => item.roomId === activeJob.roomId);
+  if (context) context.pendingSendJobId = activeJob.jobId;
+  return activeJob;
 }
 
 function personalWechatNowMs(value = "") {
@@ -1055,11 +1181,12 @@ function expirePersonalWechatSendJobs(config, nowMs = Date.now()) {
   return expiredJobs;
 }
 
-function personalWechatThrottleWaitSeconds(config, job, nowMs = Date.now()) {
+function personalWechatThrottleWaitSeconds(config, job, nowMs = Date.now(), options = {}) {
   const minIntervalMs = Math.max(1, Number(config.account?.minSendIntervalSeconds || 3)) * 1000;
   const sentTimes = (config.sendJobs || [])
     .filter((item) => item.jobId !== job.jobId && item.accountId === job.accountId && ["sent", "confirmed"].includes(item.status))
     .map((item) => personalWechatJobTimeMs(item.sentAt || item.confirmedAt, 0))
+    .filter((value) => !options.ignoreSentAtMs || value !== options.ignoreSentAtMs)
     .filter((value) => value > 0)
     .sort((a, b) => b - a);
   const latestSentMs = sentTimes[0] || 0;
@@ -1067,10 +1194,127 @@ function personalWechatThrottleWaitSeconds(config, job, nowMs = Date.now()) {
   return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
 }
 
+function personalWechatSendsInLastMinute(config, accountId = "", nowMs = Date.now()) {
+  const windowStart = nowMs - 60_000;
+  return (config.sendJobs || []).filter((item) => {
+    if (item.accountId !== accountId) return false;
+    const sentMs = personalWechatJobTimeMs(item.sentAt || item.scheduledAt || item.confirmedAt, 0);
+    return sentMs >= windowStart && sentMs <= nowMs && ["sending", "sent", "confirmed"].includes(item.status);
+  }).length;
+}
+
+function personalWechatRoomHasEarlierActiveJob(config, job) {
+  const jobCreatedMs = personalWechatJobTimeMs(job.createdAt, 0);
+  return (config.sendJobs || []).some((item) => {
+    if (item.jobId === job.jobId || item.roomId !== job.roomId) return false;
+    if (!ACTIVE_PERSONAL_WECHAT_JOB_STATUSES.has(item.status)) return false;
+    const itemCreatedMs = personalWechatJobTimeMs(item.createdAt, 0);
+    return itemCreatedMs > 0 && jobCreatedMs > 0 && itemCreatedMs < jobCreatedMs;
+  });
+}
+
+function dispatchPersonalWechatJobs(state, payload = {}) {
+  const config = ensurePersonalWechat(state);
+  const nowMs = personalWechatNowMs(payload.now);
+  const now = new Date(nowMs).toISOString();
+  const expiredJobs = expirePersonalWechatSendJobs(config, nowMs);
+  for (const job of expiredJobs) {
+    appendPersonalWechatLog(state, {
+      type: "发送过期",
+      status: "失败",
+      accountId: job.accountId,
+      roomId: job.roomId,
+      roomName: job.roomName,
+      sendJobId: job.jobId,
+      contentPreview: job.replyText,
+      error: job.error,
+      externalSideEffects: false
+    });
+  }
+  const maxDispatch = Math.max(1, Math.min(10, Math.round(finiteNumber(payload.maxJobs, config.account.concurrency || 1))));
+  const concurrency = Math.max(1, Math.min(3, Number(config.account.concurrency || 1)));
+  const alreadySending = config.sendJobs.filter((job) => job.accountId === config.account.id && job.status === "sending").length;
+  let availableSlots = Math.max(0, Math.min(maxDispatch, concurrency - alreadySending));
+  const dispatched = [];
+  const skipped = [];
+  const candidates = (config.sendJobs || [])
+    .filter((job) => DISPATCHABLE_PERSONAL_WECHAT_JOB_STATUSES.has(job.status))
+    .sort((a, b) => personalWechatJobTimeMs(a.createdAt, 0) - personalWechatJobTimeMs(b.createdAt, 0));
+  for (const job of candidates) {
+    if (availableSlots <= 0) break;
+    if (job.accountId !== config.account.id) continue;
+    if (job.retryAfterAt && personalWechatJobTimeMs(job.retryAfterAt, 0) > nowMs) {
+      skipped.push(job.jobId);
+      continue;
+    }
+    if (personalWechatRoomHasEarlierActiveJob(config, job)) {
+      job.error = "同群存在更早的活跃发送任务，保持FIFO等待。";
+      skipped.push(job.jobId);
+      continue;
+    }
+    const waitSeconds = personalWechatThrottleWaitSeconds(config, job, nowMs, { ignoreSentAtMs: nowMs });
+    if (waitSeconds > 0) {
+      job.error = `账号发送限频中，请${waitSeconds}秒后再发送。`;
+      skipped.push(job.jobId);
+      appendPersonalWechatLog(state, {
+        type: "发送限频",
+        status: "失败",
+        accountId: job.accountId,
+        roomId: job.roomId,
+        roomName: job.roomName,
+        sendJobId: job.jobId,
+        contentPreview: job.replyText,
+        error: job.error,
+        externalSideEffects: false
+      });
+      continue;
+    }
+    if (personalWechatSendsInLastMinute(config, job.accountId, nowMs) >= Number(config.account.maxSendsPerMinute || 20)) {
+      job.error = `账号分钟发送上限${config.account.maxSendsPerMinute}条已达到。`;
+      skipped.push(job.jobId);
+      appendPersonalWechatLog(state, {
+        type: "分钟限流",
+        status: "失败",
+        accountId: job.accountId,
+        roomId: job.roomId,
+        roomName: job.roomName,
+        sendJobId: job.jobId,
+        contentPreview: job.replyText,
+        error: job.error,
+        externalSideEffects: false
+      });
+      continue;
+    }
+    job.status = "sent";
+    job.scheduledAt = now;
+    job.sentAt = now;
+    job.attempts = Math.max(0, Number(job.attempts || 0)) + 1;
+    job.error = "";
+    config.account.status = "发送中";
+    config.account.lastEventAt = now;
+    appendPersonalWechatLog(state, {
+      type: "调度发送",
+      status: "成功",
+      accountId: job.accountId,
+      roomId: job.roomId,
+      roomName: job.roomName,
+      sendJobId: job.jobId,
+      contentPreview: job.replyText,
+      externalSideEffects: false
+    });
+    dispatched.push(job.jobId);
+    availableSlots -= 1;
+  }
+  audit(state, "个人微信发送调度", config.account.id, `发送${dispatched.length}条，跳过${skipped.length}条`);
+  return { dispatched, skipped, expired: expiredJobs.map((job) => job.jobId) };
+}
+
 function enqueuePersonalWechatSendJob(state, decision = {}) {
   const config = ensurePersonalWechat(state);
   if (!decision.replyText || !["auto_reply", "require_approval"].includes(decision.action)) return null;
   expirePersonalWechatSendJobs(config);
+  const mergedJob = mergeIntoActivePersonalWechatJob(config, decision);
+  if (mergedJob) return mergedJob;
   cancelActivePersonalWechatJobsForRoom(config, decision.roomId, "同一群只保留一个待发送任务。");
   const job = normalizePersonalWechatSendJob({
     jobId: id("pwx_send"),
@@ -1082,7 +1326,8 @@ function enqueuePersonalWechatSendJob(state, decision = {}) {
     status: decision.action === "auto_reply" ? "queued" : "manual_required",
     riskLevel: decision.riskLevel,
     reason: decision.reason,
-    gatewayMode: "mock"
+    gatewayMode: "mock",
+    source: decision.source || "personal-wechat"
   });
   config.sendJobs.unshift(job);
   config.sendJobs = config.sendJobs.slice(0, 200);
@@ -2051,6 +2296,9 @@ export function buildWecomConfigReport(inputState) {
       inboundEnabled: Boolean(config.inbound?.enabled),
       aibotEnabled: Boolean(config.aibot?.enabled),
       aibotConfigured: Boolean(config.aibot?.botId && config.aibot?.secret),
+      archiveEnabled: Boolean(config.archive?.enabled),
+      archiveStatus: config.archive?.status || "未配置",
+      archiveCursor: config.archive?.cursor || "",
       bridgeStatus: config.aibot?.bridgeStatus || "未启动",
       boundGroups: bindings.groups.filter((binding) => binding.status === "已绑定").length,
       pendingGroups: bindings.groups.filter((binding) => binding.status !== "已绑定").length,
@@ -2076,10 +2324,14 @@ export function buildPersonalWechatReport(inputState) {
       autoReply: Boolean(config.account.autoReply),
       groups: config.groupContexts.length,
       queuedJobs: config.sendJobs.filter((job) => job.status === "queued").length,
+      sentJobs: config.sendJobs.filter((job) => job.status === "sent").length,
       manualJobs: config.sendJobs.filter((job) => job.status === "manual_required").length,
       confirmedJobs: config.sendJobs.filter((job) => job.status === "confirmed").length,
+      failedJobs: config.sendJobs.filter((job) => job.status === "failed").length,
       activeJobs: activeJobs.length,
       highRiskDecisions: config.decisions.filter((decision) => decision.riskLevel === "high").length,
+      concurrency: config.account.concurrency,
+      maxSendsPerMinute: config.account.maxSendsPerMinute,
       lastEventAt: config.account.lastEventAt || config.logs[0]?.createdAt || ""
     }
   };
@@ -2124,83 +2376,76 @@ export function ingestPersonalWechatMessageAction(inputState, payload = {}) {
   ensureWecomConfig(state);
   ensureWecomBindings(state);
   if (!config.enabled) throw new Error("Personal WeChat AccountAgent is disabled");
-  const roomId = cleanLimitedText(payload.roomId || payload.chatId, "", 180);
-  if (!roomId) throw new Error("Personal WeChat roomId is required");
-  const roomName = cleanLimitedText(payload.roomName || payload.chatName, `外部群 ${roomId.slice(-6)}`, 160);
-  const messageId = cleanLimitedText(payload.messageId || payload.externalMessageId || `pwx_${roomId}_${Date.now()}`, "", 180);
-  const senderType = normalizePersonalWechatSenderType(payload.senderType);
-  const senderName = cleanLimitedText(payload.senderName, senderType === "bot" ? config.account.displayName : "客户", 120);
-  const text = personalWechatMessageText(payload);
-  const sendAt = cleanLimitedText(payload.sendAt, new Date().toISOString(), 80);
-  if (!text) throw new Error("Personal WeChat message text is required");
-  if (hasRecentPersonalWechatMessage(state, messageId)) {
+  const inbound = normalizeInboundGroupMessage(payload, payload.source || "personal-wechat");
+  if (hasRecentPersonalWechatMessage(state, inbound.messageId)) {
     appendPersonalWechatLog(state, {
       type: "重复入站",
       status: "成功",
       accountId: config.account.id,
-      roomId,
-      roomName,
-      messageId,
-      contentPreview: text
+      roomId: inbound.roomId,
+      roomName: inbound.roomName,
+      messageId: inbound.messageId,
+      contentPreview: inbound.text
     });
-    audit(state, "个人微信重复消息忽略", roomId, messageId);
+    audit(state, "个人微信重复消息忽略", inbound.roomId, inbound.messageId);
     return state;
   }
 
   let target = resolveWecomInboundTarget(state, {
-    customerId: payload.customerId,
-    chatId: roomId,
-    chatName: roomName,
+    customerId: inbound.customerId,
+    chatId: inbound.roomId,
+    chatName: inbound.roomName,
     channel: "VIP群",
-    source: "personal-wechat"
+    source: inbound.source
   }, state.wecomConfig);
   const context = upsertPersonalWechatContext(state, {
-    roomId,
-    roomName,
+    roomId: inbound.roomId,
+    roomName: inbound.roomName,
     customerId: target.customerId,
     accountId: config.account.id,
     message: {
-      messageId,
-      senderName,
-      senderType,
-      text,
-      msgType: payload.msgType || "text",
-      sendAt
+      messageId: inbound.messageId,
+      senderName: inbound.senderName,
+      senderType: inbound.senderType,
+      text: inbound.text,
+      msgType: inbound.msgType,
+      sendAt: inbound.sendAt,
+      source: inbound.source
     }
   });
   upsertWecomGroupBinding(state, {
-    chatId: roomId,
-    chatName: roomName,
+    chatId: inbound.roomId,
+    chatName: inbound.roomName,
     customerId: target.customerId,
     channel: "VIP群",
-    source: "personal-wechat",
+    source: inbound.source,
     status: target.binding?.status || "已绑定",
-    lastMessageAt: sendAt,
-    lastSenderId: senderName,
+    lastMessageAt: inbound.sendAt,
+    lastSenderId: inbound.senderId || inbound.senderName,
     incrementMessageCount: true
   });
 
   let nextState = state;
-  if (senderType === "customer") {
+  if (inbound.senderType === "customer") {
     nextState = ingestMessageAction(state, {
       customerId: target.customerId,
       channel: "VIP模拟群",
-      message: text,
+      message: inbound.text,
       senderRole: "客户",
-      senderName
+      senderName: inbound.senderName
     });
   } else {
     appendConversationMessage(nextState, {
       customerId: target.customerId,
       channel: "VIP模拟群",
-      message: text,
-      senderRole: senderType === "bot" ? "私域" : "销售",
-      senderName
+      message: inbound.text,
+      senderRole: ["bot", "managed_account"].includes(inbound.senderType) ? "私域" : "销售",
+      senderName: inbound.senderName
     });
-    cancelActivePersonalWechatJobsForRoom(ensurePersonalWechat(nextState), roomId, "群内已有员工或托管号回复，取消自动发送。");
+    cancelActivePersonalWechatJobsForRoom(ensurePersonalWechat(nextState), inbound.roomId, "群内已有员工或托管号回复，取消自动发送。");
   }
 
-  const decision = createPersonalWechatDecision(nextState, { ...payload, messageId, senderType, text }, context);
+  const decision = createPersonalWechatDecision(nextState, { ...payload, ...inbound }, context);
   const decisionConfig = ensurePersonalWechat(nextState);
   decisionConfig.decisions.unshift(decision);
   decisionConfig.decisions = decisionConfig.decisions.slice(0, 200);
@@ -2213,14 +2458,91 @@ export function ingestPersonalWechatMessageAction(inputState, payload = {}) {
     type: "消息入站",
     status: "成功",
     accountId: updatedConfig.account.id,
-    roomId,
-    roomName,
-    messageId,
+    roomId: inbound.roomId,
+    roomName: inbound.roomName,
+    messageId: inbound.messageId,
     sendJobId: job?.jobId || "",
-    contentPreview: text
+    contentPreview: inbound.text
   });
-  audit(nextState, "个人微信消息入站", roomId, `${senderName}: ${text}`);
+  audit(nextState, inbound.source === "wecom-archive" ? "会话存档消息入站" : "个人微信消息入站", inbound.roomId, `${inbound.senderName}: ${inbound.text}`);
   return nextState;
+}
+
+export function ingestWecomArchiveMessageAction(inputState, payload = {}) {
+  const baseState = cloneState(inputState);
+  const config = ensureWecomConfig(baseState);
+  if (!config.archive?.enabled) throw new Error("WeCom archive gateway is disabled");
+  const inbound = normalizeInboundGroupMessage({ ...payload, source: "wecom-archive" }, "wecom-archive");
+  let nextState = ingestPersonalWechatMessageAction(baseState, {
+    ...inbound,
+    customerId: inbound.customerId || config.archive.defaultCustomerId,
+    channel: config.archive.defaultChannel || "VIP群"
+  });
+  const nextConfig = ensureWecomConfig(nextState);
+  nextConfig.archive.status = "运行中";
+  nextConfig.archive.cursor = cleanLimitedText(payload.cursor || inbound.messageId, nextConfig.archive.cursor || "", 220);
+  nextConfig.archive.lastPulledAt = new Date().toISOString();
+  nextConfig.archive.lastMessageAt = inbound.sendAt;
+  nextConfig.archive.lastError = "";
+  appendWecomLog(nextState, {
+    type: "会话存档入站",
+    status: "成功",
+    customerId: inbound.customerId || nextConfig.archive.defaultCustomerId || nextState.selectedCustomerId,
+    channel: "VIP模拟群",
+    source: "wecom-archive",
+    externalMessageId: inbound.messageId,
+    chatId: inbound.roomId,
+    senderId: inbound.senderId || inbound.senderName,
+    contentPreview: inbound.text,
+    externalSideEffects: false
+  });
+  audit(nextState, "企微会话存档入站", inbound.roomId, inbound.messageId);
+  return nextState;
+}
+
+export function runPersonalWechatSendSchedulerAction(inputState, payload = {}) {
+  const state = cloneState(inputState);
+  const config = ensurePersonalWechat(state);
+  if (!config.enabled) throw new Error("Personal WeChat AccountAgent is disabled");
+  const result = dispatchPersonalWechatJobs(state, payload);
+  state.personalWechat.schedulerResult = {
+    ...result,
+    createdAt: new Date(personalWechatNowMs(payload.now)).toISOString()
+  };
+  return state;
+}
+
+export function failPersonalWechatSendJobAction(inputState, jobId = "", payload = {}) {
+  const state = cloneState(inputState);
+  const config = ensurePersonalWechat(state);
+  const normalizedJobId = cleanLimitedText(jobId || payload.jobId, "", 80);
+  const job = config.sendJobs.find((item) => item.jobId === normalizedJobId);
+  if (!job) throw new Error("Personal WeChat send job not found");
+  const nowMs = personalWechatNowMs(payload.now);
+  const now = new Date(nowMs).toISOString();
+  const backoffSeconds = Math.max(5, Number(config.account.failureBackoffSeconds || 30));
+  job.status = "failed";
+  job.error = cleanLimitedText(payload.error, "个人微信Gateway发送失败，需退避后重新判断或人工接管。", 400);
+  job.retryAfterAt = new Date(nowMs + backoffSeconds * 1000).toISOString();
+  job.attempts = Math.max(1, Number(job.attempts || 0));
+  config.account.status = "异常";
+  config.account.lastEventAt = now;
+  config.account.lastError = job.error;
+  const context = config.groupContexts.find((item) => item.roomId === job.roomId);
+  if (context?.pendingSendJobId === job.jobId) context.pendingSendJobId = "";
+  appendPersonalWechatLog(state, {
+    type: "发送失败",
+    status: "失败",
+    accountId: job.accountId,
+    roomId: job.roomId,
+    roomName: job.roomName,
+    sendJobId: job.jobId,
+    contentPreview: job.replyText,
+    error: job.error,
+    externalSideEffects: false
+  });
+  audit(state, "个人微信发送失败", job.jobId, job.error);
+  return state;
 }
 
 export function confirmPersonalWechatSendJobAction(inputState, jobId = "", payload = {}) {
@@ -2246,8 +2568,8 @@ export function confirmPersonalWechatSendJobAction(inputState, jobId = "", paylo
     audit(state, "个人微信发送过期", job.jobId, job.error || "发送任务已过期");
     return state;
   }
-  if (!["queued", "manual_required", "sent"].includes(job.status)) throw new Error(`Cannot confirm send job in status ${job.status}`);
-  const waitSeconds = job.status === "sent" ? 0 : personalWechatThrottleWaitSeconds(config, job, nowMs);
+  if (!["queued", "manual_required", "sending", "sent"].includes(job.status)) throw new Error(`Cannot confirm send job in status ${job.status}`);
+  const waitSeconds = ["sending", "sent"].includes(job.status) ? 0 : personalWechatThrottleWaitSeconds(config, job, nowMs);
   if (waitSeconds > 0) {
     job.error = `账号发送限频中，请${waitSeconds}秒后再发送。`;
     appendPersonalWechatLog(state, {
@@ -2270,6 +2592,7 @@ export function confirmPersonalWechatSendJobAction(inputState, jobId = "", paylo
   const customer = requireCustomer(state, customerId);
   const now = new Date(nowMs).toISOString();
   job.status = "confirmed";
+  job.scheduledAt = job.scheduledAt || now;
   job.sentAt = job.sentAt || now;
   job.confirmedAt = now;
   job.confirmedMessageId = cleanLimitedText(payload.confirmedMessageId, `pwx_echo_${job.jobId}`, 180);
@@ -2878,12 +3201,12 @@ export function diagnoseState(inputState) {
     check("模型配置可用", !modelConfigError, modelConfigError || `LLM ${modelReport.global.provider}/${modelReport.global.model}，API URL ${modelReport.global.apiUrl}，${modelReport.summary.overridden}个Agent独立配置`),
     check("模型API Key已配置", Boolean(modelReport?.summary.globalApiKeyConfigured), modelReport?.summary.globalApiKeyConfigured ? "全局LLM API Key已配置" : "全局LLM API Key为空；配置后可用于连接测试和真实LLM增强", "警告"),
     check("语音模型配置可用", !modelConfigError, modelConfigError || `ASR ${modelReport.voice.asr.model || "未配置"}，TTS ${modelReport.voice.tts.model || "未配置"}`),
-    check("企微连接配置可用", !wecomConfigError, wecomConfigError || (wecomReport.summary.aibotConfigured ? `智能机器人凭据已配置，桥接状态${wecomReport.summary.bridgeStatus}，群绑定${wecomReport.summary.boundGroups}个` : wecomReport.summary.enabled ? `已启用Webhook路由${wecomReport.summary.configuredRoutes}/${wecomReport.summary.totalRoutes}个，发送成功${wecomReport.summary.sent}次` : "企微连接器未启用；本地功能不受影响"), "警告"),
+    check("企微连接配置可用", !wecomConfigError, wecomConfigError || (wecomReport.summary.archiveEnabled ? `会话存档入口${wecomReport.summary.archiveStatus}，游标${wecomReport.summary.archiveCursor || "未回写"}，群绑定${wecomReport.summary.boundGroups}个` : wecomReport.summary.aibotConfigured ? `智能机器人凭据已配置，桥接状态${wecomReport.summary.bridgeStatus}，群绑定${wecomReport.summary.boundGroups}个` : wecomReport.summary.enabled ? `已启用Webhook路由${wecomReport.summary.configuredRoutes}/${wecomReport.summary.totalRoutes}个，发送成功${wecomReport.summary.sent}次` : "企微连接器未启用；本地功能不受影响"), "警告"),
     check("企微群绑定有效", duplicateWecomChats.length === 0 && orphanWecomBindings.length === 0, duplicateWecomChats.length ? `重复chatid ${duplicateWecomChats.join("、")}` : orphanWecomBindings.length ? `绑定客户不存在 ${orphanWecomBindings.map((binding) => binding.chatId).join("、")}` : `群绑定 ${wecomBindings.groups.length} 个`),
     check("企微群待绑定可见", wecomBindings.groups.filter((binding) => binding.status !== "已绑定").length === 0, wecomBindings.groups.filter((binding) => binding.status !== "已绑定").length ? `待绑定群 ${wecomBindings.groups.filter((binding) => binding.status !== "已绑定").length} 个，需要在企微接入页绑定到客户档案` : "所有企微群均已绑定客户", "警告"),
     check("个人微信AccountAgent可用", !personalWechatError, personalWechatError || (personalWechatReport.summary.enabled ? `单账号 ${personalWechatReport.summary.accountName}，群上下文 ${personalWechatReport.summary.groups} 个，活跃发送任务 ${personalWechatReport.summary.activeJobs} 个` : "个人微信AccountAgent已停用；不影响企微存档回读"), "警告"),
     check("个人微信群上下文有效", duplicatePersonalRooms.length === 0 && orphanPersonalContexts.length === 0, duplicatePersonalRooms.length ? `重复roomId ${duplicatePersonalRooms.join("、")}` : orphanPersonalContexts.length ? `上下文客户不存在 ${orphanPersonalContexts.map((context) => context.roomId).join("、")}` : `上下文 ${personalWechat.groupContexts.length} 个`),
-    check("个人微信发送队列串行", duplicatePersonalActiveRooms.length === 0 && personalJobsMissingRoom.length === 0, duplicatePersonalActiveRooms.length ? `同群存在多个活跃发送任务 ${duplicatePersonalActiveRooms.join("、")}` : personalJobsMissingRoom.length ? `发送任务缺少群上下文 ${personalJobsMissingRoom.map((job) => job.jobId).join("、")}` : `发送任务 ${personalWechat.sendJobs.length} 个，单账号按队列确认`),
+    check("个人微信发送队列串行", duplicatePersonalActiveRooms.length === 0 && personalJobsMissingRoom.length === 0, duplicatePersonalActiveRooms.length ? `同群存在多个活跃发送任务 ${duplicatePersonalActiveRooms.join("、")}` : personalJobsMissingRoom.length ? `发送任务缺少群上下文 ${personalJobsMissingRoom.map((job) => job.jobId).join("、")}` : `发送任务 ${personalWechat.sendJobs.length} 个，并发${personalWechat.account.concurrency}，分钟上限${personalWechat.account.maxSendsPerMinute}`),
     check("Agent执行边界可追踪", agentRunsMissingExecution.length === 0, agentRunsMissingExecution.length ? `缺少执行边界的运行记录 ${agentRunsMissingExecution.map((run) => run.agent || "unknown").join("、")}` : `运行记录 ${state.agentRuns.length} 条均标明本地执行/外部副作用`),
     check("审计日志存在", (state.auditLog || []).length > 0, `审计数 ${(state.auditLog || []).length}`)
   ];
@@ -2930,6 +3253,7 @@ export function buildCapabilityAudit(inputState) {
   const personalWechatReport = buildPersonalWechatReport(state);
   const wecomReady = wecomReport.summary.enabled && wecomReport.summary.configuredRoutes > 0 && wecomReport.summary.enabledRoutes > 0;
   const wecomAibotReady = wecomReport.summary.aibotEnabled && wecomReport.summary.aibotConfigured;
+  const wecomArchiveReady = wecomReport.summary.archiveEnabled;
   const personalWechatReady = personalWechatReport.summary.enabled && personalWechatReport.summary.autoReply;
   const vipConversationMessages = conversations
     .filter((conversation) => conversation.channel === "VIP模拟群")
@@ -3033,28 +3357,32 @@ export function buildCapabilityAudit(inputState) {
     },
     {
       area: "企微连接器",
-      capability: "测试群机器人发送、智能机器人长连接读取、按chatid群聊独立归档、本地入站分流",
-      status: wecomAibotReady ? "长连接待运行" : wecomReady ? "Webhook可用" : "待配置",
-      evidence: wecomAibotReady
-        ? `智能机器人凭据已配置，桥接状态${wecomReport.summary.bridgeStatus}；群绑定${wecomReport.summary.boundGroups}个，待绑定${wecomReport.summary.pendingGroups}个`
-        : wecomReady
-          ? `已启用${wecomReport.summary.enabledRoutes}个企微发送路由，成功发送${wecomReport.summary.sent}次，失败${wecomReport.summary.failed}次`
-          : "可在企微接入页配置智能机器人Bot ID/Secret或测试群机器人Webhook",
-      gap: "长连接桥接启动后可读取真实智能机器人会话；客户联系加好友回调、企业通讯录、成员私聊全量同步和生产权限策略仍需后续接入"
+      capability: "会话内容存档主读取、智能机器人辅助读取、测试群Webhook发送和群绑定",
+      status: wecomArchiveReady ? "存档入口可用" : wecomAibotReady ? "长连接待运行" : wecomReady ? "Webhook可用" : "待配置",
+      evidence: wecomArchiveReady
+        ? `会话存档入口${wecomReport.summary.archiveStatus}，游标${wecomReport.summary.archiveCursor || "未回写"}；群绑定${wecomReport.summary.boundGroups}个，待绑定${wecomReport.summary.pendingGroups}个`
+        : wecomAibotReady
+          ? `智能机器人凭据已配置，桥接状态${wecomReport.summary.bridgeStatus}；群绑定${wecomReport.summary.boundGroups}个，待绑定${wecomReport.summary.pendingGroups}个`
+          : wecomReady
+            ? `已启用${wecomReport.summary.enabledRoutes}个企微发送路由，成功发送${wecomReport.summary.sent}次，失败${wecomReport.summary.failed}次`
+            : "可在企微接入页配置会话存档入口、智能机器人Bot ID/Secret或测试群机器人Webhook",
+      gap: "真实存档拉取、解密SDK、客户同意校验、权限审批、消息幂等和失败重试仍需补齐"
     },
     {
       area: "个人微信AccountAgent",
-      capability: "单个人微信号加入外部群后，由一个AccountAgent维护多群上下文、风控决策和单账号发送队列",
+      capability: "单个人微信号加入外部群后，由一个AccountAgent维护多群上下文、风控决策和SendScheduler受控发送",
       status: personalWechatReady ? "Mock可运行" : personalWechatReport.summary.enabled ? "待接Gateway" : "已停用",
-      evidence: `账号 ${personalWechatReport.summary.accountName}，群上下文${personalWechatReport.summary.groups}个，队列待发${personalWechatReport.summary.queuedJobs}条，人工确认${personalWechatReport.summary.manualJobs}条，已确认${personalWechatReport.summary.confirmedJobs}条`,
-      gap: "当前实现为本地Mock个人微信Gateway；生产需要稳定登录、收发消息、掉线重连、自回显确认、限频和风控审批"
+      evidence: `账号 ${personalWechatReport.summary.accountName}，群上下文${personalWechatReport.summary.groups}个，队列待发${personalWechatReport.summary.queuedJobs}条，已发送待确认${personalWechatReport.summary.sentJobs}条，人工确认${personalWechatReport.summary.manualJobs}条，并发${personalWechatReport.summary.concurrency}`,
+      gap: "真实个人微信登录、收发Gateway、自回显监听、掉线重连、人工审批台和合规策略仍待接入"
     },
     {
       area: "外部触达执行器",
       capability: "真实外呼、短信、企微私聊、企微群消息发送",
-      status: wecomAibotReady || wecomReady ? "半闭环" : "未接入",
-      evidence: wecomAibotReady
-        ? "企微智能机器人长连接可作为消息入口；自动回复默认关闭，出站仍以人工确认和后续执行器为准"
+      status: wecomArchiveReady || wecomAibotReady || wecomReady ? "半闭环" : "未接入",
+      evidence: wecomArchiveReady
+        ? "企微会话存档可作为主读取入口；个人微信SendScheduler当前以Mock发送和回读确认验证受控出站"
+        : wecomAibotReady
+          ? "企微智能机器人长连接可作为辅助消息入口；自动回复默认关闭，出站仍以人工确认和后续执行器为准"
         : wecomReady
           ? "企微测试群机器人可执行人工确认后的群消息发送；其他外部触达仍保持本地任务/草稿"
           : personalWechatReady

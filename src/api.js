@@ -100,6 +100,12 @@ export const api = {
       body: JSON.stringify(payload)
     });
   },
+  ingestWecomArchiveMessage(payload) {
+    return request("/api/wecom/archive/inbound", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
   updatePersonalWechatConfig(payload) {
     return request("/api/personal-wechat/config", {
       method: "POST",
@@ -114,6 +120,18 @@ export const api = {
   },
   confirmPersonalWechatSendJob(jobId, payload = {}) {
     return request(`/api/personal-wechat/send-jobs/${jobId}/confirm`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  runPersonalWechatScheduler(payload = {}) {
+    return request("/api/personal-wechat/send-scheduler/run", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  failPersonalWechatSendJob(jobId, payload = {}) {
+    return request(`/api/personal-wechat/send-jobs/${jobId}/fail`, {
       method: "POST",
       body: JSON.stringify(payload)
     });
