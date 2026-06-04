@@ -3471,6 +3471,7 @@ export function ingestWecomMessageAction(inputState, payload = {}) {
   const senderId = cleanLimitedText(payload.senderId || payload.userid || payload.fromUserId, "", 180);
   const source = cleanLimitedText(payload.source, chatId ? "wecom-aibot" : "local-simulator", 60);
   const message = cleanLimitedText(payload.message, "", 4000);
+  const isOutbound = payload.direction === "outbound" || (payload.senderRole && payload.senderRole !== "客户");
   if (externalMessageId && hasRecentWecomInbound(state, externalMessageId)) {
     appendWecomLog(state, {
       type: "重复入站",
@@ -3511,7 +3512,7 @@ export function ingestWecomMessageAction(inputState, payload = {}) {
       message: {
         messageId: externalMessageId || id("wecom_msg"),
         senderName: payload.senderName || senderId || "客户",
-        senderType: payload.senderRole === "客户" ? "customer" : "staff",
+        senderType: isOutbound ? "bot" : "customer",
         text: message,
         msgType: "text",
         sendAt: new Date().toISOString(),
@@ -3527,7 +3528,7 @@ export function ingestWecomMessageAction(inputState, payload = {}) {
     senderName: payload.senderName || senderId || ""
   });
   appendWecomLog(nextState, {
-    type: "消息入站",
+    type: isOutbound ? "消息出站" : "消息入站",
     status: "成功",
     customerId: target.customerId,
     customerName: getCustomer(nextState, target.customerId)?.name || "",
@@ -3538,9 +3539,9 @@ export function ingestWecomMessageAction(inputState, payload = {}) {
     chatId,
     senderId,
     contentPreview: message,
-    externalSideEffects: false
+    externalSideEffects: isOutbound
   });
-  audit(nextState, "企微消息入站", chatId || channel, message || "");
+  audit(nextState, isOutbound ? "企微消息出站" : "企微消息入站", chatId || channel, message || "");
   return nextState;
 }
 

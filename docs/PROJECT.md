@@ -49,7 +49,7 @@ flowchart LR
 - Agent 控制台：面向销售和运营使用的Agent工作台，展示客户摘要、常用客户消息、业务动作、客户判断、建议话术、推荐报价、触达草稿和后续待办，不展示原始代码或 JSON。
 - 模型配置：配置全局 LLM API URL、API Key、模型名、温度和输出Token，配置ASR/TTS语音模型，并支持各Agent独立LLM覆盖；温度表示回答稳定/发散程度，支持真实LLM连接测试和Agent按需LLM增强，ASR/TTS当前仍只保存连接参数。
 - 业务会话工作台：在“电销管理 > 电销会话”、“销售管理 > 销售会话”和“VIP群管理 > VIP会话”下提供类微信/企微三栏界面；底层统一聚合企微会话存档、企微智能机器人和个人微信/统一Sidecar真实来源，本地模拟仅在“本地调试”筛选中出现；前端默认按业务范围过滤，支持会话搜索、来源/状态筛选、客户绑定、聊天回复、风险提示、任务/报价/发送队列查看。
-- 企微接入：提供真实连接中心，保存企微会话内容存档入口、企微智能机器人 Bot ID/Secret，启动长连接 bridge 读取真实消息，按 `chatid/roomId` 独立归档客户群并维护群绑定；会话存档Gateway固定Sidecar `/health`、`/pull`、`/ack` 契约，非文本消息占位入站并生成客服人工查看任务；统一出站Sidecar必须声明 `canSend=true` 才能真实调度。Webhook、Bot ID、Secret、会话存档Secret和RSA私钥不在前端明文展示。
+- 企微接入：提供真实连接中心，保存企微会话内容存档入口、企微智能机器人 Bot ID/Secret，启动长连接 bridge 读取真实消息，按 `chatid/roomId` 独立归档客户群并维护群绑定；智能机器人测试入口已验证普通测试群真实 @ 入站和回调窗口内真实回复，回复成功后会写入会话工作台出站消息；会话存档Gateway固定Sidecar `/health`、`/pull`、`/ack` 契约，非文本消息占位入站并生成客服人工查看任务；统一出站Sidecar必须声明 `canSend=true` 才能真实调度。Webhook、Bot ID、Secret、会话存档Secret和RSA私钥不在前端明文展示。
 - 销售学习：沉淀成交/培育话术样本、质检分、异议点和适用卡种，供销售承接Agent引用。
 - 消息入站：放在设置中，用于写入电销私聊、销售私聊、VIP群本地消息，沉淀本地会话窗口并展示群成员、消息和@对象。
 - 触达草稿：Agent和人工可生成待确认触达文案，支持搜索、状态/渠道/优先级/风险筛选、确认、复制、发送企微测试群、批量处理、人工已处理和废弃；只有企微发送成功会写入外部副作用。
@@ -94,7 +94,7 @@ flowchart LR
 - 完成当前全局LLM真实验收：使用已配置的DeepSeek兼容网关完成连接测试和销售承接Agent LLM增强，增强结果写入本地待确认草稿且 `externalSideEffects=false`。
 - 增加业务分组侧边栏：一级菜单按总览、客户管理、电销管理、销售管理、VIP群管理、设置聚合，二级菜单进入具体页面，并支持电销/销售/VIP客户、会话、任务和群聊草稿的预设筛选；企微接入和消息入站移入设置。
 - 增加企微P1连接器：新增 `wecomConfig`、`wecomLogs`、企微接入页和 `/api/wecom/*` 接口；支持Webhook脱敏保存、测试发送、已确认草稿发送到企微测试群、本地企微入站模拟和系统自检。
-- 增加企微P2长连接桥接：新增 `scripts/wecom-aibot-bridge.mjs`、`wecomBindings`、智能机器人 Bot ID/Secret 脱敏配置、`/api/wecom/aibot/check`、`/api/wecom/aibot/status`、`/api/wecom/group-bindings`；bridge 使用 `@wecom/aibot-node-sdk` 连接企微 WebSocket，真实认证通过后可读取消息，系统按 `chatid` 独立归档、按 `msgid` 去重，未知群进入待绑定档案。
+- 增加企微P2长连接桥接：新增 `scripts/wecom-aibot-bridge.mjs`、`wecomBindings`、智能机器人 Bot ID/Secret 脱敏配置、`/api/wecom/aibot/check`、`/api/wecom/aibot/status`、`/api/wecom/group-bindings`；bridge 使用 `@wecom/aibot-node-sdk` 连接企微 WebSocket，真实认证通过后可读取消息，系统按 `chatid` 独立归档、按 `msgid` 去重，未知群进入待绑定档案；真实回复成功后会通过 `direction=outbound` 回写机器人出站消息，避免会话工作台漏掉机器人已回内容。
 - 增加业务会话工作台：新增 `ChatSession` 投影和 `/api/chat/sessions`、`/api/chat/sessions/:sessionId`、`/api/chat/sessions/:sessionId/reply`、`/api/chat/sessions/:sessionId/bind-customer`，把企微会话存档、智能机器人和个人微信/Sidecar会话统一到聊天能力层；前端在电销、销售、VIP入口按渠道、阶段和会员状态过滤展示，默认只看真实来源；外部群低风险回复进入SendScheduler，高风险进入人工确认，本地调试会话只保存草稿，不伪装真实发送。
 - 增加会话存档主读取链路：新增企微 `archive` 配置、`/api/wecom/archive/inbound`、`/api/wecom/archive/status` 和 `scripts/wecom-archive-gateway.mjs`，用于通过Sidecar拉取/解密企微会话存档消息，成功入站后调用Sidecar `/ack` 回写游标和消息ID，并复用AccountAgent群上下文、去重、风控和SendScheduler链路；非文本消息以占位文本进入会话并生成客服人工查看任务。
 - 增强个人微信单账号 AccountAgent：新增 `personalWechat` 状态、`/api/personal-wechat/*` 接口和企微接入页个人微信区域；按 `roomId` 维护外部群上下文，低风险消息生成 `queued` 单账号发送任务，高风险消息生成 `manual_required` 人工确认任务，人工放行后才回到 `queued`，连续客户消息会合并到一个活跃任务，重复 `messageId` 去重，员工或托管号回复会取消同群待发，SendScheduler执行同群FIFO、账号并发、分钟上限、队列过期重判、失败退避、Sidecar发送回调和回读确认。

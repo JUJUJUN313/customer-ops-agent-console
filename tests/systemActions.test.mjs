@@ -861,6 +861,44 @@ test("企微长连接入站会按chatid独立建档并对msgid去重", () => {
   assert.equal(state.wecomLogs[0].deduped, true);
 });
 
+test("企微机器人真实回复会作为出站消息写入会话工作台", () => {
+  let state = updateWecomConfigAction(seedState(), {
+    aibot: {
+      enabled: true,
+      botId: "aibot-test",
+      secret: "secret-test",
+      defaultChannel: "VIP群"
+    }
+  });
+  state = ingestWecomMessageAction(state, {
+    source: "wecom-aibot",
+    chatId: "chat_reply",
+    externalMessageId: "msg-reply-001",
+    senderId: "user-a",
+    channel: "VIP群",
+    message: "@测试机器人1 今天能帮我看一下吗？",
+    senderRole: "客户",
+    senderName: "user-a"
+  });
+  state = ingestWecomMessageAction(state, {
+    source: "wecom-aibot",
+    direction: "outbound",
+    chatId: "chat_reply",
+    externalMessageId: "reply_msg-reply-001",
+    senderId: "aibot-test",
+    channel: "VIP群",
+    message: "已收到，我先帮您整理需求。",
+    senderRole: "私域",
+    senderName: "企微机器人"
+  });
+
+  assert.equal(state.wecomLogs[0].type, "消息出站");
+  assert.equal(state.wecomLogs[0].externalSideEffects, true);
+  const session = getChatSessionReport(state, "room:chat_reply").session;
+  assert.equal(session.messages.at(-1).text, "已收到，我先帮您整理需求。");
+  assert.equal(session.messages.at(-1).direction, "outbound");
+});
+
 test("企微群绑定可以改绑到已有客户并通过自检", () => {
   let state = ingestWecomMessageAction(seedState(), {
     source: "wecom-aibot",

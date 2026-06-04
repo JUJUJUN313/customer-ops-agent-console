@@ -174,7 +174,7 @@ async function main() {
     }
   });
 
-  wsClient.on("message", async (frame) => {
+  async function handleInboundMessage(frame, eventName = "message") {
     const body = frame.body || {};
     const externalMessageId = body.msgid || frame.headers?.msgid || frame.headers?.req_id || "";
     if (markDuplicate(externalMessageId)) {
@@ -197,18 +197,41 @@ async function main() {
         channel: body.chattype === "group" ? "VIP群" : latestConfig.defaultChannel || "销售企微",
         message
       });
-      console.log(`[wecom-bridge] 入站已写入：${body.chattype || "unknown"} ${body.chatid || body.from?.userid || ""} ${externalMessageId}`);
+      console.log(`[wecom-bridge] 入站已写入(${eventName})：${body.chattype || "unknown"} ${body.chatid || body.from?.userid || ""} ${externalMessageId}`);
 
       if (latestConfig.autoReply) {
         const replyText = resolveSuggestedReply(nextState, latestConfig.welcomeText);
         await wsClient.replyStream(frame, generateReqId("customer_ops"), replyText, true);
         console.log(`[wecom-bridge] 已回复消息 ${externalMessageId}`);
+        await postJson("/api/wecom/inbound", {
+          source: "wecom-aibot",
+          direction: "outbound",
+          externalMessageId: `reply_${externalMessageId}`,
+          requestId: frame.headers?.req_id || "",
+          chatId: body.chatid || "",
+          chatType: body.chattype || "",
+          senderId: config.botId,
+          senderRole: "私域",
+          senderName: "企微机器人",
+          channel: body.chattype === "group" ? "VIP群" : latestConfig.defaultChannel || "销售企微",
+          message: replyText
+        });
       }
     } catch (error) {
       console.error(`[wecom-bridge] 入站处理失败：${error.message}`);
       await recordStatus("错误", "inbound handling failed", error.message);
     }
+  }
+
+  wsClient.on("message", (frame) => {
+    void handleInboundMessage(frame, "message");
   });
+
+  for (const eventName of ["message.text", "message.image", "message.mixed", "message.voice", "message.file", "message.video"]) {
+    wsClient.on(eventName, (frame) => {
+      void handleInboundMessage(frame, eventName);
+    });
+  }
 
   wsClient.connect();
   if (checkMode) {

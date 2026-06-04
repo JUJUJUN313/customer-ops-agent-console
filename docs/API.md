@@ -263,6 +263,22 @@ npm run wecom:archive -- --once
 
 `/api/wecom/inbound` 会把 `VIP群` 映射为 `VIP模拟群`，把销售/电销企微映射为对应本地私聊渠道，然后复用本地消息路由和Agent。长连接 bridge 会传入企微消息的 `chatId`、`externalMessageId`、`requestId` 和 `senderId`；系统按 `externalMessageId` 去重，按 `chatId` 查找 `wecomBindings.groups`。未知群会自动创建“企微群待绑定”客户档案和待绑定群记录，避免不同客户群消息混档。
 
+机器人真实回复成功后，bridge 会再次调用 `/api/wecom/inbound` 写入一条出站记录：
+
+```json
+{
+  "source": "wecom-aibot",
+  "direction": "outbound",
+  "chatId": "chat_xxx",
+  "externalMessageId": "reply_msg_xxx",
+  "senderRole": "私域",
+  "senderName": "企微机器人",
+  "message": "已收到，我先帮您整理需求。"
+}
+```
+
+`direction=outbound` 会在群上下文和会话工作台中显示为右侧出站消息，并写入 `wecomLogs.type=消息出站`、`externalSideEffects=true`。入站客户消息仍写入 `消息入站`。
+
 个人微信单账号 AccountAgent 配置：
 
 ```json

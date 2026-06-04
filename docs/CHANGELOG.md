@@ -4,6 +4,8 @@
 
 ### 新增
 
+- 新增企微智能机器人真实联调闭环：普通测试群中通过企微成员选择器真实 @ “测试机器人 1” 后，bridge 已验证可读取真实群消息并按 `chatid` 写入会话工作台；临时开启 `aibot.autoReply` 后，机器人可在企微群内真实回复。
+- 新增企微机器人出站回写：bridge 成功调用 `replyStream` 后会把机器人回复以 `direction=outbound` 写入 `/api/wecom/inbound`，会话工作台展示为出站消息，企微日志记录为 `消息出站` 且 `externalSideEffects=true`。
 - 新增真实企微接入收敛：企微接入页调整为真实连接中心，突出会话存档主读取、智能机器人测试入口和统一出站Sidecar，模拟入站统一折叠到高级调试区。
 - 新增会话存档ACK闭环：`scripts/wecom-archive-gateway.mjs` 成功写入 `/api/wecom/archive/inbound` 后会调用Sidecar `/ack` 回写 `cursor/seq/messageIds`，并把 `lastAckAt` 回写到状态。
 - 新增会话存档非文本兜底：图片、文件、语音等无正文消息会以占位文本进入会话，并生成客服人工查看任务，避免真实拉取时丢消息。
@@ -53,7 +55,7 @@
 
 ### 验证
 
-- `npm test`：61 个用例通过，新增企微会话存档入站去重、非文本占位任务、会话工作台投影/绑定/回复、会话存档Gateway状态回写、统一出站Sidecar能力门禁、个人微信Gateway健康检查、同群连续客户消息合并、SendScheduler并发调度/回读确认、人工放行、Sidecar发送回调、分钟上限和发送失败退避断言。
+- `npm test`：新增企微机器人出站回写断言；既有企微会话存档入站去重、非文本占位任务、会话工作台投影/绑定/回复、会话存档Gateway状态回写、统一出站Sidecar能力门禁、个人微信Gateway健康检查、同群连续客户消息合并、SendScheduler并发调度/回读确认、人工放行、Sidecar发送回调、分钟上限和发送失败退避断言继续覆盖。
 - `node --check src/app.js`
 - `node --check src/systemActions.js`
 - `node --check src/api.js`
