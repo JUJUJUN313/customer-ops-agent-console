@@ -1,5 +1,18 @@
 # 变更记录
 
+## 2026-06-04
+
+### 新增
+
+- 新增 `CONTRIBUTING.md`，正式定义 PR 合并、分支命名、提交前差异核对、文档同步、敏感信息检查、Tag/Release 版本保留和维护者职责。
+- 新增 `.github/pull_request_template.md`，要求 PR 填写变更说明、测试结果、文档同步、安全检查和合并前确认。
+- 新增 `.github/workflows/ci.yml`，在 Pull Request 和 `main` 推送时自动运行 `npm test`。
+
+### 改进
+
+- 升级 `docs/USAGE_GUIDE.md` 的“多人协作规范”，补齐开始工作、提交前线上线下差异核对、rebase同步、PR合并和版本发布流程。
+- README 和项目说明新增贡献与版本发布规范入口。
+
 ## 2026-06-03
 
 ### 新增
