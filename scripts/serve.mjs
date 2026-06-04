@@ -95,10 +95,17 @@ async function checkHttpEndpoint(url, timeoutMs = 5000) {
       headers: { Accept: "application/json,text/plain,*/*" }
     });
     const text = await response.text();
+    let body = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = null;
+    }
     return {
-      ok: response.ok || response.status === 404,
+      ok: response.ok,
       httpStatus: response.status,
       latencyMs: Date.now() - startedAt,
+      body,
       bodyPreview: text.slice(0, 180)
     };
   } finally {
@@ -309,15 +316,18 @@ async function handleApi(req, res, pathname) {
       const healthUrl = endpointWithPath(archive.sidecarUrl, "/health");
       const result = await checkHttpEndpoint(healthUrl, 5000);
       const ok = Boolean(result.ok);
+      const health = result.body?.capabilities || result.body || {};
+      const canPull = ok && (health.canPull !== false);
+      const decryptReady = ok && (health.decryptReady !== false);
       const nextState = await mutateState((state) => updateWecomArchiveStatusAction(state, {
-        status: ok ? "检查通过" : "检查失败",
-        trustedStatus: ok ? "sidecar可达" : "sidecar异常",
+        status: ok && canPull && decryptReady ? "检查通过" : "检查失败",
+        trustedStatus: ok && canPull && decryptReady ? "sidecar可拉取" : ok ? "sidecar能力不足" : "sidecar异常",
         detail: ok
-          ? `Sidecar健康检查 ${result.httpStatus}，${result.latencyMs}ms`
+          ? `Sidecar健康检查 ${result.httpStatus}，${result.latencyMs}ms，拉取 ${canPull ? "可用" : "不可用"}，解密 ${decryptReady ? "可用" : "不可用"}`
           : `Sidecar健康检查失败 HTTP ${result.httpStatus}`,
-        error: ok ? "" : `Sidecar健康检查失败 HTTP ${result.httpStatus}`
+        error: ok && canPull && decryptReady ? "" : ok ? "Sidecar未声明可拉取或可解密" : `Sidecar健康检查失败 HTTP ${result.httpStatus}`
       }));
-      return json(res, 200, { ok, url: healthUrl, result, state: publicState(nextState) });
+      return json(res, 200, { ok: ok && canPull && decryptReady, url: healthUrl, result, capability: { canPull, decryptReady }, state: publicState(nextState) });
     } catch (error) {
       const nextState = await mutateState((state) => updateWecomArchiveStatusAction(state, {
         status: "检查失败",
@@ -336,8 +346,8 @@ async function handleApi(req, res, pathname) {
     if (gateway.mode === "disabled") {
       const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
         status: "检查失败",
-        detail: "个人微信出站Gateway已停用",
-        error: "个人微信出站Gateway已停用"
+        detail: "统一出站Gateway已停用",
+        error: "统一出站Gateway已停用"
       }));
       return json(res, 200, { ok: false, missing: ["gateway.mode"], state: publicState(nextState) });
     }
@@ -345,6 +355,10 @@ async function handleApi(req, res, pathname) {
       const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
         status: "Mock检查通过",
         connected: true,
+        canSend: false,
+        sendMode: "proactive",
+        supportsConfirm: false,
+        supportsRecall: false,
         detail: "当前为Mock本地验证模式，不会调用外部Sidecar"
       }));
       return json(res, 200, { ok: true, mode: "mock", state: publicState(nextState) });
@@ -365,19 +379,33 @@ async function handleApi(req, res, pathname) {
       const healthUrl = endpointWithPath(gateway.sidecarUrl, "/health");
       const result = await checkHttpEndpoint(healthUrl, 5000);
       const ok = Boolean(result.ok);
+      const capability = result.body?.capabilities || result.body || {};
+      const canSend = ok && (capability.canSend === true || capability.send?.enabled === true);
+      const sendMode = capability.sendMode === "reply_window" || capability.sendMode === "proactive"
+        ? capability.sendMode
+        : capability.send?.mode === "reply_window" || capability.send?.mode === "proactive"
+          ? capability.send.mode
+          : "proactive";
+      const supportsConfirm = ok && (capability.supportsConfirm === true || capability.confirm?.enabled === true);
+      const supportsRecall = ok && (capability.supportsRecall === true || capability.recall?.enabled === true);
       const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
-        status: ok ? "Sidecar可达" : "检查失败",
+        status: ok ? canSend ? "Sidecar可发送" : "Sidecar可达但不可发送" : "检查失败",
         connected: ok,
+        canSend,
+        sendMode,
+        supportsConfirm,
+        supportsRecall,
         detail: ok
-          ? `Sidecar健康检查 ${result.httpStatus}，${result.latencyMs}ms`
+          ? `Sidecar健康检查 ${result.httpStatus}，${result.latencyMs}ms，发送能力 ${canSend ? "可用" : "不可用"}`
           : `Sidecar健康检查失败 HTTP ${result.httpStatus}`,
-        error: ok ? "" : `Sidecar健康检查失败 HTTP ${result.httpStatus}`
+        error: ok ? canSend ? "" : "Sidecar未声明canSend=true" : `Sidecar健康检查失败 HTTP ${result.httpStatus}`
       }));
-      return json(res, 200, { ok, url: healthUrl, result, state: publicState(nextState) });
+      return json(res, 200, { ok: ok && canSend, url: healthUrl, result, capability: { canSend, sendMode, supportsConfirm, supportsRecall }, state: publicState(nextState) });
     } catch (error) {
       const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
         status: "检查失败",
-        detail: "个人微信出站Sidecar不可达",
+        canSend: false,
+        detail: "统一出站Sidecar不可达",
         error: error.message
       }));
       return json(res, 200, { ok: false, error: error.message, state: publicState(nextState) });

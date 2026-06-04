@@ -1192,6 +1192,36 @@ test("企微会话存档入站会进入统一群上下文并去重", () => {
   assert.equal(diagnoseState(state).ok, true);
 });
 
+test("企微会话存档非文本消息会占位入站并生成客服任务", () => {
+  let state = updateWecomConfigAction(seedState(), {
+    archive: {
+      enabled: true,
+      provider: "企微会话内容存档",
+      defaultCustomerId: "c003",
+      defaultChannel: "VIP群"
+    }
+  });
+
+  state = ingestWecomArchiveMessageAction(state, {
+    customerId: "c003",
+    roomId: "archive_room_media",
+    roomName: "媒体消息企微外部群",
+    messageId: "archive-media-001",
+    senderId: "external_customer_media",
+    senderName: "周总",
+    senderType: "customer",
+    msgType: "image",
+    text: "",
+    cursor: "seq-media-001"
+  });
+
+  const context = state.personalWechat.groupContexts.find((item) => item.roomId === "archive_room_media");
+  assert.equal(context.messages[0].text, "[image消息]");
+  assert.equal(context.messages[0].msgType, "image");
+  assert.ok(state.tasks.some((task) => task.customerId === "c003" && task.title.includes("image")));
+  assert.ok(state.events.some((event) => event.type === "非文本消息待处理"));
+});
+
 test("统一聊天会话投影会展示企微存档会话并支持绑定客户", () => {
   let state = updateWecomConfigAction(seedState(), {
     archive: {
@@ -1313,12 +1343,14 @@ test("企微会话存档配置和Gateway状态回写会脱敏并保留游标", (
     trustedStatus: "sidecar已连接",
     cursor: "cursor-009",
     seq: 9,
+    lastAckAt: "2026-06-04T10:10:00.000Z",
     detail: "拉取2条"
   });
   report = buildWecomConfigReport(state);
   assert.equal(report.summary.archiveStatus, "运行中");
   assert.equal(report.summary.archiveCursor, "cursor-009");
   assert.equal(report.summary.archiveSeq, 9);
+  assert.equal(report.summary.archiveLastAckAt, "2026-06-04T10:10:00.000Z");
   assert.equal(report.config.archive.trustedStatus, "sidecar已连接");
   assert.equal(state.wecomLogs[0].type, "会话存档状态");
 });
@@ -1436,7 +1468,11 @@ test("Sidecar出站模式需要Gateway发送回调后才能等待回读确认", 
     gateway: {
       mode: "sidecar",
       sidecarUrl: "http://127.0.0.1:8788",
-      sendEndpoint: "/send"
+      sendEndpoint: "/send",
+      canSend: true,
+      sendMode: "proactive",
+      supportsConfirm: true,
+      supportsRecall: false
     },
     account: {
       id: "pwx_sidecar",
@@ -1449,6 +1485,7 @@ test("Sidecar出站模式需要Gateway发送回调后才能等待回读确认", 
 
   assert.equal(state.personalWechat.gateway.mode, "sidecar");
   assert.equal(state.personalWechat.gateway.sidecarUrl, "http://127.0.0.1:8788");
+  assert.equal(state.personalWechat.gateway.canSend, true);
 
   state = ingestPersonalWechatMessageAction(state, {
     customerId: "c003",
@@ -1502,9 +1539,17 @@ test("个人微信Gateway健康检查状态会写入日志和账号状态", () =
   state = updatePersonalWechatGatewayStatusAction(state, {
     status: "Sidecar可达",
     connected: true,
+    canSend: true,
+    sendMode: "reply_window",
+    supportsConfirm: true,
+    supportsRecall: true,
     detail: "Sidecar健康检查 200，12ms"
   });
   assert.equal(state.personalWechat.gateway.status, "Sidecar可达");
+  assert.equal(state.personalWechat.gateway.canSend, true);
+  assert.equal(state.personalWechat.gateway.sendMode, "reply_window");
+  assert.equal(state.personalWechat.gateway.supportsConfirm, true);
+  assert.equal(state.personalWechat.gateway.supportsRecall, true);
   assert.ok(state.personalWechat.gateway.lastConnectedAt);
   assert.equal(state.personalWechat.gateway.lastError, "");
   assert.equal(state.personalWechat.account.status, "Sidecar可达");
@@ -1513,13 +1558,51 @@ test("个人微信Gateway健康检查状态会写入日志和账号状态", () =
 
   state = updatePersonalWechatGatewayStatusAction(state, {
     status: "检查失败",
-    detail: "个人微信出站Sidecar不可达",
+    canSend: false,
+    detail: "统一出站Sidecar不可达",
     error: "connect ECONNREFUSED"
   });
   assert.equal(state.personalWechat.gateway.status, "检查失败");
   assert.equal(state.personalWechat.gateway.lastError, "connect ECONNREFUSED");
   assert.equal(state.personalWechat.account.status, "Gateway异常");
   assert.equal(state.personalWechat.logs[0].status, "失败");
+});
+
+test("Sidecar未声明发送能力时SendScheduler不会真实调度", () => {
+  let state = updatePersonalWechatConfigAction(seedState(), {
+    enabled: true,
+    gateway: {
+      mode: "sidecar",
+      sidecarUrl: "http://127.0.0.1:8788",
+      sendEndpoint: "/send",
+      canSend: false
+    },
+    account: {
+      id: "pwx_no_send",
+      name: "未授权出站号",
+      displayName: "VIP群助手",
+      defaultCustomerId: "c003",
+      autoReply: true
+    }
+  });
+  state = ingestPersonalWechatMessageAction(state, {
+    customerId: "c003",
+    roomId: "pwx_room_no_send",
+    roomName: "无发送能力测试群",
+    messageId: "pwx-no-send-001",
+    senderType: "customer",
+    senderName: "客户",
+    text: "收到，先帮我确认流程"
+  });
+  const jobId = state.personalWechat.sendJobs[0].jobId;
+  state.personalWechat.sendJobs[0].createdAt = "2026-06-04T10:39:58.000Z";
+  state = runPersonalWechatSendSchedulerAction(state, { now: "2026-06-04T10:40:00.000Z" });
+  const job = state.personalWechat.sendJobs.find((item) => item.jobId === jobId);
+  assert.equal(state.personalWechat.schedulerResult.dispatched.length, 0);
+  assert.equal(state.personalWechat.schedulerResult.skipped.includes(jobId), true);
+  assert.equal(job.status, "queued");
+  assert.match(job.error, /canSend|发送能力|Sidecar/);
+  assert.equal(state.personalWechat.logs[0].type, "Gateway无发送能力");
 });
 
 test("SendScheduler会执行分钟上限并记录发送失败退避", () => {

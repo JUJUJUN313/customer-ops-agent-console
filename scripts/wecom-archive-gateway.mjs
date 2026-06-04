@@ -30,7 +30,6 @@ function readState() {
 function readArchiveConfig() {
   const state = readState();
   const archive = state.wecomConfig?.archive || {};
-  if (!archive.enabled) throw new Error("WeCom archive gateway is disabled in local config");
   return archive;
 }
 
@@ -62,7 +61,9 @@ async function recordStatus(status, detail = "", extra = {}) {
 function normalizeSidecarMessage(raw = {}, cursor = "") {
   const roomId = raw.roomId || raw.chatId || raw.chatid || raw.room_id || raw.chat_id || "";
   const messageId = raw.messageId || raw.msgid || raw.msgId || raw.id || "";
-  const text = raw.text || raw.content || raw.message || raw.textContent || "";
+  const msgType = raw.msgType || raw.msgtype || "text";
+  const rawText = raw.text || raw.content || raw.message || raw.textContent || "";
+  const text = rawText || (msgType === "text" ? "" : `[${msgType}消息]`);
   return {
     messageId,
     roomId,
@@ -70,7 +71,7 @@ function normalizeSidecarMessage(raw = {}, cursor = "") {
     senderId: raw.senderId || raw.fromUserId || raw.from || raw.userid || "",
     senderName: raw.senderName || raw.fromName || raw.name || "",
     senderType: raw.senderType || raw.senderRoleType || "customer",
-    msgType: raw.msgType || raw.msgtype || "text",
+    msgType,
     text,
     sendAt: raw.sendAt || raw.msgtime || raw.time || new Date().toISOString(),
     source: "wecom-archive",
@@ -83,6 +84,12 @@ function sidecarPullUrl(sidecarUrl = "") {
   const base = String(sidecarUrl || "").replace(/\/+$/, "");
   if (!base) throw new Error("WeCom archive sidecar URL is required");
   return /\/pull$/i.test(base) ? base : `${base}/pull`;
+}
+
+function sidecarAckUrl(sidecarUrl = "") {
+  const base = String(sidecarUrl || "").replace(/\/+$/, "").replace(/\/pull$/i, "");
+  if (!base) throw new Error("WeCom archive sidecar URL is required");
+  return /\/ack$/i.test(base) ? base : `${base}/ack`;
 }
 
 async function pullFromSidecar(archive = {}) {
@@ -116,8 +123,34 @@ async function pullFromSidecar(archive = {}) {
   };
 }
 
+async function ackSidecar(archive = {}, ack = {}) {
+  const response = await fetch(sidecarAckUrl(archive.sidecarUrl), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      corpId: archive.corpId,
+      cursor: ack.cursor || archive.cursor || "",
+      seq: ack.seq ?? archive.seq ?? 0,
+      messageIds: ack.messageIds || [],
+      processedAt: new Date().toISOString()
+    })
+  });
+  const text = await response.text();
+  let body = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = { error: text };
+  }
+  if (!response.ok) throw new Error(body.error || `sidecar ACK HTTP ${response.status}`);
+  return body;
+}
+
 async function runOnce() {
   const archive = readArchiveConfig();
+  if (!archive.enabled) {
+    throw new Error("WeCom archive gateway is disabled in local config");
+  }
   if (archive.gatewayMode !== "sidecar") {
     throw new Error(`Unsupported archive gateway mode: ${archive.gatewayMode || "empty"}`);
   }
@@ -129,6 +162,7 @@ async function runOnce() {
   });
   const result = await pullFromSidecar(archive);
   let ingested = 0;
+  const ackMessageIds = [];
   for (const raw of result.messages) {
     const message = normalizeSidecarMessage(raw, result.cursor || archive.cursor || "");
     if (!message.messageId || !message.roomId || !message.text) {
@@ -136,13 +170,30 @@ async function runOnce() {
       continue;
     }
     await postJson("/api/wecom/archive/inbound", message);
+    ackMessageIds.push(message.messageId);
     ingested += 1;
+  }
+  if (ackMessageIds.length) {
+    try {
+      await ackSidecar(archive, {
+        cursor: result.cursor || archive.cursor || "",
+        seq: result.seq,
+        messageIds: ackMessageIds
+      });
+    } catch (error) {
+      await recordStatus("ACK失败", "archive sidecar ack failed", {
+        error: error.message,
+        trustedStatus: "ACK异常"
+      });
+      throw error;
+    }
   }
   await recordStatus("运行中", `本轮拉取 ${ingested} 条`, {
     cursor: result.cursor || archive.cursor || "",
     seq: result.seq,
     trustedStatus: "sidecar已连接",
-    lastMessageAt: result.messages.at(-1)?.sendAt || result.messages.at(-1)?.msgtime || ""
+    lastMessageAt: result.messages.at(-1)?.sendAt || result.messages.at(-1)?.msgtime || "",
+    lastAckAt: ackMessageIds.length ? new Date().toISOString() : ""
   });
   return { ingested, hasMore: result.hasMore };
 }
@@ -152,6 +203,8 @@ async function main() {
   console.log(`[wecom-archive] ${check ? "检查" : "启动"}会话存档Gateway，API ${apiBase}`);
   if (check) {
     const missing = [];
+    if (!archive.enabled) missing.push("enabled");
+    if (archive.gatewayMode !== "sidecar") missing.push("gatewayMode=sidecar");
     if (!archive.corpId) missing.push("corpId");
     if (!archive.archiveSecret) missing.push("archiveSecret");
     if (!archive.privateKey) missing.push("privateKey");

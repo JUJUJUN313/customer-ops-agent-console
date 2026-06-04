@@ -147,6 +147,10 @@ const defaultPersonalWechatState = {
     mode: "mock",
     sidecarUrl: "",
     sendEndpoint: "/send",
+    canSend: false,
+    sendMode: "proactive",
+    supportsConfirm: false,
+    supportsRecall: false,
     status: "Mock待接",
     lastConnectedAt: "",
     lastEventAt: "",
@@ -207,7 +211,7 @@ let draftChannelFilter = "全部";
 let draftPriorityFilter = "全部";
 let draftRiskFilter = "全部";
 let chatSearchQuery = "";
-let chatSourceFilter = "全部";
+let chatSourceFilter = "全部真实";
 let chatStatusFilter = "全部";
 let chatBusinessScope = "vip";
 let activeChatSessionId = "";
@@ -277,9 +281,9 @@ const chatScopeDefinitions = {
     navTitle: "电销会话",
     title: "电销会话工作台",
     label: "电销培育",
-    subtitle: "只展示电销沉淀企微、个人微信托管号和本地电销私聊中归属电销流程的会话，用于继续筛选意向并转交销售。",
+    subtitle: "只展示电销沉淀企微和托管号真实会话，用于继续筛选意向并转交销售。",
     emptyTitle: "暂无电销会话",
-    emptyDetail: "电销企微、企微机器人或本地电销消息入站后，会在这里形成独立聊天窗口。",
+    emptyDetail: "电销企微、企微机器人或托管号消息入站后，会在这里形成独立聊天窗口。",
     channels: ["电销企微", "电销企微培育", "电销模拟私聊"],
     stages: ["待筛选", "待外呼", "电销企微培育"],
     keywords: ["电销", "外呼", "培育", "待筛选", "待外呼"]
@@ -289,9 +293,9 @@ const chatScopeDefinitions = {
     navTitle: "销售会话",
     title: "销售会话工作台",
     label: "销售承接",
-    subtitle: "只展示销售企微、个人微信托管号和本地销售私聊中归属会员卡销售承接的会话，用于判断意图、沉淀话术并推进成交。",
+    subtitle: "只展示销售企微和托管号真实会话，用于判断意图、沉淀话术并推进成交。",
     emptyTitle: "暂无销售会话",
-    emptyDetail: "销售企微或本地销售消息入站后，会在这里形成独立聊天窗口。",
+    emptyDetail: "销售企微或托管号消息入站后，会在这里形成独立聊天窗口。",
     channels: ["销售企微", "销售企微承接", "销售模拟私聊", "企微私聊"],
     stages: ["销售企微承接", "销售跟进"],
     keywords: ["销售", "会员卡", "承接"]
@@ -314,7 +318,7 @@ const chatScopeDefinitions = {
     navTitle: "会话工作台",
     title: "全量会话工作台",
     label: "全部业务",
-    subtitle: "展示全部企微会话存档、智能机器人、个人微信AccountAgent和本地模拟消息，适合管理员排查跨业务链路。",
+    subtitle: "展示全部企微会话存档、智能机器人和个人微信/Sidecar会话；本地模拟只在调试来源中查看。",
     emptyTitle: "暂无会话",
     emptyDetail: "会话存档、个人微信或本地消息入站后，会在这里形成独立聊天窗口。",
     channels: [],
@@ -526,7 +530,13 @@ function normalizePersonalWechatState(config = {}) {
     ...defaultPersonalWechatState,
     ...config,
     enabled: config.enabled === undefined ? defaultPersonalWechatState.enabled : Boolean(config.enabled),
-    gateway,
+    gateway: {
+      ...gateway,
+      canSend: Boolean(gateway.canSend),
+      sendMode: gateway.sendMode === "reply_window" ? "reply_window" : "proactive",
+      supportsConfirm: Boolean(gateway.supportsConfirm),
+      supportsRecall: Boolean(gateway.supportsRecall)
+    },
     account: {
       ...account,
       autoReply: Boolean(account.autoReply),
@@ -978,18 +988,28 @@ function renderTruthPanel() {
     : "真实LLM调用路径已接好，但需要先在模型配置页保存API Key后才能测试或增强。";
   const wecomConfig = normalizeWecomConfigState(state.wecomConfig);
   const wecomReady = wecomConfig.enabled && wecomRoutes().some((route) => route.enabled && route.webhookConfigured);
-  const wecomStatus = wecomReady
-    ? "企微测试群机器人已可发送人工确认后的草稿，也可通过本地入站适配器模拟群消息。"
-    : "企微测试群机器人连接器已接好，但需要在企微接入页填写Webhook并启用后才能真实发送。";
+  const archive = wecomConfig.archive || {};
+  const archiveConfigured = archive.enabled && archive.gatewayMode === "sidecar" && archive.sidecarUrl && archive.corpId && archive.archiveSecretConfigured && archive.privateKeyConfigured;
+  const personalGateway = normalizePersonalWechatState(state.personalWechat).gateway;
+  const outboundReady = personalGateway.mode === "sidecar" && personalGateway.canSend === true;
+  const wecomStatus = archiveConfigured
+    ? "企微会话存档主读取链路已配置，可通过Sidecar拉取和ACK真实会话消息。"
+    : "企微会话存档主读取链路已接好，需要补齐CorpID、Secret、RSA私钥和Sidecar后才能真实拉取。";
+  const outboundStatus = outboundReady
+    ? "统一出站Sidecar已声明canSend=true，低风险回复可进入真实出站调度，仍需回读确认。"
+    : "统一出站Sidecar未声明canSend=true，回复只会入队、人工确认或保存草稿，不会伪装已发送。";
+  const testSendStatus = wecomReady
+    ? "测试群机器人可发送人工确认后的草稿。"
+    : "测试群机器人需配置Webhook后才能发送测试消息。";
   return `
     <section class="truth-panel">
       <div>
         <strong>当前真实可用</strong>
-        <span>客户档案、任务队列、报价维护、销售样本、本地消息、规则Agent、闭环编排、自检和审计都会真实写入本地状态。${llmStatus}${wecomStatus}</span>
+        <span>客户档案、任务队列、报价维护、销售样本、本地消息、规则Agent、闭环编排、自检和审计都会真实写入本地状态。${llmStatus}${wecomStatus}${outboundStatus}${testSendStatus}</span>
       </div>
       <div>
         <strong>当前未接入</strong>
-        <span>真实外呼、短信发送、企微私聊读取、官方客户群回调、CRM/交易系统同步尚未接入；相关动作会先进入本地任务、草稿或企微测试群确认链路。</span>
+        <span>真实外呼、短信发送、企微私聊读取、CRM/交易系统同步尚未接入；会话存档SDK/协议拉取、解密、客户同意、个人微信登录态和主动发送由外部Sidecar生产化承接。</span>
       </div>
     </section>
   `;
@@ -1789,8 +1809,11 @@ function renderOverview() {
       ${renderRoleWorkbenchCard("sales")}
     </section>
 
-    <section class="grid two">
-      <article class="panel">
+    <details class="panel advanced-debug-panel">
+      <summary>高级调试：模拟入站工具</summary>
+      <p class="panel-subtitle">这些工具只用于本地验证路由、去重和队列状态，不代表已经接入真实企微或个人微信。</p>
+      <section class="grid two">
+      <article class="panel subtle-panel">
         <div class="panel-header">
           <div>
             <h2 class="panel-title">系统蓝图</h2>
@@ -1799,7 +1822,7 @@ function renderOverview() {
         </div>
         ${renderSystemBlueprint()}
       </article>
-      <article class="panel">
+      <article class="panel subtle-panel">
         <div class="panel-header">
           <div>
             <h2 class="panel-title">最近Agent输出</h2>
@@ -1877,6 +1900,10 @@ function renderJourney() {
         `).join("")}
       </div>
     </section>
+
+    <section class="grid two">
+      </section>
+    </details>
 
     <section class="grid two">
       <article class="panel">
@@ -2440,7 +2467,7 @@ function personalWechatJobLabel(status = "") {
   const labels = {
     queued: "待自动发送",
     sending: "发送中",
-    sent: "已发送待回显",
+    sent: "已提交待回读",
     sent_pending_confirm: "已提交待回读",
     confirmed: "已确认",
     failed: "失败",
@@ -2481,6 +2508,7 @@ function renderPersonalWechatJob(job) {
         ${job.createdAt ? `<span class="tag">创建 ${escapeHtml(formatDateTime(job.createdAt))}</span>` : ""}
         ${job.approvedAt ? `<span class="tag">放行 ${escapeHtml(formatDateTime(job.approvedAt))}</span>` : ""}
         ${job.gatewayMode ? `<span class="tag">网关 ${escapeHtml(job.gatewayMode)}</span>` : ""}
+        <span class="tag">${job.gatewayMode === "sidecar" ? "真实出站待回读" : "Mock/未真实外发"}</span>
         ${job.gatewayRequestId ? `<span class="tag">请求 ${escapeHtml(job.gatewayRequestId)}</span>` : ""}
         ${job.sentAt ? `<span class="tag">已发 ${escapeHtml(formatDateTime(job.sentAt))}</span>` : ""}
         ${job.confirmedAt ? `<span class="tag">确认 ${escapeHtml(formatDateTime(job.confirmedAt))}</span>` : ""}
@@ -2597,7 +2625,8 @@ function renderWecom() {
   const personalDefaultCustomer = state.customers.find((customer) => customer.id === personalAccount.defaultCustomerId) || selectedCustomer();
   const archiveConfigured = archive.enabled && archive.gatewayMode === "sidecar" && archive.sidecarUrl && archive.corpId && archive.archiveSecretConfigured && archive.privateKeyConfigured;
   const routeReady = config.enabled && readyRoutes.length > 0;
-  const personalGatewayReady = personalGateway.mode === "mock" || (personalGateway.mode === "sidecar" && personalGateway.sidecarUrl && personalGateway.sendEndpoint);
+  const personalGatewayConfigured = personalGateway.mode === "sidecar" && personalGateway.sidecarUrl && personalGateway.sendEndpoint;
+  const personalGatewayCanSend = personalGatewayConfigured && personalGateway.canSend === true;
   const normalizedBindingSearch = wecomBindingSearchQuery.trim().toLowerCase();
   const filteredBindings = bindings.filter((binding) => {
     if (!normalizedBindingSearch) return true;
@@ -2683,21 +2712,24 @@ function renderWecom() {
           action: `<button class="small-button" type="button" data-jump-wecom-section="wecom-send-test">查看发送测试</button>`
         })}
         ${renderIntegrationCard({
-          title: "个人微信出站",
-          subtitle: "单账号AccountAgent + SendScheduler",
-          status: personalGatewayReady ? personalGateway.status || "可检查" : "Gateway未完成",
-          tone: personalGatewayReady ? "success" : "warning",
-          body: personalGateway.mode === "mock" ? "当前为Mock验证模式，不会触发外部发送；用于验证队列、风控和回读闭环。" : "Sidecar模式会把发送中任务交给外部个微Gateway，回读确认前不算闭环完成。",
+          title: "统一出站Sidecar",
+          subtitle: "确认回复真实发回群的唯一出口",
+          status: personalGatewayCanSend ? personalGateway.status || "可发送" : personalGateway.mode === "mock" ? "Mock不可真实发送" : personalGateway.status || "Gateway未完成",
+          tone: personalGatewayCanSend ? "success" : "warning",
+          body: personalGatewayCanSend ? "Sidecar已声明canSend=true，SendScheduler可把确认后的任务交给真实出站服务；回读确认前仍不算闭环。" : "未连接可发送Sidecar时，聊天回复只会生成草稿、待发送或人工确认任务，不会显示真实已发送。",
           tags: [
             personalWechat.enabled ? "已启用" : "已停用",
             `模式 ${personalGateway.mode || "mock"}`,
             personalGateway.sidecarUrl ? "Sidecar URL已填" : "无Sidecar URL",
+            personalGateway.canSend ? "canSend=true" : "canSend=false",
+            `发送模式 ${personalGateway.sendMode || "proactive"}`,
+            personalGateway.supportsConfirm ? "支持回读确认" : "未声明回读",
             `待发 ${personalQueuedJobs.length}`,
             `发送中 ${personalSendingJobs.length}`,
             `待回读 ${personalSentJobs.length}`,
             `人工 ${personalManualJobs.length}`
           ],
-          action: `<button class="small-button" id="checkPersonalWechatGateway" type="button" ${actionAttrs("personal-wechat-gateway-check")}>检查个微Gateway</button>`
+          action: `<button class="small-button" id="checkPersonalWechatGateway" type="button" ${actionAttrs("personal-wechat-gateway-check")}>检查出站Sidecar</button>`
         })}
       </div>
     </section>
@@ -2706,7 +2738,7 @@ function renderWecom() {
       ${cardKpi("个人微信账号", personalAccount.status || "未连接", personalWechat.enabled ? "单账号单Agent" : "已停用")}
       ${cardKpi("外部群上下文", personalContexts.length, "按roomId隔离")}
       ${cardKpi("待发送队列", personalQueuedJobs.length, `发送中 ${personalSendingJobs.length}，待回读 ${personalSentJobs.length}`)}
-      ${cardKpi("已确认回显", personalConfirmedJobs.length, "Mock自回显/存档确认")}
+      ${cardKpi("已确认回显", personalConfirmedJobs.length, "自回显/存档回读确认")}
     </section>
 
     <form id="personalWechatConfigForm">
@@ -2714,8 +2746,8 @@ function renderWecom() {
       <article class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">个人微信单账号AccountAgent</h2>
-            <p class="panel-subtitle">一个个人微信号只绑定一个AccountAgent；它维护多个外部群上下文，但出站消息统一进入单账号队列。</p>
+            <h2 class="panel-title">统一出站Sidecar与AccountAgent</h2>
+            <p class="panel-subtitle">确认后的回复只通过SendScheduler进入统一Sidecar；Mock只做本地演练，不代表真实发回群。</p>
           </div>
         </div>
         <div class="form-grid compact-form">
@@ -2727,10 +2759,13 @@ function renderWecom() {
           <div class="field"><label>账号名称</label><input name="account.name" value="${escapeHtml(personalAccount.name)}"></div>
           <div class="field"><label>群内显示名</label><input name="account.displayName" value="${escapeHtml(personalAccount.displayName)}"></div>
           <div class="field"><label>默认客户</label><select name="account.defaultCustomerId">${customerOptions(personalDefaultCustomer)}</select></div>
-          <div class="field"><label>出站Gateway模式</label><select name="gateway.mode"><option value="mock" ${personalGateway.mode === "mock" ? "selected" : ""}>Mock本地验证</option><option value="sidecar" ${personalGateway.mode === "sidecar" ? "selected" : ""}>Sidecar真实发送</option><option value="disabled" ${personalGateway.mode === "disabled" ? "selected" : ""}>停用出站</option></select></div>
+          <div class="field"><label>出站模式</label><select name="gateway.mode"><option value="mock" ${personalGateway.mode === "mock" ? "selected" : ""}>Mock本地演练</option><option value="sidecar" ${personalGateway.mode === "sidecar" ? "selected" : ""}>Sidecar真实发送</option><option value="disabled" ${personalGateway.mode === "disabled" ? "selected" : ""}>停用出站</option></select></div>
           <div class="field"><label>Sidecar URL</label><input name="gateway.sidecarUrl" value="${escapeHtml(personalGateway.sidecarUrl || "")}" placeholder="http://127.0.0.1:8788"></div>
           <div class="field"><label>发送端点</label><input name="gateway.sendEndpoint" value="${escapeHtml(personalGateway.sendEndpoint || "/send")}"></div>
           <div class="field"><label>Gateway状态</label><input value="${escapeHtml(personalGateway.status || "未配置")}" disabled></div>
+          <div class="field"><label>发送能力</label><input value="${personalGateway.canSend ? "canSend=true，可交给真实Sidecar" : "canSend=false，不能真实发送"}" disabled></div>
+          <div class="field"><label>发送模式</label><input value="${escapeHtml(personalGateway.sendMode || "proactive")}" disabled></div>
+          <div class="field"><label>回读/撤回能力</label><input value="${personalGateway.supportsConfirm ? "支持回读确认" : "未声明回读"} / ${personalGateway.supportsRecall ? "支持撤回" : "未声明撤回"}" disabled></div>
           <label class="inline-check compact-check"><input name="account.autoReply" type="checkbox" value="true" ${personalAccount.autoReply ? "checked" : ""}><span>低风险自动排队</span></label>
           <label class="inline-check compact-check"><input name="account.requireApprovalForRisk" type="checkbox" value="true" ${personalAccount.requireApprovalForRisk ? "checked" : ""}><span>高风险人工确认</span></label>
           <div class="field"><label>最小发送间隔秒</label><input name="account.minSendIntervalSeconds" type="number" min="1" max="60" value="${escapeHtml(personalAccount.minSendIntervalSeconds)}"></div>
@@ -2759,11 +2794,14 @@ function renderWecom() {
               </div>
               <span class="status-pill">${personalAccount.autoReply ? "低风险自动" : "全部人工确认"}</span>
             </div>
-            <p class="event-text">发消息由SendScheduler受控调度：同群FIFO，单账号默认并发1，可灰度到2-3；超过队列时效会要求重新判断。</p>
+            <p class="event-text">发消息由SendScheduler受控调度：同群FIFO、账号限频、超过队列时效重判；只有Sidecar声明canSend=true时才会真实外发。</p>
             <div class="tag-list">
               <span class="tag">Gateway ${escapeHtml(personalGateway.mode)}</span>
               ${personalGateway.sidecarUrl ? `<span class="tag">${escapeHtml(personalGateway.sidecarUrl)}${escapeHtml(personalGateway.sendEndpoint || "/send")}</span>` : ""}
               <span class="tag">${escapeHtml(personalGateway.status || "未配置")}</span>
+              <span class="tag">${personalGateway.canSend ? "可真实发送" : "不可真实发送"}</span>
+              <span class="tag">模式 ${escapeHtml(personalGateway.sendMode || "proactive")}</span>
+              <span class="tag">${personalGateway.supportsConfirm ? "支持回读" : "未声明回读"}</span>
               <span class="tag">限频 ${escapeHtml(personalAccount.minSendIntervalSeconds)} 秒</span>
               <span class="tag">并发 ${escapeHtml(personalAccount.concurrency)}</span>
               <span class="tag">分钟 ${escapeHtml(personalAccount.maxSendsPerMinute)} 条</span>
@@ -2779,12 +2817,14 @@ function renderWecom() {
     </section>
     </form>
 
-    <section class="grid two">
+    <details class="advanced-debug-panel">
+      <summary>高级调试：模拟入站工具</summary>
+      <section class="grid two">
       <article class="panel">
         <div class="panel-header">
           <div>
             <h2 class="panel-title">模拟个人微信外部群入站</h2>
-            <p class="panel-subtitle">用于第一阶段验证个人微信号已在外部群内时的实时收消息、上下文和回复队列。</p>
+            <p class="panel-subtitle">仅用于研发验证消息格式、上下文和回复队列，不代表真实个人微信接入。</p>
           </div>
         </div>
         <div class="form-grid compact-form">
@@ -2803,7 +2843,7 @@ function renderWecom() {
         <div class="panel-header">
           <div>
             <h2 class="panel-title">模拟企微会话存档入站</h2>
-            <p class="panel-subtitle">生产链路中由WeComArchiveGateway拉取、解密并转成统一入站消息；这里用于验证存档主入口和去重。</p>
+            <p class="panel-subtitle">仅用于研发验证标准入站、去重和风控；真实读取请运行会话存档Sidecar。</p>
           </div>
         </div>
         <div class="form-grid compact-form">
@@ -2817,7 +2857,10 @@ function renderWecom() {
           <button class="primary-button full-span" id="ingestWecomArchiveMessage" type="button" ${actionAttrs("wecom-archive-inbound")} ${archive.enabled && state.customers.length ? "" : "disabled"}>写入会话存档入站</button>
         </div>
       </article>
+      </section>
+    </details>
 
+    <section class="grid two">
       <article class="panel">
         <div class="panel-header">
           <div>
@@ -2883,7 +2926,7 @@ function renderWecom() {
         <div class="panel-header">
           <div>
             <h2 class="panel-title">企微会话内容存档</h2>
-            <p class="panel-subtitle">生产外部群主读取入口。当前提供标准化入站和游标记录；真实拉取、解密和客户同意流程由后续WeComArchiveGateway接入。</p>
+            <p class="panel-subtitle">生产外部群主读取入口。主服务保存配置、游标和审计；真实拉取、解密和客户同意校验由Sidecar完成。</p>
           </div>
         </div>
         <div class="form-grid compact-form">
@@ -2912,7 +2955,7 @@ function renderWecom() {
             <div class="agent-customer-head">
               <div>
                 <strong>${escapeHtml(archive.status || (archive.enabled ? "已启用" : "未启用"))}</strong>
-                <span>${archive.lastPulledAt ? `最近拉取 ${escapeHtml(formatDateTime(archive.lastPulledAt))}` : "等待会话存档Gateway接入"} · ${escapeHtml(archive.trustedStatus || "未验证")}</span>
+                <span>${archive.lastPulledAt ? `最近拉取 ${escapeHtml(formatDateTime(archive.lastPulledAt))}` : "等待会话存档Gateway接入"} · ${archive.lastAckAt ? `最近ACK ${escapeHtml(formatDateTime(archive.lastAckAt))} · ` : ""}${escapeHtml(archive.trustedStatus || "未验证")}</span>
               </div>
               <span class="status-pill">${archive.enabled ? "主读取入口" : "未启用"}</span>
             </div>
@@ -3078,7 +3121,8 @@ function renderWecom() {
     </section>
 
     <section class="grid two">
-      <article class="panel">
+      <details class="panel advanced-debug-panel">
+        <summary>高级调试：本地企微入站适配器</summary>
         <div class="panel-header">
           <div>
             <h2 class="panel-title">模拟企微入站</h2>
@@ -3095,7 +3139,7 @@ function renderWecom() {
           <div class="field full-span"><label>消息内容</label><textarea id="wecomInboundMessage">${escapeHtml(scenarios.vip)}</textarea></div>
           <button class="primary-button full-span" id="ingestWecomMessage" type="button" ${actionAttrs("wecom-inbound")} ${state.customers.length ? "" : "disabled"}>写入企微模拟入站</button>
         </div>
-      </article>
+      </details>
 
       <article class="panel">
         <div class="panel-header">
@@ -3359,7 +3403,7 @@ function chatSourceMeta(messages = []) {
   const sources = new Set(messages.map((message) => message.source).filter(Boolean));
   if (sources.has("wecom-archive")) return { source: "wecom-archive", label: "企微会话存档" };
   if ([...sources].some((source) => source.includes("wecom-aibot") || source.includes("local-chatid"))) return { source: "wecom-aibot", label: "企微机器人" };
-  if (sources.has("personal-wechat")) return { source: "personal-wechat", label: "个人微信" };
+  if (sources.has("personal-wechat")) return { source: "personal-wechat", label: "个人微信/Sidecar" };
   return { source: "external", label: "外部会话" };
 }
 
@@ -3397,7 +3441,9 @@ function chatSessionsFromState() {
       createdAt: message.sendAt || "",
       direction: chatMessageDirection(message.senderType)
     }));
-    const activeJobs = (personal.sendJobs || []).filter((job) => job.roomId === context.roomId && ["queued", "sending", "sent", "manual_required"].includes(job.status));
+    const jobs = (personal.sendJobs || []).filter((job) => job.roomId === context.roomId);
+    const activeJobs = jobs.filter((job) => ["queued", "sending", "sent", "sent_pending_confirm", "manual_required"].includes(job.status));
+    const failedJobs = jobs.filter((job) => job.status === "failed");
     const lastDecision = (personal.decisions || []).find((decision) => decision.roomId === context.roomId) || null;
     const source = chatSourceMeta(context.messages || []);
     const placeholder = customer?.tags?.includes("企微群待绑定");
@@ -3418,6 +3464,7 @@ function chatSessionsFromState() {
       binding,
       messages,
       activeJobs,
+      failedJobs,
       lastDecision,
       riskLevel,
       needsReply: activeJobs.length > 0,
@@ -3502,11 +3549,18 @@ function filteredChatSessions() {
     const matchesScope = sessionMatchesChatScope(session);
     const matchesSearch = !query || [session.title, session.customerName, session.lastMessageText, session.roomId, session.channel]
       .some((value) => String(value || "").toLowerCase().includes(query));
-    const matchesSource = chatSourceFilter === "全部" || session.sourceLabel === chatSourceFilter;
+    const normalizedSourceFilter = chatSourceFilter === "全部" ? "全部真实" : chatSourceFilter;
+    const matchesSource = normalizedSourceFilter === "全部真实"
+      ? session.source !== "local"
+      : normalizedSourceFilter === "本地调试"
+        ? session.source === "local"
+        : session.sourceLabel === normalizedSourceFilter;
     const matchesStatus = chatStatusFilter === "全部"
       || (chatStatusFilter === "待绑定" && !session.bound)
       || (chatStatusFilter === "待回复" && session.needsReply)
-      || (chatStatusFilter === "高风险" && session.riskLevel === "high");
+      || (chatStatusFilter === "高风险" && session.riskLevel === "high")
+      || (chatStatusFilter === "待回读" && (session.activeJobs || []).some((job) => ["sending", "sent", "sent_pending_confirm"].includes(job.status)))
+      || (chatStatusFilter === "发送失败" && (session.failedJobs || []).length > 0);
     return matchesScope && matchesSearch && matchesSource && matchesStatus;
   });
 }
@@ -3528,7 +3582,9 @@ function renderChatSessionRow(session) {
   const statusTags = [
     !session.bound ? "待绑定" : "",
     session.needsReply ? `待回复 ${session.activeJobs?.length || 0}` : "",
-    session.riskLevel === "high" ? "高风险" : ""
+    session.riskLevel === "high" ? "高风险" : "",
+    (session.activeJobs || []).some((job) => ["sending", "sent", "sent_pending_confirm"].includes(job.status)) ? "待回读" : "",
+    (session.failedJobs || []).length ? "发送失败" : ""
   ].filter(Boolean);
   return `
     <button class="chat-session ${active ? "active" : ""}" data-chat-session="${escapeHtml(session.sessionId)}" type="button">
@@ -3559,6 +3615,8 @@ function renderChatSidePanel(session) {
   const tasks = chatSessionTasks(session);
   const quotes = chatSessionQuotes(session);
   const latestRun = session?.customerId ? state.agentRuns.find((run) => run.customerId === session.customerId) : null;
+  const personal = normalizePersonalWechatState(state.personalWechat);
+  const gateway = personal.gateway || defaultPersonalWechatState.gateway;
   return `
     <aside class="chat-detail-panel">
       <section>
@@ -3581,6 +3639,15 @@ function renderChatSidePanel(session) {
           <button class="small-button full-span" data-chat-bind-customer="${escapeHtml(session.sessionId)}" type="button" ${actionAttrs(`chat-bind-${session.sessionId}`)}>保存绑定</button>
         </section>
       ` : ""}
+      <section>
+        <h3>连接状态</h3>
+        <div class="detail-list">
+          <div><span>最近来源</span><strong>${escapeHtml(session?.sourceLabel || "未知")}</strong></div>
+          <div><span>出站模式</span><strong>${escapeHtml(gateway.mode || "mock")}</strong></div>
+          <div><span>发送能力</span><strong>${gateway.mode === "sidecar" && gateway.canSend ? "可真实发送" : "不可真实发送"}</strong></div>
+          <div><span>回读确认</span><strong>${gateway.supportsConfirm ? "Sidecar声明支持" : "依赖自回显/存档回读"}</strong></div>
+        </div>
+      </section>
       <section>
         <h3>Agent判断</h3>
         ${latestRun ? `
@@ -3620,8 +3687,10 @@ function renderChatWorkbench() {
     activeChatSessionId = sessions[0]?.sessionId || "";
   }
   const activeSession = sessions.find((session) => session.sessionId === activeChatSessionId) || sessions[0];
-  const sources = ["全部", "企微会话存档", "企微机器人", "个人微信", "本地模拟"];
-  const statuses = ["全部", "待绑定", "待回复", "高风险"];
+  const sources = ["全部真实", "企微会话存档", "企微机器人", "个人微信/Sidecar", "本地调试"];
+  const statuses = ["全部", "待绑定", "待回复", "高风险", "待回读", "发送失败"];
+  const gateway = normalizePersonalWechatState(state.personalWechat).gateway || defaultPersonalWechatState.gateway;
+  const canRealSend = gateway.mode === "sidecar" && gateway.canSend === true;
   return `
     <section class="panel chat-workbench-panel">
       <div class="panel-header">
@@ -3633,13 +3702,13 @@ function renderChatWorkbench() {
       <div class="chat-scope-strip">
         <span><strong>${escapeHtml(scope.label)}</strong></span>
         <span>当前范围 ${sessions.length}/${scopedSessions.length} 个会话</span>
-        <span>来源：企微会话存档 / 企微机器人 / 个人微信 / 本地模拟</span>
+        <span>来源：企微会话存档 / 企微机器人 / 个人微信/Sidecar</span>
       </div>
       <div class="chat-workbench">
         <aside class="chat-list-panel">
           <div class="chat-search">
             <input id="chatSearchInput" value="${escapeHtml(chatSearchQuery)}" placeholder="搜索会话、客户、消息">
-            <select id="chatSourceFilter">${sources.map((source) => `<option value="${escapeHtml(source)}" ${source === chatSourceFilter ? "selected" : ""}>${escapeHtml(source)}</option>`).join("")}</select>
+            <select id="chatSourceFilter">${sources.map((source) => `<option value="${escapeHtml(source)}" ${(source === chatSourceFilter || (chatSourceFilter === "全部" && source === "全部真实")) ? "selected" : ""}>${escapeHtml(source)}</option>`).join("")}</select>
             <select id="chatStatusFilter">${statuses.map((status) => `<option value="${escapeHtml(status)}" ${status === chatStatusFilter ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}</select>
           </div>
           <div class="chat-session-list">
@@ -3658,6 +3727,8 @@ function renderChatWorkbench() {
                 <span class="tag">${escapeHtml(activeSession.channel || "会话")}</span>
                 ${activeSession.needsReply ? `<span class="tag">待回复 ${escapeHtml(activeSession.activeJobs.length)}</span>` : ""}
                 ${activeSession.riskLevel === "high" ? `<span class="tag">高风险</span>` : ""}
+                ${(activeSession.activeJobs || []).some((job) => ["sending", "sent", "sent_pending_confirm"].includes(job.status)) ? `<span class="tag">待回读</span>` : ""}
+                ${(activeSession.failedJobs || []).length ? `<span class="tag">发送失败</span>` : ""}
               </div>
             </header>
             <div class="chat-message-stream">
@@ -3666,7 +3737,7 @@ function renderChatWorkbench() {
             <footer class="chat-composer">
               <textarea id="chatReplyText" placeholder="输入回复。低风险会进入发送队列，高风险会进入人工确认。"></textarea>
               <div class="chat-composer-actions">
-                <span>${activeSession.kind === "room" ? "外部会话回复会进入SendScheduler，不直接标记已发送。" : "本地会话回复会保存为触达草稿。"}</span>
+                <span>${activeSession.kind === "room" ? canRealSend ? "外部会话回复会进入SendScheduler，Sidecar发送后仍需回读确认。" : "真实出站未就绪，回复只会入队或进入人工确认，不会显示已发送。" : "本地调试会话回复会保存为触达草稿。"}</span>
                 <button class="primary-button" id="sendChatReply" data-chat-reply-session="${escapeHtml(activeSession.sessionId)}" type="button" ${actionAttrs(`chat-reply-${activeSession.sessionId}`)}>发送/入队</button>
               </div>
             </footer>

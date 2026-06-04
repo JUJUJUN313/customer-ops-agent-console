@@ -118,6 +118,7 @@ const DEFAULT_WECOM_CONFIG = {
     trustedStatus: "未验证",
     lastPulledAt: "",
     lastMessageAt: "",
+    lastAckAt: "",
     status: "未配置",
     lastError: "",
     defaultCustomerId: "",
@@ -131,6 +132,10 @@ const DEFAULT_PERSONAL_WECHAT = {
     mode: "mock",
     sidecarUrl: "",
     sendEndpoint: "/send",
+    canSend: false,
+    sendMode: "proactive",
+    supportsConfirm: false,
+    supportsRecall: false,
     status: "Mock待接",
     lastConnectedAt: "",
     lastEventAt: "",
@@ -565,6 +570,7 @@ function normalizeWecomArchiveConfig(config = {}, current = DEFAULT_WECOM_CONFIG
     trustedStatus: cleanLimitedText(config.trustedStatus, current.trustedStatus || "未验证", 80),
     lastPulledAt: cleanLimitedText(config.lastPulledAt, current.lastPulledAt || "", 80),
     lastMessageAt: cleanLimitedText(config.lastMessageAt, current.lastMessageAt || "", 80),
+    lastAckAt: cleanLimitedText(config.lastAckAt, current.lastAckAt || "", 80),
     status: cleanLimitedText(config.status, current.status || "未配置", 40),
     lastError: cleanLimitedText(config.lastError, current.lastError || "", 400),
     defaultCustomerId: cleanLimitedText(config.defaultCustomerId, current.defaultCustomerId || "", 80),
@@ -913,6 +919,7 @@ function normalizePersonalWechatGateway(gateway = {}, current = DEFAULT_PERSONAL
   const hasSendEndpoint = Object.prototype.hasOwnProperty.call(gateway, "sendEndpoint");
   const rawEndpoint = cleanLimitedText(hasSendEndpoint ? gateway.sendEndpoint : current.sendEndpoint, current.sendEndpoint || "/send", 120);
   const sendEndpoint = rawEndpoint.startsWith("/") ? rawEndpoint : `/${rawEndpoint}`;
+  const sendMode = cleanLimitedText(gateway.sendMode, current.sendMode || "proactive", 40);
   return {
     mode: ["mock", "sidecar", "disabled"].includes(mode) ? mode : "mock",
     sidecarUrl: hasSidecarUrl
@@ -921,6 +928,10 @@ function normalizePersonalWechatGateway(gateway = {}, current = DEFAULT_PERSONAL
         : ""
       : cleanLimitedText(current.sidecarUrl || "", "", 300),
     sendEndpoint,
+    canSend: gateway.canSend === undefined ? Boolean(current.canSend) : gateway.canSend === true || gateway.canSend === "true",
+    sendMode: ["reply_window", "proactive"].includes(sendMode) ? sendMode : "proactive",
+    supportsConfirm: gateway.supportsConfirm === undefined ? Boolean(current.supportsConfirm) : gateway.supportsConfirm === true || gateway.supportsConfirm === "true",
+    supportsRecall: gateway.supportsRecall === undefined ? Boolean(current.supportsRecall) : gateway.supportsRecall === true || gateway.supportsRecall === "true",
     status: cleanLimitedText(gateway.status, current.status || "Mock待接", 60),
     lastConnectedAt: cleanLimitedText(gateway.lastConnectedAt, current.lastConnectedAt || "", 80),
     lastEventAt: cleanLimitedText(gateway.lastEventAt, current.lastEventAt || "", 80),
@@ -1378,7 +1389,7 @@ function dispatchPersonalWechatJobs(state, payload = {}) {
       continue;
     }
     if (gateway.mode === "disabled") {
-      job.error = "个人微信出站Gateway已停用，无法调度发送。";
+      job.error = "统一出站Gateway已停用，无法调度发送。";
       skipped.push(job.jobId);
       appendPersonalWechatLog(state, {
         type: "Gateway停用",
@@ -1399,6 +1410,23 @@ function dispatchPersonalWechatJobs(state, payload = {}) {
       skipped.push(job.jobId);
       appendPersonalWechatLog(state, {
         type: "Gateway未配置",
+        status: "失败",
+        accountId: job.accountId,
+        roomId: job.roomId,
+        roomName: job.roomName,
+        sendJobId: job.jobId,
+        contentPreview: job.replyText,
+        error: job.error,
+        gatewayMode: gateway.mode,
+        externalSideEffects: false
+      });
+      continue;
+    }
+    if (gateway.mode === "sidecar" && gateway.canSend !== true) {
+      job.error = "出站Sidecar未声明可发送能力，任务保持待发送。";
+      skipped.push(job.jobId);
+      appendPersonalWechatLog(state, {
+        type: "Gateway无发送能力",
         status: "失败",
         accountId: job.accountId,
         roomId: job.roomId,
@@ -1459,7 +1487,7 @@ function enqueuePersonalWechatSendJob(state, decision = {}) {
     status: decision.action === "auto_reply" ? "queued" : "manual_required",
     riskLevel: decision.riskLevel,
     reason: decision.reason,
-    gatewayMode: "mock",
+    gatewayMode: config.gateway?.mode || "mock",
     source: decision.source || "personal-wechat"
   });
   config.sendJobs.unshift(job);
@@ -2430,12 +2458,13 @@ export function buildWecomConfigReport(inputState) {
       aibotEnabled: Boolean(config.aibot?.enabled),
       aibotConfigured: Boolean(config.aibot?.botId && config.aibot?.secret),
       archiveEnabled: Boolean(config.archive?.enabled),
-      archiveConfigured: Boolean(config.archive?.corpId && config.archive?.archiveSecret && config.archive?.privateKey),
+      archiveConfigured: Boolean(config.archive?.enabled && config.archive?.gatewayMode === "sidecar" && config.archive?.sidecarUrl && config.archive?.corpId && config.archive?.archiveSecret && config.archive?.privateKey),
       archiveStatus: config.archive?.status || "未配置",
       archiveCursor: config.archive?.cursor || "",
       archiveSeq: config.archive?.seq || 0,
       archiveGatewayMode: config.archive?.gatewayMode || "sidecar",
       archiveTrustedStatus: config.archive?.trustedStatus || "未验证",
+      archiveLastAckAt: config.archive?.lastAckAt || "",
       bridgeStatus: config.aibot?.bridgeStatus || "未启动",
       boundGroups: bindings.groups.filter((binding) => binding.status === "已绑定").length,
       pendingGroups: bindings.groups.filter((binding) => binding.status !== "已绑定").length,
@@ -2468,6 +2497,11 @@ export function buildPersonalWechatReport(inputState) {
       failedJobs: config.sendJobs.filter((job) => job.status === "failed").length,
       activeJobs: activeJobs.length,
       highRiskDecisions: config.decisions.filter((decision) => decision.riskLevel === "high").length,
+      gatewayMode: config.gateway.mode,
+      gatewayCanSend: Boolean(config.gateway.canSend),
+      gatewaySendMode: config.gateway.sendMode || "proactive",
+      gatewaySupportsConfirm: Boolean(config.gateway.supportsConfirm),
+      gatewaySupportsRecall: Boolean(config.gateway.supportsRecall),
       concurrency: config.account.concurrency,
       maxSendsPerMinute: config.account.maxSendsPerMinute,
       lastEventAt: config.account.lastEventAt || config.logs[0]?.createdAt || ""
@@ -2502,7 +2536,7 @@ function sourceMetaForContext(context = {}) {
   if ([...sources].some((source) => source.includes("wecom-aibot") || source.includes("local-chatid"))) {
     return { source: "wecom-aibot", sourceLabel: "企微机器人" };
   }
-  if (sources.has("personal-wechat")) return { source: "personal-wechat", sourceLabel: "个人微信" };
+  if (sources.has("personal-wechat")) return { source: "personal-wechat", sourceLabel: "个人微信/Sidecar" };
   return { source: "external", sourceLabel: "外部会话" };
 }
 
@@ -2562,6 +2596,7 @@ function buildRoomChatSession(state, context = {}) {
   const messages = (context.messages || []).map(chatMessageFromContext);
   const jobs = (config.sendJobs || []).filter((job) => job.roomId === context.roomId);
   const activeJobs = jobs.filter((job) => ACTIVE_PERSONAL_WECHAT_JOB_STATUSES.has(job.status));
+  const failedJobs = jobs.filter((job) => job.status === "failed");
   const lastDecision = (config.decisions || []).find((decision) => decision.roomId === context.roomId) || null;
   const riskLevel = activeJobs.some((job) => job.riskLevel === "high" || job.status === "manual_required") || lastDecision?.riskLevel === "high" ? "high" : "low";
   const sourceMeta = sourceMetaForContext(context);
@@ -2571,7 +2606,8 @@ function buildRoomChatSession(state, context = {}) {
     bound ? "已绑定" : "待绑定",
     activeJobs.length ? "待回复" : "",
     riskLevel === "high" ? "高风险" : "",
-    jobs.some((job) => ["sent", "sent_pending_confirm", "sending"].includes(job.status)) ? "待回读确认" : ""
+    jobs.some((job) => ["sent", "sent_pending_confirm", "sending"].includes(job.status)) ? "待回读确认" : "",
+    failedJobs.length ? "发送失败" : ""
   ].filter(Boolean);
   return {
     sessionId: roomSessionId(context.roomId),
@@ -2594,6 +2630,7 @@ function buildRoomChatSession(state, context = {}) {
     statusTags,
     pendingJobCount: activeJobs.length,
     activeJobs,
+    failedJobs,
     lastDecision,
     messages,
     binding: binding || null,
@@ -2891,6 +2928,21 @@ export function ingestPersonalWechatMessageAction(inputState, payload = {}) {
     lastSenderId: inbound.senderId || inbound.senderName,
     incrementMessageCount: true
   });
+  if (inbound.msgType !== "text") {
+    appendTask(state, target.customerId, {
+      title: `人工查看外部群${inbound.msgType}消息`,
+      ownerRole: "客服",
+      owner: "客服队列",
+      priority: "中",
+      sla: "2小时",
+      reason: `${inbound.roomName || inbound.roomId} 收到非文本消息，系统已以占位内容入站，需要人工查看原始附件或媒体。`
+    });
+    appendEvent(state, target.customerId, {
+      channel: inbound.source === "wecom-archive" ? "企微会话存档" : "个人微信托管",
+      type: "非文本消息待处理",
+      text: `${inbound.senderName} 发送了 ${inbound.msgType} 消息：${inbound.text}`
+    });
+  }
 
   let nextState = state;
   if (inbound.senderType === "customer") {
@@ -3228,6 +3280,7 @@ export function updateWecomArchiveStatusAction(inputState, payload = {}) {
   archive.seq = Math.max(0, Math.round(finiteNumber(payload.seq, archive.seq || 0)));
   archive.lastPulledAt = cleanLimitedText(payload.lastPulledAt, payload.status ? now : archive.lastPulledAt || "", 80);
   archive.lastMessageAt = cleanLimitedText(payload.lastMessageAt, archive.lastMessageAt || "", 80);
+  archive.lastAckAt = cleanLimitedText(payload.lastAckAt, archive.lastAckAt || "", 80);
   archive.lastError = cleanLimitedText(payload.error, payload.status === "错误" ? "未知错误" : "", 400);
   appendWecomLog(state, {
     type: "会话存档状态",
@@ -3249,6 +3302,13 @@ export function updatePersonalWechatGatewayStatusAction(inputState, payload = {}
   const gateway = config.gateway || DEFAULT_PERSONAL_WECHAT.gateway;
   gateway.status = cleanLimitedText(payload.status, gateway.status || "未配置", 60);
   gateway.lastEventAt = now;
+  if (payload.canSend !== undefined) gateway.canSend = payload.canSend === true || payload.canSend === "true";
+  if (payload.sendMode !== undefined) {
+    const sendMode = cleanLimitedText(payload.sendMode, gateway.sendMode || "proactive", 40);
+    gateway.sendMode = ["reply_window", "proactive"].includes(sendMode) ? sendMode : gateway.sendMode || "proactive";
+  }
+  if (payload.supportsConfirm !== undefined) gateway.supportsConfirm = payload.supportsConfirm === true || payload.supportsConfirm === "true";
+  if (payload.supportsRecall !== undefined) gateway.supportsRecall = payload.supportsRecall === true || payload.supportsRecall === "true";
   if (!payload.error && (payload.connected === true || payload.status === "检查通过" || payload.status === "Sidecar可达")) {
     gateway.lastConnectedAt = now;
   }
@@ -3269,7 +3329,7 @@ export function updatePersonalWechatGatewayStatusAction(inputState, payload = {}
     status: payload.error ? "失败" : "成功",
     accountId: config.account.id,
     roomId: "",
-    roomName: "个人微信出站Gateway",
+    roomName: "统一出站Gateway",
     contentPreview: cleanLimitedText(payload.detail || gateway.status, "", 180),
     error: gateway.lastError,
     gatewayMode: gateway.mode,

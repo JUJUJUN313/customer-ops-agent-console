@@ -10,13 +10,13 @@
 | GET | `/api/state` | 读取前端可用系统状态；模型API Key、企微Webhook、Bot ID 和 Secret 会脱敏为空值，只返回是否已配置和掩码 |
 | GET | `/api/diagnostics` | 运行系统自检并返回报告 |
 | GET | `/api/capabilities` | 返回当前系统能力审计，标记本地可用、可运行、待建设和未接入能力 |
-| GET | `/api/chat/sessions` | 返回会话工作台统一投影，聚合企微会话存档、企微智能机器人、个人微信和本地会话；前端按电销、销售、VIP入口过滤展示 |
+| GET | `/api/chat/sessions` | 返回会话工作台统一投影，聚合企微会话存档、企微智能机器人、个人微信/Sidecar和本地调试会话；前端按电销、销售、VIP入口过滤，默认只展示真实来源 |
 | GET | `/api/chat/sessions/:sessionId` | 返回单个会话详情、消息、客户档案、待发送任务、任务和报价 |
 | GET | `/api/tasks/sla` | 返回任务SLA报表，包含超时、临期、升级和完成统计 |
 | GET | `/api/model-config` | 返回全局LLM、ASR/TTS语音模型、Agent覆盖配置和每个Agent的最终生效模型；API Key只返回掩码和是否已配置 |
 | GET | `/api/wecom/config` | 返回企微连接配置、智能机器人状态、群绑定、路由、入站设置和最近发送/入站日志；Webhook、Bot ID、Secret和入站Secret只返回掩码和是否已配置 |
 | GET | `/api/wecom/aibot/check` | 检查企微智能机器人 Bot ID/Secret 是否完整，返回 bridge 启动条件和当前连接状态 |
-| GET | `/api/personal-wechat/config` | 返回个人微信单账号 AccountAgent 配置、群上下文、发送队列、决策和运行日志 |
+| GET | `/api/personal-wechat/config` | 返回统一出站Sidecar/AccountAgent 配置、Sidecar能力声明、群上下文、发送队列、决策和运行日志 |
 | GET | `/api/outbound-drafts` | 返回触达草稿队列、客户信息和待确认/已复制/已处理等统计 |
 
 ## 写入接口
@@ -44,19 +44,19 @@
 | POST | `/api/wecom/config` | 保存企微测试群机器人Webhook、企微智能机器人Bot ID/Secret、发送模式和本地入站设置 |
 | POST | `/api/wecom/archive/check-sidecar` | 检查会话存档Sidecar配置完整度，并尝试访问 `sidecarUrl/health`，结果回写存档状态和企微日志 |
 | POST | `/api/wecom/aibot/status` | bridge 进程回写长连接启动、认证、断开、错误和最后连接时间 |
-| POST | `/api/wecom/archive/status` | 会话存档Gateway回写启动、拉取、Sidecar连接、游标、seq、错误和可信状态 |
+| POST | `/api/wecom/archive/status` | 会话存档Gateway回写启动、拉取、ACK、Sidecar连接、游标、seq、错误和可信状态 |
 | POST | `/api/wecom/group-bindings` | 把企微 `chatid` 绑定到客户档案和业务渠道 |
 | POST | `/api/chat/sessions/:sessionId/reply` | 在会话工作台回复；外部群低风险进入SendScheduler，高风险进入人工确认，本地会话只保存草稿 |
 | POST | `/api/chat/sessions/:sessionId/bind-customer` | 把外部群会话绑定到真实客户档案 |
 | POST | `/api/wecom/test-send` | 真实调用企微群机器人Webhook发送测试消息，结果写入 `wecomLogs` |
 | POST | `/api/wecom/inbound` | 写入企微模拟或长连接入站消息，按 `chatid` 独立归档并路由到本地Agent |
 | POST | `/api/wecom/archive/inbound` | 写入企微会话内容存档标准化入站消息，按 `roomId/chatId` 去重、归档并进入AccountAgent和SendScheduler链路 |
-| POST | `/api/personal-wechat/config` | 保存个人微信单账号 AccountAgent 配置 |
-| POST | `/api/personal-wechat/gateway/check` | 检查个人微信Gateway模式和Sidecar配置；Mock模式直接通过，Sidecar模式尝试访问 `sidecarUrl/health` 并写入运行日志 |
+| POST | `/api/personal-wechat/config` | 保存统一出站Sidecar/AccountAgent 配置 |
+| POST | `/api/personal-wechat/gateway/check` | 检查出站Sidecar模式和配置；Mock模式只记录本地演练，Sidecar模式访问 `sidecarUrl/health` 并读取 `canSend/sendMode/supportsConfirm/supportsRecall` |
 | POST | `/api/personal-wechat/inbound` | 写入个人微信外部群入站消息，按 `roomId` 维护群上下文、决策和发送队列 |
-| POST | `/api/personal-wechat/send-scheduler/run` | 运行个人微信 SendScheduler；Mock模式将 `queued` 调度为 `sent_pending_confirm`，Sidecar模式将 `queued` 调度为 `sending` |
+| POST | `/api/personal-wechat/send-scheduler/run` | 运行 SendScheduler；Mock模式将 `queued` 调度为 `sent_pending_confirm` 用于本地演练，Sidecar模式必须 `canSend=true` 才会把 `queued` 调度为 `sending` |
 | POST | `/api/personal-wechat/send-jobs/:jobId/approve` | 人工放行高风险 `manual_required` 任务，放行后回到 `queued` 等待调度 |
-| POST | `/api/personal-wechat/send-jobs/:jobId/dispatched` | 个人微信出站Sidecar回写“已提交发送”，任务进入 `sent_pending_confirm` 等待回读 |
+| POST | `/api/personal-wechat/send-jobs/:jobId/dispatched` | 统一出站Sidecar回写“已提交发送”，任务进入 `sent_pending_confirm` 等待回读 |
 | POST | `/api/personal-wechat/send-jobs/:jobId/confirm` | 自回显或企微存档回读确认，把 `sent_pending_confirm/sending/sent` 任务标记为 `confirmed` |
 | POST | `/api/personal-wechat/send-jobs/:jobId/fail` | 标记个人微信Gateway发送失败，写入失败退避、账号错误和运行日志 |
 | POST | `/api/quotes` | 新增或更新报价 |
@@ -217,7 +217,7 @@ npm run wecom:archive -- --check
 npm run wecom:archive -- --once
 ```
 
-`wecom:archive` 默认调用 `archive.sidecarUrl + /pull`。Sidecar 可接官方会话存档SDK，也可接你参考的企微/微信协议服务；Sidecar 必须返回已解密和标准化的消息数组，系统不直接绑定某个协议供应商。建议 Sidecar 层统一封装实例健康、登录态、消息回调、发送文本/群@、标记已读、联系人/群同步和CDN文件处理。
+`wecom:archive` 默认调用 `archive.sidecarUrl + /pull`。Sidecar 可接官方会话存档SDK，也可接你参考的企微/微信协议服务；Sidecar 必须返回已解密和标准化的消息数组，系统不直接绑定某个协议供应商。入站成功后脚本会调用 `archive.sidecarUrl + /ack` 回写 `cursor/seq/messageIds`，避免外部Sidecar重复推送已经处理的消息。建议 Sidecar 层统一封装实例健康、登录态、消息回调、发送文本/群@、标记已读、联系人/群同步和CDN文件处理。
 
 检查会话存档Sidecar：
 
@@ -225,7 +225,7 @@ npm run wecom:archive -- --once
 {}
 ```
 
-`/api/wecom/archive/check-sidecar` 不会发送企微Secret或RSA私钥，只检查本地配置完整度，并访问 `archive.sidecarUrl + /health`。配置缺失会返回 `missing`；Sidecar不可达会把会话存档状态写成 `检查失败`。
+`/api/wecom/archive/check-sidecar` 不会发送企微Secret或RSA私钥，只检查本地配置完整度，并访问 `archive.sidecarUrl + /health`。配置缺失会返回 `missing`；Sidecar不可达或未声明可拉取/可解密能力时会把会话存档状态写成 `检查失败`。
 
 企微测试发送：
 
@@ -271,7 +271,11 @@ npm run wecom:archive -- --once
   "gateway": {
     "mode": "mock",
     "sidecarUrl": "http://127.0.0.1:8791",
-    "sendEndpoint": "/send"
+    "sendEndpoint": "/send",
+    "canSend": false,
+    "sendMode": "proactive",
+    "supportsConfirm": false,
+    "supportsRecall": false
   },
   "account": {
     "id": "personal_wx_default",
@@ -288,8 +292,8 @@ npm run wecom:archive -- --once
 
 `gateway.mode` 支持：
 
-- `mock`：本地验证模式，运行SendScheduler后任务进入 `sent_pending_confirm`，不会调用外部服务。
-- `sidecar`：真实出站骨架模式，运行SendScheduler后任务进入 `sending`，由 `npm run personal-wechat:gateway` 调用 `sidecarUrl + sendEndpoint`。
+- `mock`：本地演练模式，运行SendScheduler后任务进入 `sent_pending_confirm`，不会调用外部服务，不能视为真实发送。
+- `sidecar`：真实出站模式，必须先由 `/health` 声明 `canSend=true`，运行SendScheduler后任务才会进入 `sending`，由 `npm run personal-wechat:gateway` 调用 `sidecarUrl + sendEndpoint`。
 - `disabled`：停用出站调度，任务保持待处理并写入Gateway停用日志。
 
 个人微信外部群入站：
@@ -327,7 +331,7 @@ npm run wecom:archive -- --once
 }
 ```
 
-`/api/wecom/archive/inbound` 当前是生产会话存档Gateway的本地可验证入口：它不执行真实企微拉取或解密，只接收已标准化的存档消息，回写 `wecomConfig.archive.cursor/status/lastPulledAt`，再复用AccountAgent的群上下文、去重、风控和发送调度链路。
+`/api/wecom/archive/inbound` 是生产会话存档Gateway的主入站入口：主系统不直接执行企微SDK拉取或解密，只接收Sidecar已标准化的存档消息，回写 `wecomConfig.archive.cursor/status/lastPulledAt`，再复用AccountAgent的群上下文、去重、风控和发送调度链路。非文本消息第一版以占位文本入站，并生成客服人工查看任务。
 
 会话工作台列表：
 
@@ -362,7 +366,7 @@ npm run wecom:archive -- --once
 }
 ```
 
-外部群会话回复会进入 `PersonalWechatSendJob`：低风险为 `queued`，高风险为 `manual_required`。本地模拟会话没有真实出站通道，因此只生成 `OutboundDraft`，不会标记真实发送。
+外部群会话回复会进入 `PersonalWechatSendJob`：低风险为 `queued`，高风险为 `manual_required`。本地调试会话没有真实出站通道，因此只生成 `OutboundDraft`，不会标记真实发送。
 
 运行个人微信发送调度：
 
@@ -373,7 +377,7 @@ npm run wecom:archive -- --once
 }
 ```
 
-`/api/personal-wechat/send-scheduler/run` 只调度 `queued` 低风险任务或已经人工放行的高风险任务。调度会执行同群FIFO、账号并发 `concurrency`、最小发送间隔、分钟发送上限、队列过期重判和失败退避检查。Mock模式通过后任务状态变为 `sent_pending_confirm`；Sidecar模式通过后任务状态变为 `sending`，等待出站Gateway真实提交发送。
+`/api/personal-wechat/send-scheduler/run` 只调度 `queued` 低风险任务或已经人工放行的高风险任务。调度会执行同群FIFO、账号并发 `concurrency`、最小发送间隔、分钟发送上限、队列过期重判、Gateway能力声明和失败退避检查。Mock模式通过后任务状态变为 `sent_pending_confirm`，只用于本地演练；Sidecar模式必须 `canSend=true` 才会变为 `sending`，等待出站Gateway真实提交发送。
 
 人工放行高风险任务：
 
@@ -397,7 +401,7 @@ npm run wecom:archive -- --once
 }
 ```
 
-`/api/personal-wechat/send-jobs/:jobId/dispatched` 由个人微信出站Sidecar调用，表示外部发送服务已经提交发送。任务会进入 `sent_pending_confirm`，但仍不算闭环完成，必须等待自回显或企微会话存档回读确认。
+`/api/personal-wechat/send-jobs/:jobId/dispatched` 由统一出站Sidecar调用，表示外部发送服务已经提交发送。任务会进入 `sent_pending_confirm`，但仍不算闭环完成，必须等待自回显或企微会话存档回读确认。
 
 确认个人微信发送任务：
 
@@ -409,7 +413,7 @@ npm run wecom:archive -- --once
 
 `/api/personal-wechat/send-jobs/:jobId/confirm` 用于 Mock 自回显或企微存档回读确认，会把发送任务标记为 `confirmed`，把回复写入本地会话和客户事件。该接口不是发送动作，不能用于把 `queued/manual_required` 任务直接改成已发送。
 
-启动个人微信出站Sidecar调度器：
+启动统一出站Sidecar调度器：
 
 ```bash
 npm run personal-wechat:gateway
@@ -427,7 +431,7 @@ npm run personal-wechat:gateway -- --check
 npm run personal-wechat:gateway -- --once
 ```
 
-`personal-wechat:gateway` 会读取 `/api/personal-wechat/config`，只处理 `status=sending` 的任务，并调用 `gateway.sidecarUrl + gateway.sendEndpoint`。Sidecar成功返回后脚本调用 `dispatched`，失败时调用 `fail`。真实登录态、协议发送、二维码托管、自回显监听和账号风控仍由外部Sidecar承担。
+`personal-wechat:gateway` 会读取 `/api/personal-wechat/config`，只有 `gateway.canSend=true` 时才处理 `status=sending` 的任务，并调用 `gateway.sidecarUrl + gateway.sendEndpoint`。Sidecar成功返回后脚本调用 `dispatched`，失败时调用 `fail`。真实登录态、协议发送、二维码托管、自回显监听和账号风控仍由外部Sidecar承担。
 
 检查个人微信Gateway：
 
@@ -435,7 +439,7 @@ npm run personal-wechat:gateway -- --once
 {}
 ```
 
-`/api/personal-wechat/gateway/check` 在 `mock` 模式下会记录“Mock检查通过”；在 `sidecar` 模式下会访问 `gateway.sidecarUrl + /health` 并把结果写入 `personalWechat.gateway.status`、运行日志和审计。检查不发送消息，也不携带客户消息内容。
+`/api/personal-wechat/gateway/check` 在 `mock` 模式下会记录“Mock检查通过”且 `canSend=false`；在 `sidecar` 模式下会访问 `gateway.sidecarUrl + /health`，读取 `canSend`、`sendMode`、`supportsConfirm`、`supportsRecall`，并把结果写入 `personalWechat.gateway.status`、运行日志和审计。检查不发送消息，也不携带客户消息内容。
 
 标记个人微信发送失败：
 

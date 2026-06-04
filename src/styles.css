@@ -625,6 +625,28 @@ h3 {
   gap: 12px;
 }
 
+.advanced-debug-panel {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fbfdff;
+}
+
+.advanced-debug-panel > summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: #334155;
+  list-style-position: inside;
+}
+
+.advanced-debug-panel[open] > summary {
+  margin-bottom: 10px;
+}
+
+.subtle-panel {
+  background: #f8fafc;
+}
+
 .integration-card {
   border: 1px solid var(--line);
   border-radius: 8px;

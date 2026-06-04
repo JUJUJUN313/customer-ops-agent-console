@@ -63,6 +63,11 @@ async function runOnce() {
     return { checked: true, dispatched: 0, failed: 0, message };
   }
   if (!gateway.sidecarUrl) throw new Error("Personal WeChat sidecarUrl is required");
+  if (gateway.canSend !== true) {
+    const message = "Personal WeChat sidecar is reachable only after /health declares canSend=true.";
+    if (check) console.log(message);
+    return { checked: true, dispatched: 0, failed: 0, message, canSend: false };
+  }
   const jobs = (config.sendJobs || []).filter((job) => job.status === "sending");
   if (check) {
     console.log(JSON.stringify({
@@ -70,6 +75,10 @@ async function runOnce() {
       apiBase,
       sidecarUrl: gateway.sidecarUrl,
       sendEndpoint: gateway.sendEndpoint || "/send",
+      canSend: Boolean(gateway.canSend),
+      sendMode: gateway.sendMode || "proactive",
+      supportsConfirm: Boolean(gateway.supportsConfirm),
+      supportsRecall: Boolean(gateway.supportsRecall),
       sendingJobs: jobs.length
     }, null, 2));
     return { checked: true, dispatched: 0, failed: 0 };
