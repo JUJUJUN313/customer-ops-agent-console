@@ -1426,7 +1426,7 @@ function dispatchPersonalWechatJobs(state, payload = {}) {
       continue;
     }
     if (gateway.mode === "sidecar" && !gateway.sidecarUrl) {
-      job.error = "个人微信Sidecar地址未配置，任务保持待发送。";
+      job.error = "个人微信连接器地址未配置，任务保持待发送。";
       skipped.push(job.jobId);
       appendPersonalWechatLog(state, {
         type: "Gateway未配置",
@@ -3359,7 +3359,7 @@ export function updatePersonalWechatGatewayStatusAction(inputState, payload = {}
   if (payload.cursor !== undefined) gateway.cursor = cleanLimitedText(payload.cursor, gateway.cursor || "", 220);
   if (payload.lastPulledAt !== undefined) gateway.lastPulledAt = cleanLimitedText(payload.lastPulledAt, gateway.lastPulledAt || "", 80);
   if (payload.lastAckAt !== undefined) gateway.lastAckAt = cleanLimitedText(payload.lastAckAt, gateway.lastAckAt || "", 80);
-  if (!payload.error && (payload.connected === true || payload.status === "检查通过" || payload.status === "Sidecar可达")) {
+  if (!payload.error && (payload.connected === true || payload.status === "检查通过" || payload.status === "Sidecar可达" || payload.status === "连接器可用" || payload.status === "连接器可达但能力不足")) {
     gateway.lastConnectedAt = now;
   }
   gateway.lastError = cleanLimitedText(payload.error, payload.error ? "Gateway检查失败" : "", 400);
@@ -3376,7 +3376,7 @@ export function updatePersonalWechatGatewayStatusAction(inputState, payload = {}
     if (payload.loginQrCodeUrl === undefined) gateway.loginQrCodeUrl = "";
     if (payload.loginQrCodeText === undefined) gateway.loginQrCodeText = "";
   } else if (gateway.mode === "sidecar") {
-    config.account.status = gateway.loginStatus && gateway.loginStatus !== "未连接" ? gateway.loginStatus : "Sidecar可达";
+    config.account.status = gateway.loginStatus && gateway.loginStatus !== "未连接" ? gateway.loginStatus : "连接器可达";
     config.account.lastError = "";
   } else if (gateway.mode === "mock") {
     config.account.status = "Mock运行中";

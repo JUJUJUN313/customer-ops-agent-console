@@ -1008,8 +1008,8 @@ function renderTruthPanel() {
     ? "企微会话存档主读取链路已配置，可通过Sidecar拉取和ACK真实会话消息。"
     : "企微会话存档主读取链路已接好，需要补齐CorpID、Secret、RSA私钥和Sidecar后才能真实拉取。";
   const outboundStatus = outboundReady
-    ? "个人微信Sidecar已声明canSend=true，低风险回复可进入真实出站调度，仍需回读确认。"
-    : "个人微信Sidecar未声明canSend=true，回复只会入队、人工确认或保存草稿，不会伪装已发送。";
+    ? "个人微信连接器已声明canSend=true，低风险回复可进入真实出站调度，仍需回读确认。"
+    : "个人微信连接器未声明canSend=true，回复只会入队、人工确认或保存草稿，不会伪装已发送。";
   const testSendStatus = wecomReady
     ? "测试群机器人可发送人工确认后的草稿。"
     : "测试群机器人需配置Webhook后才能发送测试消息。";
@@ -1021,7 +1021,7 @@ function renderTruthPanel() {
       </div>
       <div>
         <strong>当前未接入</strong>
-        <span>真实外呼、短信发送、企微私聊读取、CRM/交易系统同步尚未接入；会话存档SDK/协议拉取、解密、客户同意、个人微信登录态和主动发送由外部Sidecar生产化承接。</span>
+        <span>真实外呼、短信发送、企微私聊读取、CRM/交易系统同步尚未接入；会话存档SDK/协议拉取、解密、客户同意、个人微信登录态和主动发送由外部连接器生产化承接。</span>
       </div>
     </section>
   `;
@@ -2619,12 +2619,12 @@ function personalWechatLoginGuide(gateway = {}, enabled = true) {
   const sendReady = healthReady && gateway.canSend === true;
   const steps = [
     {
-      title: "1. 启动真实Sidecar",
+      title: "1. 启动个人微信连接器",
       ok: enabled && sidecarMode && hasSidecarUrl && endpointReady,
       detail: sidecarMode
         ? hasSidecarUrl
-          ? "Sidecar地址和端点已填写，可以检查 /health。"
-          : "还没有填写Sidecar URL，当前无法进入扫码登录。"
+          ? "连接器地址和端点已填写，可以检查 /health。"
+          : "还没有填写个人微信连接器URL，当前无法进入扫码登录。"
         : "当前是Mock本地演练模式，不能登录真实微信。"
     },
     {
@@ -2634,10 +2634,10 @@ function personalWechatLoginGuide(gateway = {}, enabled = true) {
       detail: loggedIn
         ? `登录态：${gateway.loginStatus}`
         : hasQr
-          ? "Sidecar已返回二维码，请用测试微信扫码后重新检查。"
+          ? "连接器已返回二维码，请用测试微信扫码后重新检查。"
           : healthReady
-            ? "Sidecar可检查，但暂未返回二维码；需要Sidecar /health 提供 loginQrCodeUrl 或 loginQrCodeText。"
-            : "等待Sidecar配置完成后再获取二维码。"
+            ? "连接器可检查，但暂未返回二维码；需要连接器 /health 提供 loginQrCodeUrl 或 loginQrCodeText。"
+            : "等待连接器配置完成后再获取二维码。"
     },
     {
       title: "3. 开启收发能力",
@@ -2649,7 +2649,7 @@ function personalWechatLoginGuide(gateway = {}, enabled = true) {
           ? "已可读取消息，但未声明 canSend=true，回复不会真实外发。"
           : sendReady
             ? "已可发送，但未声明 canReceive=true，无法验证真实入站和回读。"
-            : "Sidecar /health 还未声明 canReceive=true 或 canSend=true。"
+            : "连接器 /health 还未声明 canReceive=true 或 canSend=true。"
     }
   ];
   return `
@@ -2663,6 +2663,39 @@ function personalWechatLoginGuide(gateway = {}, enabled = true) {
       `).join("")}
     </div>
   `;
+}
+
+function personalWechatConnectionNotice(gateway = {}, enabled = true) {
+  const mode = gateway.mode || "mock";
+  const realMode = mode === "sidecar";
+  const hasUrl = Boolean(gateway.sidecarUrl);
+  const hasQr = Boolean(gateway.loginQrCodeUrl || gateway.loginQrCodeText);
+  const canReceive = realMode && gateway.canReceive === true;
+  const canSend = realMode && gateway.canSend === true;
+  const loggedIn = /已登录|online|logged/i.test(gateway.loginStatus || "");
+  const status = !enabled
+    ? "个人微信托管已停用"
+    : !realMode
+      ? "未接入真实个人微信"
+      : !hasUrl
+        ? "等待填写连接器地址"
+        : hasQr && !loggedIn
+          ? "等待扫码登录"
+          : loggedIn && (canReceive || canSend)
+            ? "真实连接器可用"
+            : "连接器未就绪";
+  const detail = !enabled
+    ? "先启用个人微信托管账号。"
+    : !realMode
+      ? "当前是Mock本地演练，只能测试队列和Agent，不能登录微信。要登录测试微信，请切换为“真实连接器接入”。"
+      : !hasUrl
+        ? "请填写个人微信连接器URL。连接器是一个单独运行的微信协议服务，负责扫码、收消息、发消息和自回显监听。"
+        : hasQr && !loggedIn
+          ? "二维码已经由连接器返回，请在下方二维码区域扫码。"
+          : loggedIn && (canReceive || canSend)
+            ? "可以运行个人微信Gateway脚本拉取消息或处理发送队列。"
+            : "连接器已配置但还没声明收发能力，检查 /health 返回值里的 canReceive/canSend。";
+  return { status, detail };
 }
 
 function renderWecom() {
@@ -2700,6 +2733,7 @@ function renderWecom() {
   const personalGatewayConfigured = personalGateway.mode === "sidecar" && personalGateway.sidecarUrl && personalGateway.sendEndpoint;
   const personalGatewayCanSend = personalGatewayConfigured && personalGateway.canSend === true;
   const personalGatewayCanReceive = personalGatewayConfigured && personalGateway.canReceive === true;
+  const personalConnection = personalWechatConnectionNotice(personalGateway, personalWechat.enabled);
   const normalizedBindingSearch = wecomBindingSearchQuery.trim().toLowerCase();
   const filteredBindings = bindings.filter((binding) => {
     if (!normalizedBindingSearch) return true;
@@ -2785,15 +2819,15 @@ function renderWecom() {
           action: `<button class="small-button" type="button" data-jump-wecom-section="wecom-send-test">查看发送测试</button>`
         })}
         ${renderIntegrationCard({
-          title: "个人微信Sidecar",
-          subtitle: "个人微信接收、发送和确认出口",
-          status: personalGatewayCanSend ? personalGateway.status || "可发送" : personalGateway.mode === "mock" ? "Mock不可真实发送" : personalGateway.status || "Gateway未完成",
+          title: "个人微信连接器",
+          subtitle: "登录、接收、发送和回读确认出口",
+          status: personalConnection.status,
           tone: personalGatewayCanSend || personalGatewayCanReceive ? "success" : "warning",
-          body: personalGatewayCanSend ? "Sidecar已声明canSend=true，SendScheduler可把确认后的任务交给真实出站服务；回读确认前仍不算闭环。" : personalGatewayCanReceive ? "Sidecar已声明canReceive=true，可读取个人微信消息；但未声明发送能力，回复不会真实外发。" : "未连接可发送Sidecar时，聊天回复只会生成草稿、待发送或人工确认任务，不会显示真实已发送。",
+          body: personalConnection.detail,
           tags: [
             personalWechat.enabled ? "已启用" : "已停用",
             `模式 ${personalGateway.mode || "mock"}`,
-            personalGateway.sidecarUrl ? "Sidecar URL已填" : "无Sidecar URL",
+            personalGateway.sidecarUrl ? "连接器URL已填" : "无连接器URL",
             personalGateway.canSend ? "canSend=true" : "canSend=false",
             personalGateway.canReceive ? "canReceive=true" : "canReceive=false",
             `登录 ${personalGateway.loginStatus || "未连接"}`,
@@ -2804,9 +2838,26 @@ function renderWecom() {
             `待回读 ${personalSentJobs.length}`,
             `人工 ${personalManualJobs.length}`
           ],
-          action: `<button class="small-button" id="checkPersonalWechatGateway" type="button" ${actionAttrs("personal-wechat-gateway-check")}>检查个人微信Sidecar</button>`
+          action: `<button class="small-button" id="checkPersonalWechatGateway" type="button" ${actionAttrs("personal-wechat-gateway-check")}>检查个人微信连接器</button>`
         })}
       </div>
+    </section>
+
+    <section class="panel ${personalGatewayCanSend || personalGatewayCanReceive ? "success-card" : "warning-panel"}" id="personal-wechat-connector">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">连接个人微信</h2>
+          <p class="panel-subtitle">这里才是真实个人微信接入入口。要登录测试微信，必须先启动一个“个人微信连接器”程序；系统会从连接器获取二维码并展示在下方。</p>
+        </div>
+        <button class="small-button" id="checkPersonalWechatGatewayInline" type="button" ${actionAttrs("personal-wechat-gateway-check-inline")}>检查连接器</button>
+      </div>
+      <div class="connector-status-grid">
+        <div><span>当前状态</span><strong>${escapeHtml(personalConnection.status)}</strong></div>
+        <div><span>登录位置</span><strong>${personalGateway.loginQrCodeUrl || personalGateway.loginQrCodeText ? "下方二维码区域" : "等待连接器返回二维码"}</strong></div>
+        <div><span>连接器地址</span><strong>${escapeHtml(personalGateway.sidecarUrl || "未填写")}</strong></div>
+        <div><span>真实收发</span><strong>${personalGatewayCanReceive || personalGatewayCanSend ? "部分就绪" : "未就绪"}</strong></div>
+      </div>
+      <p class="panel-subtitle">${escapeHtml(personalConnection.detail)}</p>
     </section>
 
     <section class="grid four">
@@ -2821,8 +2872,8 @@ function renderWecom() {
       <article class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">个人微信Sidecar与AccountAgent</h2>
-            <p class="panel-subtitle">真实读取、发送和回读确认都通过Sidecar接入；Mock只做本地演练，不代表真实发回群。</p>
+            <h2 class="panel-title">个人微信连接器与AccountAgent</h2>
+            <p class="panel-subtitle">真实登录、读取、发送和回读确认都通过个人微信连接器接入；Mock只做本地演练，不代表真实发回群。</p>
           </div>
         </div>
         <div class="form-grid compact-form">
@@ -2834,16 +2885,16 @@ function renderWecom() {
           <div class="field"><label>账号名称</label><input name="account.name" value="${escapeHtml(personalAccount.name)}"></div>
           <div class="field"><label>群内显示名</label><input name="account.displayName" value="${escapeHtml(personalAccount.displayName)}"></div>
           <div class="field"><label>默认客户</label><select name="account.defaultCustomerId">${customerOptions(personalDefaultCustomer)}</select></div>
-          <div class="field"><label>Gateway模式</label><select name="gateway.mode"><option value="mock" ${personalGateway.mode === "mock" ? "selected" : ""}>Mock本地演练</option><option value="sidecar" ${personalGateway.mode === "sidecar" ? "selected" : ""}>Sidecar真实接入</option><option value="disabled" ${personalGateway.mode === "disabled" ? "selected" : ""}>停用Gateway</option></select></div>
-          <div class="field"><label>Sidecar URL</label><input name="gateway.sidecarUrl" value="${escapeHtml(personalGateway.sidecarUrl || "")}" placeholder="http://127.0.0.1:8788"></div>
+          <div class="field"><label>接入模式</label><select name="gateway.mode"><option value="mock" ${personalGateway.mode === "mock" ? "selected" : ""}>Mock本地演练</option><option value="sidecar" ${personalGateway.mode === "sidecar" ? "selected" : ""}>真实连接器接入</option><option value="disabled" ${personalGateway.mode === "disabled" ? "selected" : ""}>停用连接器</option></select></div>
+          <div class="field"><label>连接器URL</label><input name="gateway.sidecarUrl" value="${escapeHtml(personalGateway.sidecarUrl || "")}" placeholder="http://127.0.0.1:8788"></div>
           <div class="field"><label>发送端点</label><input name="gateway.sendEndpoint" value="${escapeHtml(personalGateway.sendEndpoint || "/send")}"></div>
           <div class="field"><label>拉取端点</label><input name="gateway.receiveEndpoint" value="${escapeHtml(personalGateway.receiveEndpoint || "/messages")}"></div>
           <div class="field"><label>ACK端点</label><input name="gateway.ackEndpoint" value="${escapeHtml(personalGateway.ackEndpoint || "/ack")}"></div>
-          <div class="field"><label>Gateway状态</label><input value="${escapeHtml(personalGateway.status || "未配置")}" disabled></div>
-          <div class="field"><label>发送能力</label><input value="${personalGateway.canSend ? "canSend=true，可交给真实Sidecar" : "canSend=false，不能真实发送"}" disabled></div>
+          <div class="field"><label>连接器状态</label><input value="${escapeHtml(personalGateway.status || "未配置")}" disabled></div>
+          <div class="field"><label>发送能力</label><input value="${personalGateway.canSend ? "canSend=true，可交给真实连接器" : "canSend=false，不能真实发送"}" disabled></div>
           <div class="field"><label>接收能力</label><input value="${personalGateway.canReceive ? "canReceive=true，可读取消息" : "canReceive=false，不能真实读取"}" disabled></div>
           <div class="field"><label>登录状态</label><input value="${escapeHtml(personalGateway.loginStatus || "未连接")}" disabled></div>
-          <div class="field"><label>扫码登录</label><input value="${personalGateway.loginQrCodeUrl || personalGateway.loginQrCodeText ? "Sidecar已返回二维码，请扫码登录" : "暂无二维码"}" disabled></div>
+          <div class="field"><label>扫码登录</label><input value="${personalGateway.loginQrCodeUrl || personalGateway.loginQrCodeText ? "连接器已返回二维码，请扫码登录" : "暂无二维码"}" disabled></div>
           <div class="field"><label>发送模式</label><input value="${escapeHtml(personalGateway.sendMode || "proactive")}" disabled></div>
           <div class="field"><label>ACK/回读/撤回</label><input value="${personalGateway.supportsAck ? "支持ACK" : "未声明ACK"} / ${personalGateway.supportsConfirm ? "支持回读" : "未声明回读"} / ${personalGateway.supportsRecall ? "支持撤回" : "未声明撤回"}" disabled></div>
           <label class="inline-check compact-check"><input name="account.autoReply" type="checkbox" value="true" ${personalAccount.autoReply ? "checked" : ""}><span>低风险自动排队</span></label>
@@ -2854,19 +2905,19 @@ function renderWecom() {
           <div class="field"><label>队列过期秒</label><input name="account.maxQueueAgeSeconds" type="number" min="15" max="600" value="${escapeHtml(personalAccount.maxQueueAgeSeconds)}"></div>
           <div class="field"><label>失败退避秒</label><input name="account.failureBackoffSeconds" type="number" min="5" max="600" value="${escapeHtml(personalAccount.failureBackoffSeconds)}"></div>
           <div class="field"><label>连续消息合并秒</label><input name="account.mergeWindowSeconds" type="number" min="5" max="300" value="${escapeHtml(personalAccount.mergeWindowSeconds)}"></div>
-          <button class="primary-button full-span" type="submit" ${actionAttrs("save-personal-wechat-config")}>保存个人微信配置</button>
+          <button class="primary-button full-span" type="submit" ${actionAttrs("save-personal-wechat-config")}>保存个人微信连接配置</button>
         </div>
         <div class="info-box">
           <strong>真实个人微信登录条件</strong>
-          <p>主系统不能直接登录微信；只有外部Sidecar运行并在 /health 返回登录二维码或已登录状态后，才能进入扫码测试。</p>
+          <p>主系统不能直接登录微信；只有外部个人微信连接器运行并在 /health 返回登录二维码或已登录状态后，才能进入扫码测试。连接器就是单独负责微信扫码登录和收发消息的本地/服务器程序。</p>
           ${personalWechatLoginGuide(personalGateway, personalWechat.enabled)}
         </div>
         ${personalGateway.loginQrCodeUrl || personalGateway.loginQrCodeText ? `<div class="info-box qr-login-box">
           <strong>需要扫码登录个人微信</strong>
-          <p>${personalGateway.loginQrCodeUrl ? `二维码链接：${escapeHtml(personalGateway.loginQrCodeUrl)}` : "Sidecar已返回二维码文本，请在Sidecar控制台或二维码工具中扫码。"}</p>
+          <p>${personalGateway.loginQrCodeUrl ? `二维码链接：${escapeHtml(personalGateway.loginQrCodeUrl)}` : "连接器已返回二维码文本，请在连接器控制台或二维码工具中扫码。"}</p>
           ${personalGateway.loginQrCodeUrl ? `<img class="qr-preview" src="${escapeHtml(personalGateway.loginQrCodeUrl)}" alt="个人微信登录二维码">` : ""}
           ${personalGateway.loginQrCodeText ? `<textarea readonly>${escapeHtml(personalGateway.loginQrCodeText)}</textarea>` : ""}
-          <p>扫码后点击“检查个人微信Sidecar”，确认登录态变成已登录，并且Sidecar声明 canReceive=true 或 canSend=true。</p>
+          <p>扫码后点击“检查个人微信连接器”，确认登录态变成已登录，并且连接器声明 canReceive=true 或 canSend=true。</p>
         </div>` : ""}
       </article>
 
@@ -2874,7 +2925,7 @@ function renderWecom() {
         <div class="panel-header">
           <div>
             <h2 class="panel-title">运行边界</h2>
-            <p class="panel-subtitle">Mock模式只做本地验证；Sidecar模式会等待真实出站网关回调，回调前不会标记真实已发送。</p>
+            <p class="panel-subtitle">Mock模式只做本地验证；真实连接器模式会等待外部网关回调，回调前不会标记真实已发送。</p>
           </div>
         </div>
         <div class="event-list">
@@ -2886,9 +2937,9 @@ function renderWecom() {
               </div>
               <span class="status-pill">${personalAccount.autoReply ? "低风险自动" : "全部人工确认"}</span>
             </div>
-            <p class="event-text">发消息由SendScheduler受控调度：同群FIFO、账号限频、超过队列时效重判；只有Sidecar声明canSend=true时才会真实外发。</p>
+            <p class="event-text">发消息由SendScheduler受控调度：同群FIFO、账号限频、超过队列时效重判；只有个人微信连接器声明canSend=true时才会真实外发。</p>
             <div class="tag-list">
-              <span class="tag">Gateway ${escapeHtml(personalGateway.mode)}</span>
+              <span class="tag">连接器 ${escapeHtml(personalGateway.mode)}</span>
               ${personalGateway.sidecarUrl ? `<span class="tag">${escapeHtml(personalGateway.sidecarUrl)}${escapeHtml(personalGateway.sendEndpoint || "/send")}</span>` : ""}
               <span class="tag">${escapeHtml(personalGateway.status || "未配置")}</span>
               <span class="tag">${personalGateway.canSend ? "可真实发送" : "不可真实发送"}</span>
@@ -3742,7 +3793,7 @@ function renderChatSidePanel(session) {
           <div><span>最近来源</span><strong>${escapeHtml(session?.sourceLabel || "未知")}</strong></div>
           <div><span>出站模式</span><strong>${escapeHtml(gateway.mode || "mock")}</strong></div>
           <div><span>发送能力</span><strong>${gateway.mode === "sidecar" && gateway.canSend ? "可真实发送" : "不可真实发送"}</strong></div>
-          <div><span>回读确认</span><strong>${gateway.supportsConfirm ? "Sidecar声明支持" : "依赖自回显/存档回读"}</strong></div>
+          <div><span>回读确认</span><strong>${gateway.supportsConfirm ? "连接器声明支持" : "依赖自回显/存档回读"}</strong></div>
         </div>
       </section>
       <section>
@@ -4892,14 +4943,19 @@ document.addEventListener("click", (event) => {
     });
     return;
   }
-  if (event.target.closest("#checkPersonalWechatGateway")) {
+  if (event.target.closest("#checkPersonalWechatGateway") || event.target.closest("#checkPersonalWechatGatewayInline")) {
     void withBusy("personal-wechat-gateway-check", async () => {
       try {
         const result = await api.checkPersonalWechatGateway();
         if (result.state) setState(result.state);
-        showToast(result.ok ? "个人微信Gateway检查通过" : `个人微信Gateway检查未通过：${(result.missing || []).join("、") || result.error || "请查看状态"}`);
+        const message = result.ok
+          ? "个人微信连接器已就绪"
+          : result.mode === "mock"
+            ? "当前是Mock本地演练，未接入真实个人微信；请切换为真实连接器接入并填写连接器URL。"
+            : `个人微信连接器未就绪：${(result.missing || []).join("、") || result.error || result.nextStep || "请查看状态"}`;
+        showToast(message);
       } catch (error) {
-        showToast(`个人微信Gateway检查失败：${error.message}`);
+        showToast(`个人微信连接器检查失败：${error.message}`);
       }
     });
     return;

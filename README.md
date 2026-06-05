@@ -216,7 +216,7 @@ data/state.json
 
 ### 个人微信AccountAgent
 
-当前个人微信链路支持 Mock 演练和统一 Sidecar 接收/发送联调：
+当前个人微信链路支持 Mock 演练和统一“个人微信连接器”接收/发送联调。这里的连接器就是之前文档里的 Sidecar：它是一个单独运行的微信协议服务，负责扫码登录、保持登录态、读取消息、发送消息和监听自回显；本系统负责把连接器返回的消息转成客户会话、Agent任务、发送队列和审计。
 
 - 一个个人微信账号对应一个 `AccountAgent`。
 - 一个账号维护多个外部群上下文。
@@ -224,8 +224,8 @@ data/state.json
 - 高风险报价、锁价、退款、赔偿、付款、合同、责任承诺进入人工确认。
 - 高风险任务必须人工放行后才会回到 `queued`。
 - SendScheduler负责同群FIFO、账号并发、分钟上限、过期重判和失败退避。
-- Sidecar模式的 `/health` 会声明 `canReceive`、`canSend`、`supportsAck`、`supportsConfirm`、`loginStatus` 等能力。
-- 主系统不会直接登录微信；真实扫码登录由外部Sidecar完成。Sidecar `/health` 返回 `loginQrCodeUrl` 或 `loginQrCodeText` 后，企微接入页会展示登录向导和二维码预览，扫码后重新检查登录态。
+- 真实连接器模式的 `/health` 会声明 `canReceive`、`canSend`、`supportsAck`、`supportsConfirm`、`loginStatus` 等能力。
+- 主系统不会直接登录微信；真实扫码登录由外部个人微信连接器完成。连接器 `/health` 返回 `loginQrCodeUrl` 或 `loginQrCodeText` 后，企微接入页会展示登录向导和二维码预览，扫码后重新检查登录态。
 - `npm run personal-wechat:gateway` 可从 `receiveEndpoint` 拉取真实个人微信消息，写入 `/api/personal-wechat/inbound`，成功后调用 `ackEndpoint` 回写游标。
 - Mock模式下调度后进入 `sent_pending_confirm`，只用于本地流程验证，不代表真实发送。
 - Sidecar模式必须先通过 `/health` 声明 `canSend=true`，调度后才会进入 `sending`，由 `npm run personal-wechat:gateway` 调用外部发送服务；Gateway回调后进入 `sent_pending_confirm`。

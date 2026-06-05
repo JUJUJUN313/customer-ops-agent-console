@@ -417,7 +417,9 @@ Sidecar建议至少提供：
 
 ### 6.12 个人微信Sidecar与AccountAgent
 
-企微接入页还有个人微信Sidecar与单账号 AccountAgent 区域，用于验证“一个托管号加入多个外部群，一个账号对应一个Agent”的产品链路。当前支持 Mock 本地验证和 Sidecar 接收/发送对接；真实个人微信登录、协议收发、二维码托管、自回显监听和账号风控由外部Sidecar承担。
+企微接入页还有“个人微信连接器与单账号 AccountAgent”区域，用于验证“一个托管号加入多个外部群，一个账号对应一个Agent”的产品链路。当前支持 Mock 本地验证和真实连接器接收/发送对接；真实个人微信登录、协议收发、二维码托管、自回显监听和账号风控由外部个人微信连接器承担。
+
+这里的“个人微信连接器”就是技术文档里的 Sidecar：它不是系统页面里的一个按钮，而是一个单独运行的微信协议服务。你真正扫码登录的位置在连接器返回的二维码里；本系统只负责展示这个二维码、读取连接器健康状态、接收标准消息和调度发送队列。
 
 当前能力：
 
@@ -430,10 +432,10 @@ Sidecar建议至少提供：
 - 员工或托管号已回复时取消同群待发。
 - SendScheduler按同群FIFO、账号并发、分钟上限、队列过期和失败退避调度发送。
 - Mock模式下调度后进入“已提交待回读”，不会调用外部服务。
-- Sidecar模式通过 `/health` 声明 `canReceive=true` 后，可由 `npm run personal-wechat:gateway` 拉取真实个人微信消息并ACK；声明 `canSend=true` 后，调度任务才会进入“发送中”并调用外部Sidecar发送。
-- Sidecar成功回调后进入“已提交待回读”；下一轮拉到自回显或确认回执后才进入“已确认”。
+- 真实连接器模式通过 `/health` 声明 `canReceive=true` 后，可由 `npm run personal-wechat:gateway` 拉取真实个人微信消息并ACK；声明 `canSend=true` 后，调度任务才会进入“发送中”并调用外部连接器发送。
+- 连接器成功回调后进入“已提交待回读”；下一轮拉到自回显或确认回执后才进入“已确认”。
 - 回读确认后才写入本地会话和客户事件。
-- 主系统不能直接登录微信。真实扫码登录由外部Sidecar负责；当 `/health` 返回 `loginQrCodeUrl` 或 `loginQrCodeText` 时，企微接入页会展示登录向导和二维码预览，扫码后再次点击“检查个人微信Sidecar”确认登录态和收发能力。
+- 主系统不能直接登录微信。真实扫码登录由外部个人微信连接器负责；当 `/health` 返回 `loginQrCodeUrl` 或 `loginQrCodeText` 时，企微接入页会展示登录向导和二维码预览，扫码后再次点击“检查个人微信连接器”确认登录态和收发能力。
 
 推荐测试步骤：
 
@@ -448,9 +450,9 @@ Sidecar建议至少提供：
 
 验证Sidecar接收和出站：
 
-1. 将个人微信Gateway模式改为“Sidecar真实发送”。
+1. 将个人微信接入模式改为“真实连接器接入”。
 2. 填入 `sidecarUrl`、`sendEndpoint`、`receiveEndpoint`、`ackEndpoint`，保存配置。
-3. 运行 `npm run personal-wechat:gateway -- --check`，确认Sidecar能力中 `canReceive=true`、`canSend=true`、`supportsAck=true` 和登录态正常；如果检查结果显示 `qrCodeAvailable=true`，先扫码登录个人微信后再继续。
+3. 运行 `npm run personal-wechat:gateway -- --check`，或在页面点击“检查个人微信连接器”，确认连接器能力中 `canReceive=true`、`canSend=true`、`supportsAck=true` 和登录态正常；如果检查结果显示 `qrCodeAvailable=true` 或页面出现二维码，先扫码登录个人微信后再继续。
 4. 运行 `npm run personal-wechat:gateway -- --once`，确认真实个人微信消息被拉取到会话工作台，并且ACK游标写入Gateway状态。
 5. 运行发送调度，确认低风险任务进入 `sending`。
 6. 再运行 `npm run personal-wechat:gateway -- --once`，由脚本调用外部Sidecar发送接口，任务进入 `sent_pending_confirm`。
@@ -459,9 +461,9 @@ Sidecar建议至少提供：
 
 当前边界：
 
-- 默认Mock模式不连接真实个人微信，也不真实发送个人微信消息。
-- Sidecar模式只有在 `canReceive=true` 后才会拉取个人微信消息；只有在 `canSend=true` 后才会把 `sending` 任务交给外部发送服务。
-- 外部Sidecar必须自己保证登录态、扫码托管、协议收发、发送成功、自回显监听、风控和失败回调。
+- 默认Mock模式不连接真实个人微信，也不真实发送个人微信消息，页面会显示“未接入真实个人微信”。
+- 真实连接器模式只有在 `canReceive=true` 后才会拉取个人微信消息；只有在 `canSend=true` 后才会把 `sending` 任务交给外部发送服务。
+- 外部个人微信连接器必须自己保证登录态、扫码托管、协议收发、发送成功、自回显监听、风控和失败回调。
 - 主系统不会把“已提交发送”当成闭环完成，必须等自回显或会话存档回读确认。
 
 ### 6.13 闭环编排

@@ -1617,7 +1617,7 @@ test("个人微信Gateway健康检查状态会写入日志和账号状态", () =
     }
   });
   state = updatePersonalWechatGatewayStatusAction(state, {
-    status: "Sidecar可达",
+    status: "连接器可用",
     connected: true,
     canSend: true,
     canReceive: true,
@@ -1633,7 +1633,7 @@ test("个人微信Gateway健康检查状态会写入日志和账号状态", () =
     lastAckAt: "2026-06-04T10:40:01.000Z",
     detail: "Sidecar健康检查 200，12ms"
   });
-  assert.equal(state.personalWechat.gateway.status, "Sidecar可达");
+  assert.equal(state.personalWechat.gateway.status, "连接器可用");
   assert.equal(state.personalWechat.gateway.canSend, true);
   assert.equal(state.personalWechat.gateway.canReceive, true);
   assert.equal(state.personalWechat.gateway.sendMode, "reply_window");

@@ -749,6 +749,38 @@ h3 {
   gap: 8px;
 }
 
+.connector-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.connector-status-grid > div {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  min-width: 0;
+}
+
+.connector-status-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.connector-status-grid strong {
+  display: block;
+  color: var(--ink);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .login-step {
   border: 1px solid var(--border);
   border-radius: 8px;

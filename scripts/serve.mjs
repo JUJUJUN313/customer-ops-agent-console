@@ -353,7 +353,7 @@ async function handleApi(req, res, pathname) {
     }
     if (gateway.mode === "mock" || !gateway.mode) {
       const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
-        status: "Mock检查通过",
+        status: "Mock本地演练",
         connected: true,
         canSend: false,
         canReceive: false,
@@ -364,9 +364,16 @@ async function handleApi(req, res, pathname) {
         loginStatus: "Mock运行中",
         loginQrCodeUrl: "",
         loginQrCodeText: "",
-        detail: "当前为Mock本地验证模式，不会调用外部Sidecar"
+        detail: "当前为Mock本地验证模式，未接入真实个人微信连接器，不会扫码登录或调用外部收发服务"
       }));
-      return json(res, 200, { ok: true, mode: "mock", state: publicState(nextState) });
+      return json(res, 200, {
+        ok: false,
+        mode: "mock",
+        realReady: false,
+        error: "当前为Mock本地演练，未接入真实个人微信连接器",
+        nextStep: "切换为真实连接器模式，填写连接器URL并启动外部个人微信连接器后再检查。",
+        state: publicState(nextState)
+      });
     }
     const missing = [];
     if (!gateway.sidecarUrl) missing.push("sidecarUrl");
@@ -374,7 +381,7 @@ async function handleApi(req, res, pathname) {
     if (!gateway.receiveEndpoint) missing.push("receiveEndpoint");
     if (!gateway.ackEndpoint) missing.push("ackEndpoint");
     if (missing.length) {
-      const detail = `个人微信Gateway配置未完成：${missing.join("、")}`;
+      const detail = `个人微信连接器配置未完成：${missing.join("、")}`;
       const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
         status: "检查失败",
         detail,
@@ -397,11 +404,11 @@ async function handleApi(req, res, pathname) {
       const supportsConfirm = ok && (capability.supportsConfirm === true || capability.confirm?.enabled === true);
       const supportsRecall = ok && (capability.supportsRecall === true || capability.recall?.enabled === true);
       const supportsAck = ok && (capability.supportsAck === true || capability.ack?.enabled === true);
-      const loginStatus = capability.loginStatus || capability.account?.loginStatus || capability.account?.status || (ok ? "Sidecar可达" : "未连接");
+      const loginStatus = capability.loginStatus || capability.account?.loginStatus || capability.account?.status || (ok ? "连接器可达" : "未连接");
       const loginQrCodeUrl = capability.loginQrCodeUrl || capability.qrCodeUrl || capability.login?.qrCodeUrl || capability.account?.qrCodeUrl || "";
       const loginQrCodeText = capability.loginQrCodeText || capability.qrCodeText || capability.login?.qrCodeText || capability.account?.qrCodeText || "";
       const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
-        status: ok ? canSend || canReceive ? "Sidecar可用" : "Sidecar可达但能力不足" : "检查失败",
+        status: ok ? canSend || canReceive ? "连接器可用" : "连接器可达但能力不足" : "检查失败",
         connected: ok,
         canSend,
         canReceive,
@@ -413,9 +420,9 @@ async function handleApi(req, res, pathname) {
         loginQrCodeUrl,
         loginQrCodeText,
         detail: ok
-          ? `Sidecar健康检查 ${result.httpStatus}，${result.latencyMs}ms，接收 ${canReceive ? "可用" : "不可用"}，发送 ${canSend ? "可用" : "不可用"}，登录态 ${loginStatus}`
-          : `Sidecar健康检查失败 HTTP ${result.httpStatus}`,
-        error: ok ? canSend || canReceive ? "" : "Sidecar未声明canSend=true或canReceive=true" : `Sidecar健康检查失败 HTTP ${result.httpStatus}`
+          ? `连接器健康检查 ${result.httpStatus}，${result.latencyMs}ms，接收 ${canReceive ? "可用" : "不可用"}，发送 ${canSend ? "可用" : "不可用"}，登录态 ${loginStatus}`
+          : `连接器健康检查失败 HTTP ${result.httpStatus}`,
+        error: ok ? canSend || canReceive ? "" : "连接器未声明canSend=true或canReceive=true" : `连接器健康检查失败 HTTP ${result.httpStatus}`
       }));
       return json(res, 200, { ok: ok && (canSend || canReceive), url: healthUrl, result, capability: { canSend, canReceive, sendMode, supportsConfirm, supportsRecall, supportsAck, loginStatus, loginQrCodeUrlConfigured: Boolean(loginQrCodeUrl), loginQrCodeTextConfigured: Boolean(loginQrCodeText) }, state: publicState(nextState) });
     } catch (error) {
@@ -426,7 +433,7 @@ async function handleApi(req, res, pathname) {
         loginStatus: "未连接",
         loginQrCodeUrl: "",
         loginQrCodeText: "",
-        detail: "统一出站Sidecar不可达",
+        detail: "个人微信连接器不可达",
         error: error.message
       }));
       return json(res, 200, { ok: false, error: error.message, state: publicState(nextState) });

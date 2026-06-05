@@ -11,6 +11,7 @@
 - 增强个人微信Sidecar Gateway：`npm run personal-wechat:gateway` 从单纯发送器升级为接收/ACK/发送/确认循环，支持 `/health` 能力检查、`receiveEndpoint` 拉取消息、`ackEndpoint` 回写游标、`sendEndpoint` 出站发送和自回显 `confirmations`。
 - 新增个人微信扫码登录提示：Sidecar `/health` 返回 `loginQrCodeUrl/loginQrCodeText` 时，配置页和 `npm run personal-wechat:gateway -- --check` 会明确提示“请扫码登录”，但在 `canReceive/canSend` 未声明前不会伪装真实可用。
 - 优化个人微信接入页登录向导：新增“启动Sidecar、扫码登录、开启收发能力”三步状态，Sidecar返回二维码链接时直接展示二维码预览，避免误以为主系统本身可以登录微信。
+- 收敛个人微信接入产品语义：将界面主入口从“Sidecar/Gateway”改为“个人微信连接器”，新增“连接个人微信”入口，Mock检查不再返回真实检查通过，而是明确提示“未接入真实个人微信”。
 - 增强个人微信确认回执闭环：Sidecar 只返回 `confirmations`、没有新消息时也会 ACK `confirmationIds/confirmedMessageIds`；同一任务重复回读确认保持幂等，不重复写会话。
 - 新增个人微信真实契约联调：使用临时Sidecar验证 `canReceive=true/canSend=true/supportsAck=true` 后，已跑通“拉取客户消息 -> ACK -> SendScheduler进入sending -> Sidecar发送 -> sent_pending_confirm -> 自回显confirmed”完整闭环。
 - 新增真实企微/个微接入收敛：企微接入页调整为真实连接中心，突出会话存档主读取、智能机器人测试入口和个人微信Sidecar，模拟入站统一折叠到高级调试区。
