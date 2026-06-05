@@ -384,14 +384,14 @@ ASR语音识别和TTS语音合成配置当前用于保存后续语音链路参�
 1. 在“企微会话内容存档”区域启用存档入口。
 2. 设置企业ID、存档Secret、RSA私钥、公钥版本、Sidecar地址、游标和轮询间隔。
 3. 保存企微配置。
-4. 在终端运行 `npm run wecom:archive -- --check` 检查配置，缺 `corpId/archiveSecret/privateKey/sidecarUrl/gatewayMode=sidecar` 任一项都会失败。
+4. 在终端运行 `npm run wecom:archive -- --check` 检查配置和 Sidecar `/health`，缺 `corpId/archiveSecret/privateKey/sidecarUrl/gatewayMode=sidecar` 任一项、Sidecar不可达、或未声明 `canPull/decryptReady` 都会失败。
 5. 检查通过后运行 `npm run wecom:archive` 持续轮询Sidecar `/pull`。
 6. Gateway成功写入 `/api/wecom/archive/inbound` 后会调用Sidecar `/ack` 回写已处理游标和消息ID，避免重复拉取。
 7. Gateway会把连接、拉取、解密、ACK、错误和游标状态回写到 `/api/wecom/archive/status`。
 8. 在页面“接入总控”点击“检查存档Sidecar”，确认Sidecar健康状态能回写到页面。
 9. 本地调试入口已折叠在“高级调试”里，只用于研发验证标准消息格式，不代表真实会话存档接入。
 
-如果 `npm run wecom:archive -- --check` 发现配置缺失，终端会输出 JSON，例如 `ok=false`、`missing=["corpId","archiveSecret","privateKey","sidecarUrl"]`，并返回非0退出码；这表示配置尚未满足真实拉取条件，不会伪装成已连接。
+如果 `npm run wecom:archive -- --check` 发现配置缺失或 Sidecar 健康检查失败，终端会输出 JSON，例如 `ok=false`、`missing=["corpId","archiveSecret","privateKey","sidecarUrl"]`、`capability.canPull=false` 或 `message="sidecar health timeout"`，并返回非0退出码；这表示配置尚未满足真实拉取条件，不会伪装成已连接。
 
 会话存档接口只接收标准化后的消息，不在Node主服务内直接绑定官方SDK或某个第三方协议实现。生产接入时，Sidecar应负责企微会话存档SDK、协议服务、登录态、解密、客户同意校验、联系人/群同步、图片/文件CDN处理和原始消息适配；本系统负责标准入站、会话隔离、风控、发送队列、回读确认和审计。
 

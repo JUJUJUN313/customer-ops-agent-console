@@ -51,7 +51,7 @@
 | 模型配置 | 全局LLM、Agent独立LLM覆盖、ASR/TTS配置保存、OpenAI兼容连接测试、按需LLM增强 | ASR/TTS尚未真实调用；生产需密钥管理 |
 | 企微接入 | 真实连接中心、会话内容存档Sidecar配置和ACK、智能机器人真实测试入口、个人微信Sidecar能力声明、群绑定、日志筛选、消息去重和脱敏配置 | 官方会话存档SDK或第三方协议服务需在Sidecar内完成拉取/解密/登录态 |
 | 个人微信Sidecar / AccountAgent | 单账号多群上下文、标准入站、ACK游标、低风险队列、高风险人工确认、人工放行、连续消息合并、SendScheduler、`canReceive/canSend`能力校验、Sidecar出站回调、失败退避、回读确认 | 默认Mock只能本地演练；真实登录、协议收发和自回显监听由外部Sidecar承担 |
-| 稳定性与审计 | 输入校验、状态自检、敏感信息脱敏、静态访问拦截、审计日志、61个自动化测试 | 本地JSON不是生产数据库 |
+| 稳定性与审计 | 输入校验、状态自检、敏感信息脱敏、静态访问拦截、审计日志、64个自动化测试 | 本地JSON不是生产数据库 |
 
 ## 业务闭环
 
@@ -151,13 +151,13 @@ npm run wecom:bridge
 npm run wecom:archive
 ```
 
-只检查会话存档 Gateway 配置：
+检查会话存档 Gateway 配置和 Sidecar 健康能力：
 
 ```bash
 npm run wecom:archive -- --check
 ```
 
-Gateway 默认调用你配置的 Sidecar `/pull` 接口，由 Sidecar 负责企微会话存档 SDK、协议服务、登录态、解密、CDN文件和原始消息适配；本系统只接收标准化后的消息并按渠道写入电销、销售或VIP对应的会话工作台。
+Gateway 默认先通过 `--check` 访问 Sidecar `/health` 确认 `canPull/decryptReady`，正常运行时调用 Sidecar `/pull`，成功入站后调用 `/ack`。Sidecar 负责企微会话存档 SDK、协议服务、登录态、解密、CDN文件和原始消息适配；本系统只接收标准化后的消息并按渠道写入电销、销售或VIP对应的会话工作台。
 
 只验证企微 Bot ID/Secret 是否能认证：
 
@@ -247,12 +247,12 @@ data/state.json
 
 ## 测试与质量
 
-当前自动化测试覆盖 63 个用例，包括：
+当前自动化测试覆盖 64 个用例，包括：
 
 - Agent基础业务链路。
 - 任务、报价、客户、模板输入校验。
 - 模型配置、LLM连接测试和LLM增强边界。
-- 企微Webhook、智能机器人入站、会话存档入站和消息去重。
+- 企微Webhook、智能机器人入站、会话存档入站、消息去重和机器人出站回写幂等。
 - 电销/销售/VIP会话工作台投影、客户绑定、回复入队和高风险人工确认。
 - 个人微信Sidecar能力声明、AccountAgent、Gateway健康检查、接收/ACK字段、确认回执ACK、重复回读确认幂等、人工放行、SendScheduler、Sidecar出站回调、失败退避和回读确认。
 - 状态自检、能力审计、脏数据恢复和安全边界。

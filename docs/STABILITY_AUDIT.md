@@ -38,6 +38,7 @@
 | 企微智能机器人凭据泄露风险 | Bot ID/Secret 泄露后可能被外部连接机器人 | `/api/state` 和 `/api/wecom/config` 只返回掩码；保存时空字段保留旧值，显式清空才删除 |
 | 企微多个群消息可能混档 | 每个VIP小群对应不同客户，如果只用默认客户会串档 | 长连接入站按 `chatid` 查找 `WeComBinding`；未知群自动生成待绑定档案，人工绑定真实客户前不视为已绑定 |
 | 企微重复推送会重复建任务 | WebSocket 重连或重放可能导致同一消息多次进入系统 | `/api/wecom/inbound` 按 `externalMessageId/msgid` 去重，重复消息只写去重日志，不再跑Agent |
+| 企微机器人出站回写可能重复展示 | bridge 同一回复回写多次会让会话工作台出现重复机器人消息 | 出站回写也按 `externalMessageId` 幂等处理，重复只写 `重复出站` 日志 |
 | bridge直接写JSON会绕过队列 | 长连接进程和前端同时写文件可能互相覆盖 | bridge 只调用本地 `/api/wecom/inbound` 和 `/api/wecom/aibot/status`，由 `mutationQueue` 串行写状态 |
 | 会话内容存档重复入站 | 存档游标回放或Gateway重试可能重复生成群上下文和队列 | `/api/wecom/archive/inbound` 将存档消息转成统一入站结构，按 `messageId` 去重，重复消息只写日志 |
 | 会话存档成功入站但Sidecar不确认 | 主系统处理成功后如果不ACK，Sidecar下轮可能重复推同一批消息 | `scripts/wecom-archive-gateway.mjs` 成功入站后调用Sidecar `/ack`，回写 `cursor/seq/messageIds`，ACK失败会写入 `ACK失败` 并中断本轮 |
@@ -138,7 +139,7 @@
 
 ## 本轮验证
 
-- `npm test`：63 个用例通过。
+- `npm test`：64 个用例通过。
 - `node --check`：核心 JS 文件通过。
 - API 冒烟：健康检查、自检、能力审计、模型配置、真实LLM连接测试、销售Agent LLM增强、企微配置脱敏、企微智能机器人配置检查、企微长连接真实认证、企微测试发送、企微草稿发送、企微模拟/长连接格式入站、企微会话存档标准入站、会话存档Gateway状态回写、聊天会话列表/详情/绑定/回复、`chatid/roomId` 群绑定、`msgid/messageId` 去重、个人微信Mock入站、SendScheduler调度、人工放行、Sidecar发送回调、个人微信发送失败、个人微信回读确认、闭环编排、批量本地Agent、任务批量状态、触达草稿批量状态、任务SLA、超时升级、成交结果、非法输入、静态状态文件拦截均通过。
 - UI smoke：真实浏览器点击业务分组导航、自检、模型配置、企微接入页、电销/销售/VIP会话工作台、客户池列表优先、客户新增二级页、双击客户进入详情、会话卡标签精简和桌面端会话高度约束、Key/Webhook脱敏、客户搜索筛选、总览角色工作台、任务筛选批量控件、草稿风险筛选批量控件、报价结构化筛选、Agent客户隔离、Agent无代码化输出、本地消息VIP上下文隔离、任务和SLA展示通过。

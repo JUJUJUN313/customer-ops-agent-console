@@ -92,6 +92,43 @@ function sidecarAckUrl(sidecarUrl = "") {
   return /\/ack$/i.test(base) ? base : `${base}/ack`;
 }
 
+function sidecarHealthUrl(sidecarUrl = "") {
+  const base = String(sidecarUrl || "").replace(/\/+$/, "").replace(/\/pull$/i, "");
+  if (!base) throw new Error("WeCom archive sidecar URL is required");
+  return /\/health$/i.test(base) ? base : `${base}/health`;
+}
+
+async function checkSidecarHealth(archive = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(sidecarHealthUrl(archive.sidecarUrl), {
+      method: "GET",
+      signal: controller.signal
+    });
+    const text = await response.text();
+    let body = {};
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      body = { raw: text };
+    }
+    const health = body.capabilities || body || {};
+    const canPull = response.ok && health.canPull !== false;
+    const decryptReady = response.ok && health.decryptReady !== false;
+    return {
+      ok: response.ok && canPull && decryptReady,
+      httpStatus: response.status,
+      body,
+      canPull,
+      decryptReady,
+      error: response.ok ? "" : body.error || `sidecar health HTTP ${response.status}`
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function pullFromSidecar(archive = {}) {
   const response = await fetch(sidecarPullUrl(archive.sidecarUrl), {
     method: "POST",
@@ -209,20 +246,56 @@ async function main() {
     if (!archive.archiveSecret) missing.push("archiveSecret");
     if (!archive.privateKey) missing.push("privateKey");
     if (!archive.sidecarUrl) missing.push("sidecarUrl");
-    const ok = missing.length === 0 && archive.enabled && archive.gatewayMode === "sidecar";
-    const error = ok ? "" : `缺少 ${missing.join("、") || "sidecar模式"}`;
+    const configOk = missing.length === 0 && archive.enabled && archive.gatewayMode === "sidecar";
+    if (!configOk) {
+      const error = `缺少 ${missing.join("、") || "sidecar模式"}`;
+      const result = {
+        ok: false,
+        apiBase,
+        gatewayMode: archive.gatewayMode || "",
+        sidecarUrl: archive.sidecarUrl || "",
+        missing,
+        message: error
+      };
+      console.log(JSON.stringify(result, null, 2));
+      await recordStatus("检查失败", result.message, {
+        error,
+        trustedStatus: "配置未完成"
+      });
+      process.exit(1);
+    }
+
+    let health;
+    try {
+      health = await checkSidecarHealth(archive);
+    } catch (error) {
+      health = {
+        ok: false,
+        httpStatus: 0,
+        canPull: false,
+        decryptReady: false,
+        error: error.name === "AbortError" ? "sidecar health timeout" : error.message
+      };
+    }
+    const ok = Boolean(health.ok);
+    const error = ok ? "" : health.error || "Sidecar未声明可拉取或可解密";
     const result = {
       ok,
       apiBase,
       gatewayMode: archive.gatewayMode || "",
       sidecarUrl: archive.sidecarUrl || "",
       missing,
-      message: ok ? "会话存档配置满足sidecar启动条件" : error
+      capability: {
+        canPull: Boolean(health.canPull),
+        decryptReady: Boolean(health.decryptReady)
+      },
+      httpStatus: health.httpStatus,
+      message: ok ? "会话存档Sidecar健康检查通过" : error
     };
     console.log(JSON.stringify(result, null, 2));
     await recordStatus(ok ? "检查通过" : "检查失败", result.message, {
       error,
-      trustedStatus: ok ? "配置已验证" : "配置未完成"
+      trustedStatus: ok ? "sidecar可拉取" : "sidecar异常"
     });
     process.exit(ok ? 0 : 1);
   }

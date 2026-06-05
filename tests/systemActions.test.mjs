@@ -899,6 +899,37 @@ test("企微机器人真实回复会作为出站消息写入会话工作台", ()
   assert.equal(session.messages.at(-1).direction, "outbound");
 });
 
+test("企微机器人重复出站回写不会重复写入会话", () => {
+  let state = updateWecomConfigAction(seedState(), {
+    aibot: {
+      enabled: true,
+      botId: "aibot-test",
+      secret: "secret-test",
+      defaultChannel: "VIP群"
+    }
+  });
+  const outbound = {
+    source: "wecom-aibot",
+    direction: "outbound",
+    chatId: "chat_reply_dup",
+    externalMessageId: "reply_msg-reply-dup",
+    senderId: "aibot-test",
+    channel: "VIP群",
+    message: "已收到，我先帮您整理需求。",
+    senderRole: "私域",
+    senderName: "企微机器人"
+  };
+  state = ingestWecomMessageAction(state, outbound);
+  const sessionBefore = getChatSessionReport(state, "room:chat_reply_dup").session;
+  const messageCount = sessionBefore.messages.length;
+  state = ingestWecomMessageAction(state, outbound);
+  const sessionAfter = getChatSessionReport(state, "room:chat_reply_dup").session;
+
+  assert.equal(sessionAfter.messages.length, messageCount);
+  assert.equal(state.wecomLogs[0].type, "重复出站");
+  assert.equal(state.wecomLogs[0].deduped, true);
+});
+
 test("企微群绑定可以改绑到已有客户并通过自检", () => {
   let state = ingestWecomMessageAction(seedState(), {
     source: "wecom-aibot",

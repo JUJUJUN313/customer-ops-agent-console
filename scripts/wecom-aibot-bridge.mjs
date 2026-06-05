@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -97,6 +98,21 @@ function extractMessageText(body = {}) {
   return body.msgtype ? `[${body.msgtype}消息]` : "";
 }
 
+function buildExternalMessageId(frame = {}, body = {}, message = "") {
+  const directId = body.msgid || body.messageId || body.msgId || body.id || frame.headers?.msgid || frame.headers?.req_id || "";
+  if (String(directId || "").trim()) return String(directId).trim();
+  const fingerprint = JSON.stringify({
+    chatId: body.chatid || frame.headers?.chatid || "",
+    chatType: body.chattype || frame.headers?.chattype || "",
+    senderId: body.from?.userid || body.userid || body.fromUserId || "",
+    msgType: body.msgtype || "message",
+    msgTime: body.msgtime || body.sendAt || body.time || frame.headers?.time || "",
+    text: String(message || "").slice(0, 500)
+  });
+  const digest = createHash("sha256").update(fingerprint).digest("hex").slice(0, 16);
+  return `fallback_${body.msgtype || "message"}_${digest}`;
+}
+
 function resolveSuggestedReply(state = {}, fallback = "") {
   const run = Array.isArray(state.agentRuns) ? state.agentRuns[0] : null;
   const reply = run?.suggestedReply || run?.pushCopy || run?.handoffPackage?.summary || run?.contextSummary || fallback;
@@ -176,13 +192,13 @@ async function main() {
 
   async function handleInboundMessage(frame, eventName = "message") {
     const body = frame.body || {};
-    const externalMessageId = body.msgid || frame.headers?.msgid || frame.headers?.req_id || "";
+    const message = extractMessageText(body);
+    const externalMessageId = buildExternalMessageId(frame, body, message);
     if (markDuplicate(externalMessageId)) {
       console.log(`[wecom-bridge] 忽略重复消息 ${externalMessageId}`);
       return;
     }
 
-    const message = extractMessageText(body);
     const latestConfig = readAibotConfig();
     try {
       const nextState = await postJson("/api/wecom/inbound", {

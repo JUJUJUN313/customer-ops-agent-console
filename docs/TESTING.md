@@ -10,7 +10,7 @@ npm test
 
 GitHub Actions 会在 Pull Request 和 `main` 推送时自动运行同一条 `npm test`，作为 `main` 合并保护的必需检查。
 
-当前覆盖 63 个用例：
+当前覆盖 64 个用例：
 
 - 外呼筛选 Agent 将高价值客户升级到销售链路。
 - VIP群分流 Agent 将售后问题路由给售后。
@@ -45,7 +45,7 @@ GitHub Actions 会在 Pull Request 和 `main` 推送时自动运行同一条 `np
 - 已确认触达草稿可发送企微测试群，成功后写入 `wecomDelivery`、`externalSideEffects: true` 和客户事件。
 - 企微模拟入站会写入本地会话窗口，并按渠道路由到对应Agent。
 - 企微长连接入站会按 `chatid` 独立建档，未知群进入待绑定档案。
-- 企微长连接入站会按 `msgid/externalMessageId` 去重，不重复生成任务和Agent输出。
+- 企微长连接入站会按 `msgid/externalMessageId` 去重，不重复生成任务和Agent输出；机器人回复成功后的出站回写也保持幂等。
 - 企微会话内容存档入站会转成统一群消息，进入 `roomId/chatId` 独立上下文并按 `messageId` 去重。
 - 统一聊天会话投影会展示企微存档会话，并支持把待绑定群绑定到客户档案。
 - 电销/销售/VIP会话工作台会按业务入口过滤会话，回复会按风险进入发送队列或人工确认。
@@ -264,7 +264,7 @@ node --check scripts/personal-wechat-send-gateway.mjs
 
 ## 本轮P0/P1验收记录
 
-- `npm test`：63 个用例通过。
+- `npm test`：64 个用例通过。
 - `node --check src/app.js`、`src/systemActions.js`、`src/api.js`、`scripts/serve.mjs`、`scripts/wecom-archive-gateway.mjs`、`scripts/personal-wechat-send-gateway.mjs` 通过。
 - 使用当前已配置的全局LLM完成 `/api/model-config/test`，返回“连接成功”，耗时约1.6秒。
 - 使用当前已配置的全局LLM运行销售承接Agent增强，`execution.modelInvocation` 为“已调用”，生成本地LLM增强草稿且 `externalSideEffects=false`。

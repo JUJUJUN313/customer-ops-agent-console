@@ -206,7 +206,7 @@ npm run wecom:bridge -- --check --timeout=20000
 npm run wecom:archive
 ```
 
-只检查会话存档配置：
+检查会话存档配置和 Sidecar `/health`：
 
 ```bash
 npm run wecom:archive -- --check
@@ -218,7 +218,7 @@ npm run wecom:archive -- --check
 npm run wecom:archive -- --once
 ```
 
-`wecom:archive` 默认调用 `archive.sidecarUrl + /pull`。Sidecar 可接官方会话存档SDK，也可接你参考的企微/微信协议服务；Sidecar 必须返回已解密和标准化的消息数组，系统不直接绑定某个协议供应商。入站成功后脚本会调用 `archive.sidecarUrl + /ack` 回写 `cursor/seq/messageIds`，避免外部Sidecar重复推送已经处理的消息。建议 Sidecar 层统一封装实例健康、登录态、消息回调、发送文本/群@、标记已读、联系人/群同步和CDN文件处理。
+`wecom:archive -- --check` 会先校验 `corpId/archiveSecret/privateKey/sidecarUrl/gatewayMode=sidecar`，配置完整后访问 `archive.sidecarUrl + /health`，确认 `canPull/decryptReady`。`wecom:archive` 正常运行时调用 `archive.sidecarUrl + /pull`。Sidecar 可接官方会话存档SDK，也可接你参考的企微/微信协议服务；Sidecar 必须返回已解密和标准化的消息数组，系统不直接绑定某个协议供应商。入站成功后脚本会调用 `archive.sidecarUrl + /ack` 回写 `cursor/seq/messageIds`，避免外部Sidecar重复推送已经处理的消息。建议 Sidecar 层统一封装实例健康、登录态、消息回调、发送文本/群@、标记已读、联系人/群同步和CDN文件处理。
 
 检查会话存档Sidecar：
 

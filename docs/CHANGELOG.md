@@ -6,6 +6,8 @@
 
 - 新增企微智能机器人真实联调闭环：普通测试群中通过企微成员选择器真实 @ “测试机器人 1” 后，bridge 已验证可读取真实群消息并按 `chatid` 写入会话工作台；临时开启 `aibot.autoReply` 后，机器人可在企微群内真实回复。
 - 新增企微机器人出站回写：bridge 成功调用 `replyStream` 后会把机器人回复以 `direction=outbound` 写入 `/api/wecom/inbound`，会话工作台展示为出站消息，企微日志记录为 `消息出站` 且 `externalSideEffects=true`。
+- 增强企微长连接稳定性：bridge 在真实帧缺少 `msgid` 时会生成稳定消息指纹，避免通用事件和类型事件重复入站；机器人出站回写按 `externalMessageId` 幂等处理，重复回写不会在会话里显示两次。
+- 增强会话存档Gateway检查：`npm run wecom:archive -- --check` 配置完整后会继续访问 Sidecar `/health`，确认 `canPull/decryptReady`，避免Sidecar未启动时误显示配置可用。
 - 增强个人微信Sidecar Gateway：`npm run personal-wechat:gateway` 从单纯发送器升级为接收/ACK/发送/确认循环，支持 `/health` 能力检查、`receiveEndpoint` 拉取消息、`ackEndpoint` 回写游标、`sendEndpoint` 出站发送和自回显 `confirmations`。
 - 新增个人微信扫码登录提示：Sidecar `/health` 返回 `loginQrCodeUrl/loginQrCodeText` 时，配置页和 `npm run personal-wechat:gateway -- --check` 会明确提示“请扫码登录”，但在 `canReceive/canSend` 未声明前不会伪装真实可用。
 - 增强个人微信确认回执闭环：Sidecar 只返回 `confirmations`、没有新消息时也会 ACK `confirmationIds/confirmedMessageIds`；同一任务重复回读确认保持幂等，不重复写会话。

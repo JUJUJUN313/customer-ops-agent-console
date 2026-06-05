@@ -880,11 +880,15 @@ function latestWecomSummary(state) {
   };
 }
 
-function hasRecentWecomInbound(state, externalMessageId = "") {
+function hasRecentWecomMessage(state, externalMessageId = "", type = "消息入站") {
   const msgId = cleanLimitedText(externalMessageId, "", 180);
   if (!msgId) return false;
   const logs = Array.isArray(state.wecomLogs) ? state.wecomLogs : [];
-  return logs.some((log) => log.type === "消息入站" && log.status === "成功" && log.externalMessageId === msgId);
+  return logs.some((log) => log.type === type && log.status === "成功" && log.externalMessageId === msgId);
+}
+
+function hasRecentWecomInbound(state, externalMessageId = "") {
+  return hasRecentWecomMessage(state, externalMessageId, "消息入站");
 }
 
 function normalizePersonalWechatAccount(account = {}, current = DEFAULT_PERSONAL_WECHAT.account) {
@@ -3526,9 +3530,10 @@ export function ingestWecomMessageAction(inputState, payload = {}) {
   const source = cleanLimitedText(payload.source, chatId ? "wecom-aibot" : "local-simulator", 60);
   const message = cleanLimitedText(payload.message, "", 4000);
   const isOutbound = payload.direction === "outbound" || (payload.senderRole && payload.senderRole !== "客户");
-  if (externalMessageId && hasRecentWecomInbound(state, externalMessageId)) {
+  const duplicateType = isOutbound ? "消息出站" : "消息入站";
+  if (externalMessageId && hasRecentWecomMessage(state, externalMessageId, duplicateType)) {
     appendWecomLog(state, {
-      type: "重复入站",
+      type: isOutbound ? "重复出站" : "重复入站",
       status: "成功",
       channel: defaultWecomInboundChannel(payload.channel || config.inbound?.defaultChannel || "VIP群"),
       source,
@@ -3540,7 +3545,7 @@ export function ingestWecomMessageAction(inputState, payload = {}) {
       contentPreview: message,
       externalSideEffects: false
     });
-    audit(state, "企微重复消息忽略", chatId || "wecom", externalMessageId);
+    audit(state, isOutbound ? "企微重复出站忽略" : "企微重复消息忽略", chatId || "wecom", externalMessageId);
     return state;
   }
   const target = resolveWecomInboundTarget(state, { ...payload, chatId, source }, config);
