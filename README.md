@@ -247,14 +247,14 @@ data/state.json
 
 ## 测试与质量
 
-当前自动化测试覆盖 62 个用例，包括：
+当前自动化测试覆盖 63 个用例，包括：
 
 - Agent基础业务链路。
 - 任务、报价、客户、模板输入校验。
 - 模型配置、LLM连接测试和LLM增强边界。
 - 企微Webhook、智能机器人入站、会话存档入站和消息去重。
 - 电销/销售/VIP会话工作台投影、客户绑定、回复入队和高风险人工确认。
-- 个人微信Sidecar能力声明、AccountAgent、Gateway健康检查、接收/ACK字段、人工放行、SendScheduler、Sidecar出站回调、失败退避和回读确认。
+- 个人微信Sidecar能力声明、AccountAgent、Gateway健康检查、接收/ACK字段、确认回执ACK、重复回读确认幂等、人工放行、SendScheduler、Sidecar出站回调、失败退避和回读确认。
 - 状态自检、能力审计、脏数据恢复和安全边界。
 
 常用检查：

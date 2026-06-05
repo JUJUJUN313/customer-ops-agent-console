@@ -10,7 +10,7 @@ npm test
 
 GitHub Actions 会在 Pull Request 和 `main` 推送时自动运行同一条 `npm test`，作为 `main` 合并保护的必需检查。
 
-当前覆盖 62 个用例：
+当前覆盖 63 个用例：
 
 - 外呼筛选 Agent 将高价值客户升级到销售链路。
 - VIP群分流 Agent 将售后问题路由给售后。
@@ -60,6 +60,7 @@ GitHub Actions 会在 Pull Request 和 `main` 推送时自动运行同一条 `np
 - 个人微信 SendScheduler 会按账号并发、同群FIFO和分钟上限调度低风险 `queued` 任务。
 - 个人微信 Sidecar 出站模式只有在 `/health` 声明 `canSend=true` 后才会进入 `sending`，Gateway回调后进入 `sent_pending_confirm`。
 - 个人微信 Sidecar 接收模式会保存 `receiveEndpoint/ackEndpoint`、`canReceive`、`supportsAck`、登录态和游标；Gateway可拉取消息、写入入站、ACK并等待自回显确认。
+- 个人微信 Sidecar 只有确认回执、没有新消息时也会 ACK `confirmationIds/confirmedMessageIds`；重复回读确认保持幂等，不重复写会话。
 - 个人微信 Sidecar 未声明发送能力时，SendScheduler不会伪装发送，会让任务保持待发送并写入错误原因。
 - 企微会话存档非文本消息会以占位文本入站，并生成客服人工查看任务。
 - 个人微信 Gateway 健康检查会写入Gateway状态、账号状态、运行日志和审计。
@@ -263,7 +264,7 @@ node --check scripts/personal-wechat-send-gateway.mjs
 
 ## 本轮P0/P1验收记录
 
-- `npm test`：62 个用例通过。
+- `npm test`：63 个用例通过。
 - `node --check src/app.js`、`src/systemActions.js`、`src/api.js`、`scripts/serve.mjs`、`scripts/wecom-archive-gateway.mjs`、`scripts/personal-wechat-send-gateway.mjs` 通过。
 - 使用当前已配置的全局LLM完成 `/api/model-config/test`，返回“连接成功”，耗时约1.6秒。
 - 使用当前已配置的全局LLM运行销售承接Agent增强，`execution.modelInvocation` 为“已调用”，生成本地LLM增强草稿且 `externalSideEffects=false`。

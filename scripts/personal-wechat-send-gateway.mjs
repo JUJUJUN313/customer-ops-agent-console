@@ -162,6 +162,7 @@ function extractConfirmations(payload = {}) {
     }));
   return [...rawConfirmations, ...messageConfirmations]
     .map((item) => ({
+      confirmationId: String(firstValue(item, ["confirmationId", "receiptId", "id"], "")),
       jobId: String(firstValue(item, ["jobId", "sendJobId", "echoOfJobId"], "")),
       confirmedMessageId: String(firstValue(item, ["confirmedMessageId", "messageId", "msgid", "externalMessageId"], "")),
       now: String(firstValue(item, ["now", "confirmedAt", "sendAt"], new Date().toISOString()))
@@ -176,6 +177,7 @@ async function pullInbound(config, gateway) {
   const confirmations = extractConfirmations(payload);
   let pulled = 0;
   let confirmed = 0;
+  const ackableConfirmations = [];
   for (const confirmation of confirmations) {
     try {
       await api(`/api/personal-wechat/send-jobs/${encodeURIComponent(confirmation.jobId)}/confirm`, {
@@ -186,6 +188,7 @@ async function pullInbound(config, gateway) {
         })
       });
       confirmed += 1;
+      ackableConfirmations.push(confirmation);
       console.log(`confirmed ${confirmation.jobId}`);
     } catch (error) {
       console.error(`confirm failed ${confirmation.jobId}: ${error.message}`);
@@ -204,7 +207,7 @@ async function pullInbound(config, gateway) {
   }
   const cursor = payload.nextCursor || payload.cursor || messages.at(-1)?.messageId || gateway.cursor || "";
   let acked = 0;
-  if (messages.length || cursor !== gateway.cursor) {
+  if (messages.length || confirmations.length || cursor !== gateway.cursor) {
     await api("/api/personal-wechat/gateway/status", {
       method: "POST",
       body: JSON.stringify({
@@ -215,19 +218,21 @@ async function pullInbound(config, gateway) {
       })
     });
   }
-  if (messages.length && gateway.supportsAck) {
+  if ((messages.length || ackableConfirmations.length) && gateway.supportsAck) {
     await sidecarAck(config, gateway, {
       cursor,
-      messageIds: messages.map((message) => message.messageId)
+      messageIds: messages.map((message) => message.messageId),
+      confirmationIds: ackableConfirmations.map((confirmation) => confirmation.confirmationId || confirmation.confirmedMessageId || confirmation.jobId),
+      confirmedMessageIds: ackableConfirmations.map((confirmation) => confirmation.confirmedMessageId).filter(Boolean)
     });
-    acked = messages.length;
+    acked = messages.length + ackableConfirmations.length;
     await api("/api/personal-wechat/gateway/status", {
       method: "POST",
       body: JSON.stringify({
         status: "Sidecar消息已ACK",
         cursor,
         lastAckAt: new Date().toISOString(),
-        detail: `ACK ${acked} 条个人微信消息`
+        detail: `ACK ${messages.length} 条个人微信消息，${ackableConfirmations.length} 条确认回执`
       })
     });
   }

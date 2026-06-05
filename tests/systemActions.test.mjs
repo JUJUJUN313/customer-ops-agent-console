@@ -1657,6 +1657,54 @@ test("个人微信Gateway健康检查状态会写入日志和账号状态", () =
   assert.equal(state.personalWechat.gateway.canReceive, false);
 });
 
+test("个人微信重复回读确认保持幂等并拒绝不同回显", () => {
+  let state = updatePersonalWechatConfigAction(seedState(), {
+    enabled: true,
+    account: {
+      id: "pwx_confirm_idempotent",
+      name: "个人微信托管号回读",
+      displayName: "VIP群助手",
+      defaultCustomerId: "c003",
+      autoReply: true
+    }
+  });
+
+  state = ingestPersonalWechatMessageAction(state, {
+    customerId: "c003",
+    roomId: "pwx_room_confirm_repeat",
+    roomName: "回读重复测试群",
+    messageId: "pwx-confirm-repeat-001",
+    senderType: "customer",
+    senderName: "客户",
+    text: "收到，帮我确认一下流程"
+  });
+  const jobId = state.personalWechat.sendJobs[0].jobId;
+  state.personalWechat.sendJobs[0].createdAt = "2026-06-05T02:00:00.000Z";
+  state = runPersonalWechatSendSchedulerAction(state, { now: "2026-06-05T02:00:02.000Z" });
+  state = confirmPersonalWechatSendJobAction(state, jobId, {
+    now: "2026-06-05T02:00:05.000Z",
+    confirmedMessageId: "echo-repeat-001"
+  });
+  const conversationCount = state.conversations
+    .find((conversation) => conversation.customerId === "c003" && conversation.channel === "VIP模拟群")
+    .messages.length;
+
+  state = confirmPersonalWechatSendJobAction(state, jobId, {
+    now: "2026-06-05T02:00:08.000Z",
+    confirmedMessageId: "echo-repeat-001"
+  });
+
+  assert.equal(state.personalWechat.sendJobs.find((job) => job.jobId === jobId).status, "confirmed");
+  assert.equal(state.personalWechat.logs[0].type, "重复回读确认");
+  assert.equal(
+    state.conversations.find((conversation) => conversation.customerId === "c003" && conversation.channel === "VIP模拟群").messages.length,
+    conversationCount
+  );
+  assert.throws(() => confirmPersonalWechatSendJobAction(state, jobId, {
+    confirmedMessageId: "echo-repeat-002"
+  }), /different confirmation/);
+});
+
 test("Sidecar未声明发送能力时SendScheduler不会真实调度", () => {
   let state = updatePersonalWechatConfigAction(seedState(), {
     enabled: true,

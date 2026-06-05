@@ -3160,6 +3160,28 @@ export function confirmPersonalWechatSendJobAction(inputState, jobId = "", paylo
   if (!job) throw new Error("Personal WeChat send job not found");
   const nowMs = personalWechatNowMs(payload.now);
   expirePersonalWechatSendJobs(config, nowMs);
+  if (job.status === "confirmed") {
+    const confirmedMessageId = cleanLimitedText(payload.confirmedMessageId, job.confirmedMessageId || "", 180);
+    if (confirmedMessageId && job.confirmedMessageId && confirmedMessageId !== job.confirmedMessageId) {
+      throw new Error("Confirmed send job received a different confirmation message");
+    }
+    appendPersonalWechatLog(state, {
+      type: "重复回读确认",
+      status: "成功",
+      accountId: job.accountId,
+      roomId: job.roomId,
+      roomName: job.roomName,
+      sendJobId: job.jobId,
+      messageId: confirmedMessageId || job.confirmedMessageId,
+      gatewayMode: job.gatewayMode,
+      gatewayRequestId: job.gatewayRequestId,
+      externalMessageId: job.externalMessageId,
+      contentPreview: job.replyText,
+      externalSideEffects: false
+    });
+    audit(state, "个人微信重复回读确认", job.jobId, confirmedMessageId || job.confirmedMessageId || "confirmed");
+    return state;
+  }
   if (job.status === "cancelled") {
     appendPersonalWechatLog(state, {
       type: "发送过期",
