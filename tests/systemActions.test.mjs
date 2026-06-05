@@ -1595,6 +1595,8 @@ test("个人微信Gateway健康检查状态会写入日志和账号状态", () =
     supportsRecall: true,
     supportsAck: true,
     loginStatus: "已登录",
+    loginQrCodeUrl: "https://sidecar.local/qr.png",
+    loginQrCodeText: "qr-login-text",
     cursor: "pwx-cursor-002",
     lastPulledAt: "2026-06-04T10:40:00.000Z",
     lastAckAt: "2026-06-04T10:40:01.000Z",
@@ -1608,6 +1610,8 @@ test("个人微信Gateway健康检查状态会写入日志和账号状态", () =
   assert.equal(state.personalWechat.gateway.supportsRecall, true);
   assert.equal(state.personalWechat.gateway.supportsAck, true);
   assert.equal(state.personalWechat.gateway.loginStatus, "已登录");
+  assert.equal(state.personalWechat.gateway.loginQrCodeUrl, "https://sidecar.local/qr.png");
+  assert.equal(state.personalWechat.gateway.loginQrCodeText, "qr-login-text");
   assert.equal(state.personalWechat.gateway.cursor, "pwx-cursor-002");
   assert.equal(state.personalWechat.gateway.lastPulledAt, "2026-06-04T10:40:00.000Z");
   assert.equal(state.personalWechat.gateway.lastAckAt, "2026-06-04T10:40:01.000Z");
@@ -1620,13 +1624,37 @@ test("个人微信Gateway健康检查状态会写入日志和账号状态", () =
   state = updatePersonalWechatGatewayStatusAction(state, {
     status: "检查失败",
     canSend: false,
+    canReceive: false,
     detail: "统一出站Sidecar不可达",
     error: "connect ECONNREFUSED"
   });
   assert.equal(state.personalWechat.gateway.status, "检查失败");
+  assert.equal(state.personalWechat.gateway.canSend, false);
+  assert.equal(state.personalWechat.gateway.canReceive, false);
+  assert.equal(state.personalWechat.gateway.supportsAck, false);
+  assert.equal(state.personalWechat.gateway.supportsConfirm, false);
+  assert.equal(state.personalWechat.gateway.supportsRecall, false);
+  assert.equal(state.personalWechat.gateway.loginStatus, "未连接");
+  assert.equal(state.personalWechat.gateway.loginQrCodeUrl, "");
+  assert.equal(state.personalWechat.gateway.loginQrCodeText, "");
   assert.equal(state.personalWechat.gateway.lastError, "connect ECONNREFUSED");
   assert.equal(state.personalWechat.account.status, "Gateway异常");
   assert.equal(state.personalWechat.logs[0].status, "失败");
+
+  state = updatePersonalWechatGatewayStatusAction(state, {
+    status: "等待扫码",
+    canSend: false,
+    canReceive: false,
+    loginStatus: "待扫码登录",
+    loginQrCodeText: "scan-me",
+    detail: "Sidecar等待扫码",
+    error: "Sidecar未声明canSend=true或canReceive=true"
+  });
+  assert.equal(state.personalWechat.gateway.status, "等待扫码");
+  assert.equal(state.personalWechat.gateway.loginStatus, "待扫码登录");
+  assert.equal(state.personalWechat.gateway.loginQrCodeText, "scan-me");
+  assert.equal(state.personalWechat.gateway.canSend, false);
+  assert.equal(state.personalWechat.gateway.canReceive, false);
 });
 
 test("Sidecar未声明发送能力时SendScheduler不会真实调度", () => {

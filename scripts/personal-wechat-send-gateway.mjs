@@ -257,6 +257,7 @@ async function runOnce() {
   }
   if (!gateway.sidecarUrl) throw new Error("Personal WeChat sidecarUrl is required");
   if (check) {
+    const qrCodeAvailable = Boolean(gateway.loginQrCodeUrl || gateway.loginQrCodeText);
     console.log(JSON.stringify({
       ok: Boolean(gateway.canSend || gateway.canReceive),
       apiBase,
@@ -271,13 +272,21 @@ async function runOnce() {
       supportsRecall: Boolean(gateway.supportsRecall),
       supportsAck: Boolean(gateway.supportsAck),
       loginStatus: gateway.loginStatus || "未连接",
+      qrCodeAvailable,
+      nextStep: qrCodeAvailable
+        ? "请扫码登录个人微信后重新运行检查。"
+        : gateway.canReceive || gateway.canSend
+          ? "Sidecar能力可用，可以运行 --once 做接收/发送联调。"
+          : "请先启动个人微信Sidecar，并在 /health 中声明 canReceive 或 canSend。",
       cursor: gateway.cursor || "",
       status: gateway.status || ""
     }, null, 2));
     return { checked: true, dispatched: 0, failed: 0 };
   }
   if (gateway.canSend !== true) {
-    const message = "Personal WeChat sidecar is reachable only after /health declares canSend=true.";
+    const message = gateway.canReceive === true
+      ? "Personal WeChat sidecar can receive messages, but canSend=true is required before dispatching outbound jobs."
+      : "Personal WeChat sidecar is reachable only after /health declares canReceive=true or canSend=true.";
     const receiveResult = await pullInbound(config, gateway);
     return { checked: true, dispatched: 0, failed: 0, message, canSend: false, ...receiveResult };
   }

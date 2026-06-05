@@ -705,6 +705,38 @@ h3 {
   line-height: 1.45;
 }
 
+.info-box {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.info-box strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.info-box p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.qr-login-box textarea {
+  min-height: 72px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.warning-tag {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
 .inline-check {
   display: inline-flex;
   width: fit-content;

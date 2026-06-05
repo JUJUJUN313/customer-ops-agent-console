@@ -30,6 +30,8 @@ export const initialState = {
       supportsRecall: false,
       supportsAck: false,
       loginStatus: "未连接",
+      loginQrCodeUrl: "",
+      loginQrCodeText: "",
       cursor: "",
       status: "Mock待接",
       lastConnectedAt: "",

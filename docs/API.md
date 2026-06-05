@@ -458,7 +458,7 @@ npm run personal-wechat:gateway -- --once
 
 个人微信Sidecar最小接口：
 
-- `GET /health`：返回 `canReceive`、`canSend`、`supportsAck`、`supportsConfirm`、`supportsRecall`、`sendMode`、`loginStatus`。
+- `GET /health`：返回 `canReceive`、`canSend`、`supportsAck`、`supportsConfirm`、`supportsRecall`、`sendMode`、`loginStatus`；如果需要扫码登录，可返回 `loginQrCodeUrl` 或 `loginQrCodeText`。
 - `POST /messages`：接收 `{ accountId, cursor, limit }`，返回 `{ messages, confirmations, nextCursor }`。
 - `POST /ack`：接收 `{ accountId, cursor, messageIds }`，确认主系统已处理消息。
 - `POST /send`：接收 `{ jobId, accountId, roomId, roomName, text, triggerMessageIds }`，返回 `gatewayRequestId/externalMessageId`。

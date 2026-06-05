@@ -362,6 +362,8 @@ async function handleApi(req, res, pathname) {
         supportsRecall: false,
         supportsAck: false,
         loginStatus: "Mock运行中",
+        loginQrCodeUrl: "",
+        loginQrCodeText: "",
         detail: "当前为Mock本地验证模式，不会调用外部Sidecar"
       }));
       return json(res, 200, { ok: true, mode: "mock", state: publicState(nextState) });
@@ -396,6 +398,8 @@ async function handleApi(req, res, pathname) {
       const supportsRecall = ok && (capability.supportsRecall === true || capability.recall?.enabled === true);
       const supportsAck = ok && (capability.supportsAck === true || capability.ack?.enabled === true);
       const loginStatus = capability.loginStatus || capability.account?.loginStatus || capability.account?.status || (ok ? "Sidecar可达" : "未连接");
+      const loginQrCodeUrl = capability.loginQrCodeUrl || capability.qrCodeUrl || capability.login?.qrCodeUrl || capability.account?.qrCodeUrl || "";
+      const loginQrCodeText = capability.loginQrCodeText || capability.qrCodeText || capability.login?.qrCodeText || capability.account?.qrCodeText || "";
       const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
         status: ok ? canSend || canReceive ? "Sidecar可用" : "Sidecar可达但能力不足" : "检查失败",
         connected: ok,
@@ -406,17 +410,22 @@ async function handleApi(req, res, pathname) {
         supportsRecall,
         supportsAck,
         loginStatus,
+        loginQrCodeUrl,
+        loginQrCodeText,
         detail: ok
           ? `Sidecar健康检查 ${result.httpStatus}，${result.latencyMs}ms，接收 ${canReceive ? "可用" : "不可用"}，发送 ${canSend ? "可用" : "不可用"}，登录态 ${loginStatus}`
           : `Sidecar健康检查失败 HTTP ${result.httpStatus}`,
         error: ok ? canSend || canReceive ? "" : "Sidecar未声明canSend=true或canReceive=true" : `Sidecar健康检查失败 HTTP ${result.httpStatus}`
       }));
-      return json(res, 200, { ok: ok && (canSend || canReceive), url: healthUrl, result, capability: { canSend, canReceive, sendMode, supportsConfirm, supportsRecall, supportsAck, loginStatus }, state: publicState(nextState) });
+      return json(res, 200, { ok: ok && (canSend || canReceive), url: healthUrl, result, capability: { canSend, canReceive, sendMode, supportsConfirm, supportsRecall, supportsAck, loginStatus, loginQrCodeUrlConfigured: Boolean(loginQrCodeUrl), loginQrCodeTextConfigured: Boolean(loginQrCodeText) }, state: publicState(nextState) });
     } catch (error) {
       const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
         status: "检查失败",
         canSend: false,
         canReceive: false,
+        loginStatus: "未连接",
+        loginQrCodeUrl: "",
+        loginQrCodeText: "",
         detail: "统一出站Sidecar不可达",
         error: error.message
       }));

@@ -156,6 +156,8 @@ const defaultPersonalWechatState = {
     supportsRecall: false,
     supportsAck: false,
     loginStatus: "未连接",
+    loginQrCodeUrl: "",
+    loginQrCodeText: "",
     cursor: "",
     status: "Mock待接",
     lastConnectedAt: "",
@@ -2783,6 +2785,7 @@ function renderWecom() {
           <div class="field"><label>发送能力</label><input value="${personalGateway.canSend ? "canSend=true，可交给真实Sidecar" : "canSend=false，不能真实发送"}" disabled></div>
           <div class="field"><label>接收能力</label><input value="${personalGateway.canReceive ? "canReceive=true，可读取消息" : "canReceive=false，不能真实读取"}" disabled></div>
           <div class="field"><label>登录状态</label><input value="${escapeHtml(personalGateway.loginStatus || "未连接")}" disabled></div>
+          <div class="field"><label>扫码登录</label><input value="${personalGateway.loginQrCodeUrl || personalGateway.loginQrCodeText ? "Sidecar已返回二维码，请扫码登录" : "暂无二维码"}" disabled></div>
           <div class="field"><label>发送模式</label><input value="${escapeHtml(personalGateway.sendMode || "proactive")}" disabled></div>
           <div class="field"><label>ACK/回读/撤回</label><input value="${personalGateway.supportsAck ? "支持ACK" : "未声明ACK"} / ${personalGateway.supportsConfirm ? "支持回读" : "未声明回读"} / ${personalGateway.supportsRecall ? "支持撤回" : "未声明撤回"}" disabled></div>
           <label class="inline-check compact-check"><input name="account.autoReply" type="checkbox" value="true" ${personalAccount.autoReply ? "checked" : ""}><span>低风险自动排队</span></label>
@@ -2795,6 +2798,11 @@ function renderWecom() {
           <div class="field"><label>连续消息合并秒</label><input name="account.mergeWindowSeconds" type="number" min="5" max="300" value="${escapeHtml(personalAccount.mergeWindowSeconds)}"></div>
           <button class="primary-button full-span" type="submit" ${actionAttrs("save-personal-wechat-config")}>保存个人微信配置</button>
         </div>
+        ${personalGateway.loginQrCodeUrl || personalGateway.loginQrCodeText ? `<div class="info-box qr-login-box">
+          <strong>需要扫码登录个人微信</strong>
+          <p>${personalGateway.loginQrCodeUrl ? `二维码链接：${escapeHtml(personalGateway.loginQrCodeUrl)}` : "Sidecar已返回二维码文本，请在Sidecar控制台或二维码工具中扫码。"}</p>
+          ${personalGateway.loginQrCodeText ? `<textarea readonly>${escapeHtml(personalGateway.loginQrCodeText)}</textarea>` : ""}
+        </div>` : ""}
       </article>
 
       <article class="panel">
@@ -2821,6 +2829,7 @@ function renderWecom() {
               <span class="tag">${personalGateway.canSend ? "可真实发送" : "不可真实发送"}</span>
               <span class="tag">${personalGateway.canReceive ? "可真实读取" : "不可真实读取"}</span>
               <span class="tag">登录 ${escapeHtml(personalGateway.loginStatus || "未连接")}</span>
+              ${personalGateway.loginQrCodeUrl || personalGateway.loginQrCodeText ? `<span class="tag warning-tag">待扫码</span>` : ""}
               <span class="tag">模式 ${escapeHtml(personalGateway.sendMode || "proactive")}</span>
               <span class="tag">${personalGateway.supportsConfirm ? "支持回读" : "未声明回读"}</span>
               <span class="tag">${personalGateway.supportsAck ? "支持ACK" : "未声明ACK"}</span>

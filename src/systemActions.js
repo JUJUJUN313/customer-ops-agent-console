@@ -943,6 +943,8 @@ function normalizePersonalWechatGateway(gateway = {}, current = DEFAULT_PERSONAL
     supportsRecall: gateway.supportsRecall === undefined ? Boolean(current.supportsRecall) : gateway.supportsRecall === true || gateway.supportsRecall === "true",
     supportsAck: gateway.supportsAck === undefined ? Boolean(current.supportsAck) : gateway.supportsAck === true || gateway.supportsAck === "true",
     loginStatus: cleanLimitedText(gateway.loginStatus, current.loginStatus || "未连接", 80),
+    loginQrCodeUrl: cleanLimitedText(gateway.loginQrCodeUrl, current.loginQrCodeUrl || "", 500),
+    loginQrCodeText: cleanLimitedText(gateway.loginQrCodeText, current.loginQrCodeText || "", 2000),
     cursor: cleanLimitedText(gateway.cursor, current.cursor || "", 220),
     status: cleanLimitedText(gateway.status, current.status || "Mock待接", 60),
     lastConnectedAt: cleanLimitedText(gateway.lastConnectedAt, current.lastConnectedAt || "", 80),
@@ -3326,6 +3328,8 @@ export function updatePersonalWechatGatewayStatusAction(inputState, payload = {}
   if (payload.supportsRecall !== undefined) gateway.supportsRecall = payload.supportsRecall === true || payload.supportsRecall === "true";
   if (payload.supportsAck !== undefined) gateway.supportsAck = payload.supportsAck === true || payload.supportsAck === "true";
   if (payload.loginStatus !== undefined) gateway.loginStatus = cleanLimitedText(payload.loginStatus, gateway.loginStatus || "未连接", 80);
+  if (payload.loginQrCodeUrl !== undefined) gateway.loginQrCodeUrl = cleanLimitedText(payload.loginQrCodeUrl, "", 500);
+  if (payload.loginQrCodeText !== undefined) gateway.loginQrCodeText = cleanLimitedText(payload.loginQrCodeText, "", 2000);
   if (payload.cursor !== undefined) gateway.cursor = cleanLimitedText(payload.cursor, gateway.cursor || "", 220);
   if (payload.lastPulledAt !== undefined) gateway.lastPulledAt = cleanLimitedText(payload.lastPulledAt, gateway.lastPulledAt || "", 80);
   if (payload.lastAckAt !== undefined) gateway.lastAckAt = cleanLimitedText(payload.lastAckAt, gateway.lastAckAt || "", 80);
@@ -3338,6 +3342,13 @@ export function updatePersonalWechatGatewayStatusAction(inputState, payload = {}
     config.account.status = "Gateway异常";
     config.account.lastError = gateway.lastError;
     if (payload.loginStatus === undefined) gateway.loginStatus = "未连接";
+    if (payload.canSend === false) gateway.canSend = false;
+    if (payload.canReceive === false) gateway.canReceive = false;
+    gateway.supportsConfirm = false;
+    gateway.supportsRecall = false;
+    gateway.supportsAck = false;
+    if (payload.loginQrCodeUrl === undefined) gateway.loginQrCodeUrl = "";
+    if (payload.loginQrCodeText === undefined) gateway.loginQrCodeText = "";
   } else if (gateway.mode === "sidecar") {
     config.account.status = gateway.loginStatus && gateway.loginStatus !== "未连接" ? gateway.loginStatus : "Sidecar可达";
     config.account.lastError = "";

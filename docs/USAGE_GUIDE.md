@@ -449,7 +449,7 @@ Sidecar建议至少提供：
 
 1. 将个人微信Gateway模式改为“Sidecar真实发送”。
 2. 填入 `sidecarUrl`、`sendEndpoint`、`receiveEndpoint`、`ackEndpoint`，保存配置。
-3. 运行 `npm run personal-wechat:gateway -- --check`，确认Sidecar能力中 `canReceive=true`、`canSend=true`、`supportsAck=true` 和登录态正常。
+3. 运行 `npm run personal-wechat:gateway -- --check`，确认Sidecar能力中 `canReceive=true`、`canSend=true`、`supportsAck=true` 和登录态正常；如果检查结果显示 `qrCodeAvailable=true`，先扫码登录个人微信后再继续。
 4. 运行 `npm run personal-wechat:gateway -- --once`，确认真实个人微信消息被拉取到会话工作台，并且ACK游标写入Gateway状态。
 5. 运行发送调度，确认低风险任务进入 `sending`。
 6. 再运行 `npm run personal-wechat:gateway -- --once`，由脚本调用外部Sidecar发送接口，任务进入 `sent_pending_confirm`。
