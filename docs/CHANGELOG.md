@@ -6,10 +6,12 @@
 
 - 新增企微智能机器人真实联调闭环：普通测试群中通过企微成员选择器真实 @ “测试机器人 1” 后，bridge 已验证可读取真实群消息并按 `chatid` 写入会话工作台；临时开启 `aibot.autoReply` 后，机器人可在企微群内真实回复。
 - 新增企微机器人出站回写：bridge 成功调用 `replyStream` 后会把机器人回复以 `direction=outbound` 写入 `/api/wecom/inbound`，会话工作台展示为出站消息，企微日志记录为 `消息出站` 且 `externalSideEffects=true`。
-- 新增真实企微接入收敛：企微接入页调整为真实连接中心，突出会话存档主读取、智能机器人测试入口和统一出站Sidecar，模拟入站统一折叠到高级调试区。
+- 增强个人微信Sidecar Gateway：`npm run personal-wechat:gateway` 从单纯发送器升级为接收/ACK/发送/确认循环，支持 `/health` 能力检查、`receiveEndpoint` 拉取消息、`ackEndpoint` 回写游标、`sendEndpoint` 出站发送和自回显 `confirmations`。
+- 新增个人微信真实契约联调：使用临时Sidecar验证 `canReceive=true/canSend=true/supportsAck=true` 后，已跑通“拉取客户消息 -> ACK -> SendScheduler进入sending -> Sidecar发送 -> sent_pending_confirm -> 自回显confirmed”完整闭环。
+- 新增真实企微/个微接入收敛：企微接入页调整为真实连接中心，突出会话存档主读取、智能机器人测试入口和个人微信Sidecar，模拟入站统一折叠到高级调试区。
 - 新增会话存档ACK闭环：`scripts/wecom-archive-gateway.mjs` 成功写入 `/api/wecom/archive/inbound` 后会调用Sidecar `/ack` 回写 `cursor/seq/messageIds`，并把 `lastAckAt` 回写到状态。
 - 新增会话存档非文本兜底：图片、文件、语音等无正文消息会以占位文本进入会话，并生成客服人工查看任务，避免真实拉取时丢消息。
-- 新增统一出站Sidecar能力门禁：Sidecar `/health` 必须声明 `canSend=true`，SendScheduler才会把任务调度到 `sending`；否则任务保持待发送并写入明确原因。
+- 新增个人微信Sidecar能力门禁：Sidecar `/health` 必须声明 `canReceive=true` 才会拉取消息，声明 `canSend=true` 后SendScheduler才会把任务调度到 `sending`；否则任务保持待处理并写入明确原因。
 - 新增业务会话工作台能力层：默认聚合企微会话存档、企微智能机器人和个人微信/统一Sidecar真实来源，提供类企微/微信三栏聊天界面、会话搜索、来源筛选、状态筛选、客户绑定、回复入队、客户档案、任务、报价和发送队列展示；本地模拟只在“本地调试”筛选中出现。
 - 导航按业务重新收口：群聊管理改为“VIP群管理”，仅保留VIP客户、VIP会话、报价订阅、群触达草稿和群聊任务；企微接入和消息入站移入设置。
 - 客户池改为列表优先：进入客户档案/电销客户池/销售客户/VIP客户时先看到客户列表，右上角“新增档案”进入二级新增页，双击客户行进入二级详情维护页。
@@ -25,12 +27,12 @@
 - 新增企微会话内容存档标准入站骨架：`wecomConfig.archive` 保存启用状态、服务名、游标、最近拉取时间和错误；`POST /api/wecom/archive/inbound` 接收WeComArchiveGateway标准化后的外部群消息。
 - 新增统一入站消息结构：企微会话存档和个人微信Mock消息都会归一为 `InboundGroupMessage`，按 `roomId/chatId` 隔离上下文，并按 `messageId` 去重。
 - 新增个人微信 SendScheduler：`POST /api/personal-wechat/send-scheduler/run` 按同群FIFO、账号并发、分钟上限、队列过期重判和失败退避调度低风险 `queued` 任务。
-- 新增统一出站Sidecar调度器：`scripts/personal-wechat-send-gateway.mjs` 和 `npm run personal-wechat:gateway`，支持 `--check`、`--once` 和持续轮询 `sending` 任务。
+- 新增统一Sidecar调度器：`scripts/personal-wechat-send-gateway.mjs` 和 `npm run personal-wechat:gateway`，支持 `--check`、`--once`、持续轮询接收消息和处理 `sending` 任务。
 - 新增个人微信高风险人工放行接口：`POST /api/personal-wechat/send-jobs/:jobId/approve`，`manual_required` 放行后回到 `queued`，仍需SendScheduler调度。
 - 新增个人微信Gateway已发送回调接口：`POST /api/personal-wechat/send-jobs/:jobId/dispatched`，外部Sidecar提交发送后进入 `sent_pending_confirm`。
 - 新增个人微信发送失败接口：`POST /api/personal-wechat/send-jobs/:jobId/fail` 记录失败次数、失败原因、退避时间和人工接管日志。
 - 新增连续客户消息合并：同一群在合并窗口内的连续客户消息会更新同一个活跃发送任务，避免多次排队和旧回复刷屏。
-- 新增企微/个人微信接入总控：企微接入页顶部集中展示会话存档、智能机器人、测试群发送和统一出站Sidecar四条链路的配置状态、队列状态和运行边界。
+- 新增企微/个人微信接入总控：企微接入页顶部集中展示会话存档、智能机器人、测试群发送和个人微信Sidecar四条链路的配置状态、队列状态和运行边界。
 - 新增会话存档Sidecar健康检查接口：`POST /api/wecom/archive/check-sidecar`，检查存档配置完整度并访问 `sidecarUrl/health`，结果回写存档状态和企微日志。
 - 新增个人微信Gateway健康检查接口：`POST /api/personal-wechat/gateway/check`，区分 Mock、Sidecar 和停用模式，结果写入Gateway状态、账号状态、运行日志和审计。
 - 新增企微群绑定搜索和最近企微记录类型筛选，便于按群名、客户名、`chatid`、来源、状态和日志类型排查接入问题。
@@ -49,13 +51,13 @@
 - 企微接入页从“复杂配置面板”优化为“接入总控 + 连接配置 + 测试工具 + 群归档 + 日志”的业务排障结构，降低销售/运营理解Gateway状态的成本。
 - 会话存档Sidecar检查只验证本地配置和 `/health` 可达性，不上传企微Secret或RSA私钥；个人微信Gateway检查不发送客户消息。
 - 会话存档Sidecar检查会读取 `/health` 能力声明，只有Sidecar可达且具备拉取/解密能力才显示通过。
-- 统一出站Sidecar检查会读取 `canSend/sendMode/supportsConfirm/supportsRecall` 能力声明；Mock模式明确标记为本地演练，不代表真实发送。
+- 个人微信Sidecar检查会读取 `canReceive/canSend/sendMode/supportsAck/supportsConfirm/supportsRecall/loginStatus` 能力声明；Mock模式明确标记为本地演练，不代表真实接入。
 - 修复 `npm run wecom:archive -- --check` 失败时只返回退出码、缺少明确终端输出的问题；现在会输出包含 `ok`、`missing`、`gatewayMode`、`sidecarUrl` 和 `message` 的 JSON，方便排障和脚本读取。
 - 能力审计、稳定性审计、API文档、架构文档、项目说明、测试文档和完整使用文档同步更新会话存档、AccountAgent和SendScheduler边界。
 
 ### 验证
 
-- `npm test`：新增企微机器人出站回写断言；既有企微会话存档入站去重、非文本占位任务、会话工作台投影/绑定/回复、会话存档Gateway状态回写、统一出站Sidecar能力门禁、个人微信Gateway健康检查、同群连续客户消息合并、SendScheduler并发调度/回读确认、人工放行、Sidecar发送回调、分钟上限和发送失败退避断言继续覆盖。
+- `npm test`：新增企微机器人出站回写断言；既有企微会话存档入站去重、非文本占位任务、会话工作台投影/绑定/回复、会话存档Gateway状态回写、个人微信Sidecar能力门禁、个人微信Gateway健康检查、同群连续客户消息合并、SendScheduler并发调度/回读确认、人工放行、Sidecar发送回调、分钟上限和发送失败退避断言继续覆盖。
 - `node --check src/app.js`
 - `node --check src/systemActions.js`
 - `node --check src/api.js`

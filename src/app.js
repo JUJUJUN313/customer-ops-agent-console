@@ -147,13 +147,21 @@ const defaultPersonalWechatState = {
     mode: "mock",
     sidecarUrl: "",
     sendEndpoint: "/send",
+    receiveEndpoint: "/messages",
+    ackEndpoint: "/ack",
     canSend: false,
+    canReceive: false,
     sendMode: "proactive",
     supportsConfirm: false,
     supportsRecall: false,
+    supportsAck: false,
+    loginStatus: "未连接",
+    cursor: "",
     status: "Mock待接",
     lastConnectedAt: "",
     lastEventAt: "",
+    lastPulledAt: "",
+    lastAckAt: "",
     lastError: ""
   },
   account: {
@@ -533,9 +541,11 @@ function normalizePersonalWechatState(config = {}) {
     gateway: {
       ...gateway,
       canSend: Boolean(gateway.canSend),
+      canReceive: Boolean(gateway.canReceive),
       sendMode: gateway.sendMode === "reply_window" ? "reply_window" : "proactive",
       supportsConfirm: Boolean(gateway.supportsConfirm),
-      supportsRecall: Boolean(gateway.supportsRecall)
+      supportsRecall: Boolean(gateway.supportsRecall),
+      supportsAck: Boolean(gateway.supportsAck)
     },
     account: {
       ...account,
@@ -996,8 +1006,8 @@ function renderTruthPanel() {
     ? "企微会话存档主读取链路已配置，可通过Sidecar拉取和ACK真实会话消息。"
     : "企微会话存档主读取链路已接好，需要补齐CorpID、Secret、RSA私钥和Sidecar后才能真实拉取。";
   const outboundStatus = outboundReady
-    ? "统一出站Sidecar已声明canSend=true，低风险回复可进入真实出站调度，仍需回读确认。"
-    : "统一出站Sidecar未声明canSend=true，回复只会入队、人工确认或保存草稿，不会伪装已发送。";
+    ? "个人微信Sidecar已声明canSend=true，低风险回复可进入真实出站调度，仍需回读确认。"
+    : "个人微信Sidecar未声明canSend=true，回复只会入队、人工确认或保存草稿，不会伪装已发送。";
   const testSendStatus = wecomReady
     ? "测试群机器人可发送人工确认后的草稿。"
     : "测试群机器人需配置Webhook后才能发送测试消息。";
@@ -2444,7 +2454,9 @@ function personalWechatConfigPayload(form) {
     gateway: {
       mode: data["gateway.mode"] || defaultPersonalWechatState.gateway.mode,
       sidecarUrl: data["gateway.sidecarUrl"] || "",
-      sendEndpoint: data["gateway.sendEndpoint"] || defaultPersonalWechatState.gateway.sendEndpoint
+      sendEndpoint: data["gateway.sendEndpoint"] || defaultPersonalWechatState.gateway.sendEndpoint,
+      receiveEndpoint: data["gateway.receiveEndpoint"] || defaultPersonalWechatState.gateway.receiveEndpoint,
+      ackEndpoint: data["gateway.ackEndpoint"] || defaultPersonalWechatState.gateway.ackEndpoint
     },
     account: {
       id: data["account.id"] || defaultPersonalWechatState.account.id,
@@ -2627,6 +2639,7 @@ function renderWecom() {
   const routeReady = config.enabled && readyRoutes.length > 0;
   const personalGatewayConfigured = personalGateway.mode === "sidecar" && personalGateway.sidecarUrl && personalGateway.sendEndpoint;
   const personalGatewayCanSend = personalGatewayConfigured && personalGateway.canSend === true;
+  const personalGatewayCanReceive = personalGatewayConfigured && personalGateway.canReceive === true;
   const normalizedBindingSearch = wecomBindingSearchQuery.trim().toLowerCase();
   const filteredBindings = bindings.filter((binding) => {
     if (!normalizedBindingSearch) return true;
@@ -2712,16 +2725,18 @@ function renderWecom() {
           action: `<button class="small-button" type="button" data-jump-wecom-section="wecom-send-test">查看发送测试</button>`
         })}
         ${renderIntegrationCard({
-          title: "统一出站Sidecar",
-          subtitle: "确认回复真实发回群的唯一出口",
+          title: "个人微信Sidecar",
+          subtitle: "个人微信接收、发送和确认出口",
           status: personalGatewayCanSend ? personalGateway.status || "可发送" : personalGateway.mode === "mock" ? "Mock不可真实发送" : personalGateway.status || "Gateway未完成",
-          tone: personalGatewayCanSend ? "success" : "warning",
-          body: personalGatewayCanSend ? "Sidecar已声明canSend=true，SendScheduler可把确认后的任务交给真实出站服务；回读确认前仍不算闭环。" : "未连接可发送Sidecar时，聊天回复只会生成草稿、待发送或人工确认任务，不会显示真实已发送。",
+          tone: personalGatewayCanSend || personalGatewayCanReceive ? "success" : "warning",
+          body: personalGatewayCanSend ? "Sidecar已声明canSend=true，SendScheduler可把确认后的任务交给真实出站服务；回读确认前仍不算闭环。" : personalGatewayCanReceive ? "Sidecar已声明canReceive=true，可读取个人微信消息；但未声明发送能力，回复不会真实外发。" : "未连接可发送Sidecar时，聊天回复只会生成草稿、待发送或人工确认任务，不会显示真实已发送。",
           tags: [
             personalWechat.enabled ? "已启用" : "已停用",
             `模式 ${personalGateway.mode || "mock"}`,
             personalGateway.sidecarUrl ? "Sidecar URL已填" : "无Sidecar URL",
             personalGateway.canSend ? "canSend=true" : "canSend=false",
+            personalGateway.canReceive ? "canReceive=true" : "canReceive=false",
+            `登录 ${personalGateway.loginStatus || "未连接"}`,
             `发送模式 ${personalGateway.sendMode || "proactive"}`,
             personalGateway.supportsConfirm ? "支持回读确认" : "未声明回读",
             `待发 ${personalQueuedJobs.length}`,
@@ -2729,7 +2744,7 @@ function renderWecom() {
             `待回读 ${personalSentJobs.length}`,
             `人工 ${personalManualJobs.length}`
           ],
-          action: `<button class="small-button" id="checkPersonalWechatGateway" type="button" ${actionAttrs("personal-wechat-gateway-check")}>检查出站Sidecar</button>`
+          action: `<button class="small-button" id="checkPersonalWechatGateway" type="button" ${actionAttrs("personal-wechat-gateway-check")}>检查个人微信Sidecar</button>`
         })}
       </div>
     </section>
@@ -2746,8 +2761,8 @@ function renderWecom() {
       <article class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">统一出站Sidecar与AccountAgent</h2>
-            <p class="panel-subtitle">确认后的回复只通过SendScheduler进入统一Sidecar；Mock只做本地演练，不代表真实发回群。</p>
+            <h2 class="panel-title">个人微信Sidecar与AccountAgent</h2>
+            <p class="panel-subtitle">真实读取、发送和回读确认都通过Sidecar接入；Mock只做本地演练，不代表真实发回群。</p>
           </div>
         </div>
         <div class="form-grid compact-form">
@@ -2759,13 +2774,17 @@ function renderWecom() {
           <div class="field"><label>账号名称</label><input name="account.name" value="${escapeHtml(personalAccount.name)}"></div>
           <div class="field"><label>群内显示名</label><input name="account.displayName" value="${escapeHtml(personalAccount.displayName)}"></div>
           <div class="field"><label>默认客户</label><select name="account.defaultCustomerId">${customerOptions(personalDefaultCustomer)}</select></div>
-          <div class="field"><label>出站模式</label><select name="gateway.mode"><option value="mock" ${personalGateway.mode === "mock" ? "selected" : ""}>Mock本地演练</option><option value="sidecar" ${personalGateway.mode === "sidecar" ? "selected" : ""}>Sidecar真实发送</option><option value="disabled" ${personalGateway.mode === "disabled" ? "selected" : ""}>停用出站</option></select></div>
+          <div class="field"><label>Gateway模式</label><select name="gateway.mode"><option value="mock" ${personalGateway.mode === "mock" ? "selected" : ""}>Mock本地演练</option><option value="sidecar" ${personalGateway.mode === "sidecar" ? "selected" : ""}>Sidecar真实接入</option><option value="disabled" ${personalGateway.mode === "disabled" ? "selected" : ""}>停用Gateway</option></select></div>
           <div class="field"><label>Sidecar URL</label><input name="gateway.sidecarUrl" value="${escapeHtml(personalGateway.sidecarUrl || "")}" placeholder="http://127.0.0.1:8788"></div>
           <div class="field"><label>发送端点</label><input name="gateway.sendEndpoint" value="${escapeHtml(personalGateway.sendEndpoint || "/send")}"></div>
+          <div class="field"><label>拉取端点</label><input name="gateway.receiveEndpoint" value="${escapeHtml(personalGateway.receiveEndpoint || "/messages")}"></div>
+          <div class="field"><label>ACK端点</label><input name="gateway.ackEndpoint" value="${escapeHtml(personalGateway.ackEndpoint || "/ack")}"></div>
           <div class="field"><label>Gateway状态</label><input value="${escapeHtml(personalGateway.status || "未配置")}" disabled></div>
           <div class="field"><label>发送能力</label><input value="${personalGateway.canSend ? "canSend=true，可交给真实Sidecar" : "canSend=false，不能真实发送"}" disabled></div>
+          <div class="field"><label>接收能力</label><input value="${personalGateway.canReceive ? "canReceive=true，可读取消息" : "canReceive=false，不能真实读取"}" disabled></div>
+          <div class="field"><label>登录状态</label><input value="${escapeHtml(personalGateway.loginStatus || "未连接")}" disabled></div>
           <div class="field"><label>发送模式</label><input value="${escapeHtml(personalGateway.sendMode || "proactive")}" disabled></div>
-          <div class="field"><label>回读/撤回能力</label><input value="${personalGateway.supportsConfirm ? "支持回读确认" : "未声明回读"} / ${personalGateway.supportsRecall ? "支持撤回" : "未声明撤回"}" disabled></div>
+          <div class="field"><label>ACK/回读/撤回</label><input value="${personalGateway.supportsAck ? "支持ACK" : "未声明ACK"} / ${personalGateway.supportsConfirm ? "支持回读" : "未声明回读"} / ${personalGateway.supportsRecall ? "支持撤回" : "未声明撤回"}" disabled></div>
           <label class="inline-check compact-check"><input name="account.autoReply" type="checkbox" value="true" ${personalAccount.autoReply ? "checked" : ""}><span>低风险自动排队</span></label>
           <label class="inline-check compact-check"><input name="account.requireApprovalForRisk" type="checkbox" value="true" ${personalAccount.requireApprovalForRisk ? "checked" : ""}><span>高风险人工确认</span></label>
           <div class="field"><label>最小发送间隔秒</label><input name="account.minSendIntervalSeconds" type="number" min="1" max="60" value="${escapeHtml(personalAccount.minSendIntervalSeconds)}"></div>
@@ -2800,8 +2819,12 @@ function renderWecom() {
               ${personalGateway.sidecarUrl ? `<span class="tag">${escapeHtml(personalGateway.sidecarUrl)}${escapeHtml(personalGateway.sendEndpoint || "/send")}</span>` : ""}
               <span class="tag">${escapeHtml(personalGateway.status || "未配置")}</span>
               <span class="tag">${personalGateway.canSend ? "可真实发送" : "不可真实发送"}</span>
+              <span class="tag">${personalGateway.canReceive ? "可真实读取" : "不可真实读取"}</span>
+              <span class="tag">登录 ${escapeHtml(personalGateway.loginStatus || "未连接")}</span>
               <span class="tag">模式 ${escapeHtml(personalGateway.sendMode || "proactive")}</span>
               <span class="tag">${personalGateway.supportsConfirm ? "支持回读" : "未声明回读"}</span>
+              <span class="tag">${personalGateway.supportsAck ? "支持ACK" : "未声明ACK"}</span>
+              ${personalGateway.cursor ? `<span class="tag">游标 ${escapeHtml(personalGateway.cursor)}</span>` : ""}
               <span class="tag">限频 ${escapeHtml(personalAccount.minSendIntervalSeconds)} 秒</span>
               <span class="tag">并发 ${escapeHtml(personalAccount.concurrency)}</span>
               <span class="tag">分钟 ${escapeHtml(personalAccount.maxSendsPerMinute)} 条</span>

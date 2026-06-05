@@ -2,7 +2,7 @@
 
 面向有历史交易数据的平台客户运营场景，本项目用于验证一套从“意向客户筛选、销售承接、VIP群维护、报价推送、任务闭环、数据回流”到“模型与企微/个人微信接入”的一体化客户运营系统。
 
-当前版本是 **本地可运行验证版 + 真实企微接入准备版**：系统会真实写入本地客户档案、任务、报价、会话、触达草稿、模型配置、企微配置、统一出站Sidecar状态、Agent运行记录和审计日志；不会真实外呼、发短信、发企微私聊或同步CRM。企微智能机器人可作为测试真实读取入口；生产主读取链路以企微会话内容存档Sidecar为准。确认回复只有在出站Sidecar声明 `canSend=true` 后才会真实发送，且回读确认前不能算闭环完成。
+当前版本是 **本地可运行验证版 + 真实企微/个人微信接入准备版**：系统会真实写入本地客户档案、任务、报价、会话、触达草稿、模型配置、企微配置、个人微信Sidecar状态、Agent运行记录和审计日志；不会真实外呼、发短信、发企微私聊或同步CRM。企微智能机器人可作为测试真实读取入口；生产主读取链路以企微会话内容存档Sidecar为准。个人微信消息读取需要Sidecar声明 `canReceive=true`，确认回复只有在Sidecar声明 `canSend=true` 后才会真实发送，且回读确认前不能算闭环完成。
 
 ## 目录
 
@@ -49,8 +49,8 @@
 | 任务中心 | 统一任务、负责人角色、SLA、批量状态更新、超时主管升级和完成时间回写 | 未接排班、提醒和关闭质检 |
 | 触达草稿 | Agent和人工生成待确认文案，支持确认、复制、废弃、批量处理、高风险阻断 | 默认不触达客户；只有测试群Webhook会真实发送 |
 | 模型配置 | 全局LLM、Agent独立LLM覆盖、ASR/TTS配置保存、OpenAI兼容连接测试、按需LLM增强 | ASR/TTS尚未真实调用；生产需密钥管理 |
-| 企微接入 | 真实连接中心、会话内容存档Sidecar配置和ACK、智能机器人真实测试入口、统一出站Sidecar能力声明、群绑定、日志筛选、消息去重和脱敏配置 | 官方会话存档SDK或第三方协议服务需在Sidecar内完成拉取/解密/登录态 |
-| 统一出站Sidecar / AccountAgent | 单账号多群上下文、低风险队列、高风险人工确认、人工放行、连续消息合并、SendScheduler、`canSend`能力校验、Sidecar出站回调、失败退避、回读确认 | 默认Mock只能本地演练；真实登录、协议发送和自回显监听由外部Sidecar承担 |
+| 企微接入 | 真实连接中心、会话内容存档Sidecar配置和ACK、智能机器人真实测试入口、个人微信Sidecar能力声明、群绑定、日志筛选、消息去重和脱敏配置 | 官方会话存档SDK或第三方协议服务需在Sidecar内完成拉取/解密/登录态 |
+| 个人微信Sidecar / AccountAgent | 单账号多群上下文、标准入站、ACK游标、低风险队列、高风险人工确认、人工放行、连续消息合并、SendScheduler、`canReceive/canSend`能力校验、Sidecar出站回调、失败退避、回读确认 | 默认Mock只能本地演练；真实登录、协议收发和自回显监听由外部Sidecar承担 |
 | 稳定性与审计 | 输入校验、状态自检、敏感信息脱敏、静态访问拦截、审计日志、61个自动化测试 | 本地JSON不是生产数据库 |
 
 ## 业务闭环
@@ -165,13 +165,13 @@ Gateway 默认调用你配置的 Sidecar `/pull` 接口，由 Sidecar 负责企�
 npm run wecom:bridge -- --check --timeout=20000
 ```
 
-启动统一出站 Sidecar 调度器：
+启动个人微信 Sidecar Gateway：
 
 ```bash
 npm run personal-wechat:gateway
 ```
 
-只检查统一出站 Sidecar 配置：
+只检查个人微信 Sidecar 配置和健康状态：
 
 ```bash
 npm run personal-wechat:gateway -- --check
@@ -216,7 +216,7 @@ data/state.json
 
 ### 个人微信AccountAgent
 
-当前出站链路支持 Mock 演练和统一 Sidecar 真实出站：
+当前个人微信链路支持 Mock 演练和统一 Sidecar 接收/发送联调：
 
 - 一个个人微信账号对应一个 `AccountAgent`。
 - 一个账号维护多个外部群上下文。
@@ -224,6 +224,8 @@ data/state.json
 - 高风险报价、锁价、退款、赔偿、付款、合同、责任承诺进入人工确认。
 - 高风险任务必须人工放行后才会回到 `queued`。
 - SendScheduler负责同群FIFO、账号并发、分钟上限、过期重判和失败退避。
+- Sidecar模式的 `/health` 会声明 `canReceive`、`canSend`、`supportsAck`、`supportsConfirm`、`loginStatus` 等能力。
+- `npm run personal-wechat:gateway` 可从 `receiveEndpoint` 拉取真实个人微信消息，写入 `/api/personal-wechat/inbound`，成功后调用 `ackEndpoint` 回写游标。
 - Mock模式下调度后进入 `sent_pending_confirm`，只用于本地流程验证，不代表真实发送。
 - Sidecar模式必须先通过 `/health` 声明 `canSend=true`，调度后才会进入 `sending`，由 `npm run personal-wechat:gateway` 调用外部发送服务；Gateway回调后进入 `sent_pending_confirm`。
 - 只有自回显或会话存档回读确认后才会进入 `confirmed`，并写入本地会话和事件。
@@ -239,20 +241,20 @@ data/state.json
 | 企微智能机器人长连接 | 已可运行 | 已验证普通测试群真实 @ 入站；可读取真实智能机器人消息并按 `chatid` 归档，回调窗口内真实回复会回写为会话出站消息 |
 | 业务会话工作台 | 已可运行 | 电销、销售、VIP各有入口和默认会话范围，默认只展示真实来源，支持绑定客户、回复入队、待回读和发送失败状态 |
 | 企微会话内容存档 | Sidecar主链路骨架完成 | 已固定 `/health`、`/pull`、`/ack` 契约；真实SDK/协议拉取、解密和客户同意校验由Sidecar适配 |
-| 统一出站Sidecar / AccountAgent | Mock闭环 + Sidecar能力校验完成 | `canSend=true` 后才允许真实出站；真实登录、协议收发、自回显监听和生产风控待接 |
+| 个人微信Sidecar / AccountAgent | Mock闭环 + Sidecar接收/发送契约完成 | `canReceive=true` 后可拉取消息并ACK，`canSend=true` 后才允许真实出站；真实登录、协议适配和生产风控由外部Sidecar承接 |
 | 多人协作规范 | 已建立 | PR模板、CI、CONTRIBUTING和分支规则已建立 |
 | 生产化 | 待建设 | 数据库、权限、密钥管理、审批、监控、外部系统同步待补 |
 
 ## 测试与质量
 
-当前自动化测试覆盖 61 个用例，包括：
+当前自动化测试覆盖 62 个用例，包括：
 
 - Agent基础业务链路。
 - 任务、报价、客户、模板输入校验。
 - 模型配置、LLM连接测试和LLM增强边界。
 - 企微Webhook、智能机器人入站、会话存档入站和消息去重。
 - 电销/销售/VIP会话工作台投影、客户绑定、回复入队和高风险人工确认。
-- 统一出站Sidecar能力声明、AccountAgent、Gateway健康检查、人工放行、SendScheduler、Sidecar出站回调、失败退避和回读确认。
+- 个人微信Sidecar能力声明、AccountAgent、Gateway健康检查、接收/ACK字段、人工放行、SendScheduler、Sidecar出站回调、失败退避和回读确认。
 - 状态自检、能力审计、脏数据恢复和安全边界。
 
 常用检查：
@@ -311,6 +313,6 @@ README 是项目首页，也是外部协作者理解系统的第一入口。只�
 - 真实外呼平台、ASR、TTS、录音和通话质检。
 - 短信、企微私聊、CRM和交易系统同步。
 - 企微会话内容存档真实拉取、消息解密、客户同意校验、`/ack`游标确认和权限审计。
-- 真实统一出站Sidecar、个人微信/企微发送登录态、收发、自回显监听、账号风控和人工审批。
+- 真实个人微信/企微Sidecar生产登录态、收发、自回显监听、账号风控和人工审批。
 - 生产数据库、迁移、备份、权限、密钥管理、监控和告警。
 - LLM知识库、内容安全、成本统计、调用日志和模型评估。

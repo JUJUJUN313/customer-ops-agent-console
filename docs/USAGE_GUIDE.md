@@ -8,7 +8,7 @@
 
 当前系统会真实写入本地状态文件 `data/state.json`，包括客户档案、客户事件、会话上下文、任务、报价、销售样本、模型配置、企微配置、企微群绑定、个人微信AccountAgent队列、触达草稿、Agent运行记录和审计日志。
 
-当前系统不会自动执行真实外呼、短信、CRM同步或企微私聊发送。只有在配置企微测试群机器人Webhook后，人工确认的草稿或测试消息才会真实发送到企微测试群机器人；个人微信或企微群真实回复必须通过统一出站Sidecar，且Sidecar `/health` 明确声明 `canSend=true` 后才允许调度。企微会话内容存档是生产主读取入口，Node主服务负责配置、状态、标准入站、游标、ACK、去重、群归档、会话工作台和AccountAgent链路；真实拉取、解密、登录态、客户同意校验、图片/文件下载和协议适配由独立Sidecar完成。企微智能机器人长连接启动后，可以读取真实企微智能机器人消息并按 `chatid` 独立归档，定位为辅助/测试读取入口。
+当前系统不会自动执行真实外呼、短信、CRM同步或企微私聊发送。只有在配置企微测试群机器人Webhook后，人工确认的草稿或测试消息才会真实发送到企微测试群机器人；个人微信消息读取必须通过Sidecar声明 `canReceive=true`，个人微信或企微群真实回复必须通过Sidecar声明 `canSend=true` 后才允许调度。企微会话内容存档是生产主读取入口，Node主服务负责配置、状态、标准入站、游标、ACK、去重、群归档、会话工作台和AccountAgent链路；真实拉取、解密、登录态、客户同意校验、图片/文件下载和协议适配由独立Sidecar完成。企微智能机器人长连接启动后，可以读取真实企微智能机器人消息并按 `chatid` 独立归档，定位为辅助/测试读取入口。
 
 ## 2. 快速启动
 
@@ -60,13 +60,13 @@ npm run wecom:archive
 npm run wecom:archive -- --check
 ```
 
-启动统一出站Sidecar调度器：
+启动个人微信Sidecar Gateway：
 
 ```bash
 npm run personal-wechat:gateway
 ```
 
-只检查统一出站Sidecar配置：
+只检查个人微信Sidecar配置：
 
 ```bash
 npm run personal-wechat:gateway -- --check
@@ -349,7 +349,7 @@ ASR语音识别和TTS语音合成配置当前用于保存后续语音链路参�
 - “企微会话存档”会显示存档入口、Sidecar URL、Secret、私钥、游标和可信状态，并可点击“检查存档Sidecar”访问 `sidecarUrl/health`。
 - “企微智能机器人”会显示 Bot ID/Secret 是否已保存、bridge状态和自动回复边界，可点击“检查机器人配置”。
 - “企微测试群发送”会显示可用Webhook路由和可发送草稿数量，可跳转到发送测试区域。
-- “统一出站Sidecar”会显示 Mock/Sidecar 模式、`canSend`能力、发送模式、回读能力、待发/发送中/待回读/人工确认队列，并可点击“检查出站Sidecar”。
+- “个人微信Sidecar”会显示 Mock/Sidecar 模式、`canReceive/canSend`能力、登录态、ACK/回读能力、待发/发送中/待回读/人工确认队列，并可点击“检查个人微信Sidecar”。
 
 这些检查不会发送客户消息，也不会携带企微会话存档密钥；它们只检查本地配置和Sidecar健康状态。
 
@@ -415,9 +415,9 @@ Sidecar建议至少提供：
 
 自动回复默认关闭。当前建议先只做消息读取、归档、分流、SendScheduler状态机和任务生成，确认策略稳定后再接生产级发送审批。
 
-### 6.12 统一出站Sidecar与AccountAgent
+### 6.12 个人微信Sidecar与AccountAgent
 
-企微接入页还有统一出站Sidecar与个人微信单账号 AccountAgent 区域，用于验证“一个托管号加入多个外部群，一个账号对应一个Agent”的产品链路。当前支持 Mock 本地验证和 Sidecar 出站对接；真实个人微信登录、协议发送、二维码托管、自回显监听和账号风控由外部Sidecar承担。
+企微接入页还有个人微信Sidecar与单账号 AccountAgent 区域，用于验证“一个托管号加入多个外部群，一个账号对应一个Agent”的产品链路。当前支持 Mock 本地验证和 Sidecar 接收/发送对接；真实个人微信登录、协议收发、二维码托管、自回显监听和账号风控由外部Sidecar承担。
 
 当前能力：
 
@@ -430,7 +430,8 @@ Sidecar建议至少提供：
 - 员工或托管号已回复时取消同群待发。
 - SendScheduler按同群FIFO、账号并发、分钟上限、队列过期和失败退避调度发送。
 - Mock模式下调度后进入“已提交待回读”，不会调用外部服务。
-- Sidecar模式必须先通过 `/health` 声明 `canSend=true`；调度后进入“发送中”，由 `npm run personal-wechat:gateway` 调用外部Sidecar；Sidecar成功回调后进入“已提交待回读”。
+- Sidecar模式通过 `/health` 声明 `canReceive=true` 后，可由 `npm run personal-wechat:gateway` 拉取真实个人微信消息并ACK；声明 `canSend=true` 后，调度任务才会进入“发送中”并调用外部Sidecar发送。
+- Sidecar成功回调后进入“已提交待回读”；下一轮拉到自回显或确认回执后才进入“已确认”。
 - 回读确认后才写入本地会话和客户事件。
 
 推荐测试步骤：
@@ -444,20 +445,22 @@ Sidecar建议至少提供：
 7. 点击“人工放行”，确认任务回到待发送队列；再运行发送调度，确认进入待回读。
 8. 写入员工或托管号回复，确认同群待发任务被取消。
 
-验证Sidecar出站：
+验证Sidecar接收和出站：
 
 1. 将个人微信Gateway模式改为“Sidecar真实发送”。
-2. 填入 `sidecarUrl` 和 `sendEndpoint`，保存配置。
-3. 运行 `npm run personal-wechat:gateway -- --check`，确认配置可读取，并确认Sidecar能力中 `canSend=true`。
-4. 写入低风险客户消息并运行发送调度，确认任务进入 `sending`。
-5. 运行 `npm run personal-wechat:gateway -- --once`，由脚本调用外部Sidecar发送接口。
-6. Sidecar成功后任务进入 `sent_pending_confirm`，仍需回读确认后才变为 `confirmed`。
-7. 在页面“接入总控”点击“检查出站Sidecar”，确认 Mock 或 Sidecar 健康状态能写入运行日志。
+2. 填入 `sidecarUrl`、`sendEndpoint`、`receiveEndpoint`、`ackEndpoint`，保存配置。
+3. 运行 `npm run personal-wechat:gateway -- --check`，确认Sidecar能力中 `canReceive=true`、`canSend=true`、`supportsAck=true` 和登录态正常。
+4. 运行 `npm run personal-wechat:gateway -- --once`，确认真实个人微信消息被拉取到会话工作台，并且ACK游标写入Gateway状态。
+5. 运行发送调度，确认低风险任务进入 `sending`。
+6. 再运行 `npm run personal-wechat:gateway -- --once`，由脚本调用外部Sidecar发送接口，任务进入 `sent_pending_confirm`。
+7. 外部Sidecar通过 `/messages` 返回自回显或 `confirmations` 后，再运行一次 `--once`，确认任务变为 `confirmed`。
+8. 在页面“接入总控”点击“检查个人微信Sidecar”，确认 Mock 或 Sidecar 健康状态能写入运行日志。
 
 当前边界：
 
 - 默认Mock模式不连接真实个人微信，也不真实发送个人微信消息。
-- Sidecar模式只有在 `canSend=true` 后才会把 `sending` 任务交给外部发送服务，外部Sidecar必须自己保证登录态、发送成功、自回显监听、风控和失败回调。
+- Sidecar模式只有在 `canReceive=true` 后才会拉取个人微信消息；只有在 `canSend=true` 后才会把 `sending` 任务交给外部发送服务。
+- 外部Sidecar必须自己保证登录态、扫码托管、协议收发、发送成功、自回显监听、风控和失败回调。
 - 主系统不会把“已提交发送”当成闭环完成，必须等自回显或会话存档回读确认。
 
 ### 6.13 闭环编排
@@ -502,10 +505,10 @@ Sidecar建议至少提供：
 | 真实LLM增强 | 已可用，需配置Key | 否，只生成本地建议和草稿 |
 | 触达草稿确认/复制/废弃 | 已可用 | 否 |
 | 企微测试群机器人发送 | 已可用，需配置Webhook且人工点击 | 是，发送到测试群机器人 |
-| 业务会话工作台 | 已可用 | 否，低风险只入队，高风险人工确认；只有出站Sidecar `canSend=true` 才会真实调度 |
+| 业务会话工作台 | 已可用 | 否，低风险只入队，高风险人工确认；只有个人微信Sidecar `canSend=true` 才会真实调度 |
 | 企微会话内容存档Gateway | 主读取链路可接Sidecar | 否，只读取、归档和 `/ack` 回写游标 |
 | 企微智能机器人长连接读消息 | 已可用，需配置Bot ID/Secret并运行bridge | 只读取，不自动回复 |
-| 统一出站Sidecar + AccountAgent + SendScheduler | Mock可运行，Sidecar可接 | 默认否；Sidecar声明 `canSend=true` 后可调用外部发送服务，但回读确认前不算完成 |
+| 个人微信Sidecar + AccountAgent + SendScheduler | Mock可运行，Sidecar可接 | 默认否；Sidecar声明 `canReceive=true` 后可读取消息，声明 `canSend=true` 后可调用外部发送服务，但回读确认前不算完成 |
 | 外呼、短信、CRM同步 | 未接入 | 否 |
 | ASR/TTS语音模型 | 可保存配置 | 否，尚未接语音执行器 |
 
@@ -729,7 +732,7 @@ PORT=5176 npm run dev
 
 ## 12. 当前仍需生产化补足
 
-当前系统已经能验证本地业务闭环、模型增强、企微测试群发送、企微会话存档Sidecar读取契约、`/ack`游标确认、企微智能机器人长连接读取、`chatid/roomId` 独立归档、统一出站Sidecar能力声明、AccountAgent + SendScheduler Mock流程，以及Sidecar出站回调和回读确认骨架。
+当前系统已经能验证本地业务闭环、模型增强、企微测试群发送、企微会话存档Sidecar读取契约、`/ack`游标确认、企微智能机器人长连接读取、`chatid/roomId` 独立归档、个人微信Sidecar接收/ACK/发送能力声明、AccountAgent + SendScheduler流程，以及Sidecar出站回调和回读确认骨架。
 
 生产化仍需补足：
 

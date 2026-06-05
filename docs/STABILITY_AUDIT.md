@@ -2,7 +2,7 @@
 
 ## 本轮重点结论
 
-本轮重点检查了状态损坏、接口误用、重复数据、非法枚举、异常输入、闭环计划引用、任务执行时效、任务批量处理、触达草稿状态、草稿批量处理、模型连接配置、企微Webhook配置、企微会话内容存档Gateway、企微智能机器人长连接、业务会话工作台、统一出站Sidecar、个人微信单账号发送队列、SendScheduler调度、Sidecar能力声明、Sidecar出站回调、API Key/企微密钥脱敏和本地静态访问边界等隐性问题。当前系统已经比上一版更稳定：关键写入入口有边界校验，系统自检能发现更多脏数据，Agent对畸形输入更抗错，重复报价不会造成报价列表膨胀，任务能按SLA识别超时并升级，任务和草稿都支持真实批量状态写入，企微发送必须经过已确认草稿和Webhook接口，企微会话存档与长连接消息都进入受控 API 队列，Gateway成功入站后会调用 `/ack` 避免重复拉取，非文本消息不会被丢弃而是占位入站并生成客服任务，电销/销售/VIP会话工作台按业务范围过滤且默认只展示真实来源，回复按风险进入队列或人工确认、不伪装已发送，出站Sidecar未声明 `canSend=true` 时任务保持待发送，个人微信链路按 `roomId` 去重、合并同群连续客户消息、同群FIFO、账号并发、分钟上限、过期重判、人工放行、Sidecar发送回调和失败退避调度，模型配置会校验URL和模型名，本地状态文件不会被静态路径直接读取，前端状态接口不会返回明文API Key、企微Webhook、Bot ID、Secret、会话存档Secret或RSA私钥。
+本轮重点检查了状态损坏、接口误用、重复数据、非法枚举、异常输入、闭环计划引用、任务执行时效、任务批量处理、触达草稿状态、草稿批量处理、模型连接配置、企微Webhook配置、企微会话内容存档Gateway、企微智能机器人长连接、业务会话工作台、个人微信Sidecar Gateway、个人微信单账号发送队列、SendScheduler调度、Sidecar能力声明、Sidecar出站回调、API Key/企微密钥脱敏和本地静态访问边界等隐性问题。当前系统已经比上一版更稳定：关键写入入口有边界校验，系统自检能发现更多脏数据，Agent对畸形输入更抗错，重复报价不会造成报价列表膨胀，任务能按SLA识别超时并升级，任务和草稿都支持真实批量状态写入，企微发送必须经过已确认草稿和Webhook接口，企微会话存档与长连接消息都进入受控 API 队列，Gateway成功入站后会调用 `/ack` 避免重复拉取，非文本消息不会被丢弃而是占位入站并生成客服任务，电销/销售/VIP会话工作台按业务范围过滤且默认只展示真实来源，回复按风险进入队列或人工确认、不伪装已发送，个人微信Sidecar未声明 `canReceive=true` 时不拉取消息、未声明 `canSend=true` 时任务保持待发送，个人微信链路按 `roomId` 去重、合并同群连续客户消息、同群FIFO、账号并发、分钟上限、过期重判、人工放行、Sidecar发送回调、自回显确认和失败退避调度，模型配置会校验URL和模型名，本地状态文件不会被静态路径直接读取，前端状态接口不会返回明文API Key、企微Webhook、Bot ID、Secret、会话存档Secret或RSA私钥。
 
 ## 已发现并修复的隐性问题
 
@@ -58,9 +58,9 @@
 | 高风险个人微信任务被误确认 | 人工确认队列如果能直接回读确认，会绕过销售/客服复核 | 新增 `approve` 放行动作；`confirm` 只接受 `sending/sent/sent_pending_confirm`，不能直接确认 `manual_required/queued` |
 | 个人微信提交发送被误当成完成 | 外部Gateway提交发送成功不代表群里已出现消息，可能形成假闭环 | 新增 `sent_pending_confirm` 状态；只有自回显或会话存档回读后才进入 `confirmed` 并写客户事件 |
 | Sidecar缺配置仍调度发送 | 未配置真实出站地址时任务可能显示发送中但实际无人处理 | Sidecar模式缺 `sidecarUrl` 时不调度，写入 `Gateway未配置` 日志 |
-| Sidecar可达但没有发送能力仍被调度 | `/health` 只表示服务在线，不等于具备真实发送权限，若继续调度会形成假发送 | `/api/personal-wechat/gateway/check` 读取 `canSend/sendMode/supportsConfirm/supportsRecall`；SendScheduler要求 `canSend=true`，否则任务保持 `queued` 并写明“出站Sidecar未声明可发送能力” |
+| Sidecar可达但没有收发能力仍被使用 | `/health` 只表示服务在线，不等于具备真实接收或发送权限，若继续调度会形成假接入 | `/api/personal-wechat/gateway/check` 读取 `canReceive/canSend/sendMode/supportsAck/supportsConfirm/supportsRecall/loginStatus`；SendScheduler要求 `canSend=true`，否则任务保持 `queued` 并写明“出站Sidecar未声明可发送能力” |
 | Sidecar发送结果不可追踪 | 外部发送服务成功/失败后如果不回写，主系统无法审计 | 新增 `dispatched` 回调、`gatewayRequestId/externalMessageId`、Gateway状态和出站脚本 `personal-wechat:gateway` |
-| 个微Gateway健康状态不可见 | 出站Sidecar未启动、URL填错或仍在Mock模式时，销售容易误判是否能真实发送 | 新增 `/api/personal-wechat/gateway/check` 和接入总控检查按钮，Mock/Sidecar/停用三种模式都会写入明确状态 |
+| 个微Gateway健康状态不可见 | Sidecar未启动、URL填错、仍在Mock模式或未登录时，销售容易误判是否能真实读取/发送 | `/api/personal-wechat/gateway/check` 和接入总控检查按钮会读取 `canReceive/canSend/supportsAck/loginStatus`，Mock/Sidecar/停用三种模式都会写入明确状态 |
 | 个人微信发送失败不留痕 | 真实Gateway失败后如果没有状态记录，销售无法判断是否接管 | 新增发送失败动作，任务进入 `failed`，记录 `attempts/retryAfterAt/error` 和人工接管日志 |
 | 保存模型配置时空Key会误清除旧Key | 用户只改模型名或温度时可能把可用密钥清空，导致模型测试和LLM增强突然失效 | 空Key默认保留旧密钥；新增 `clearApiKey` 和前端“清空已保存Key”显式操作 |
 | 模型配置无法验证 | 用户填了API URL和Key也不知道是否可用，容易形成不可用配置 | 新增 `/api/model-config/test`，缺Key不发请求，配置完整时真实调用OpenAI兼容 `chat/completions` |
@@ -98,7 +98,7 @@
 - 企微智能机器人长连接必须先保存 Bot ID/Secret 并启动 bridge；bridge 认证、断开和错误状态会写入 `wecomLogs` 和 `aibot.bridgeStatus`。
 - 企微入站按 `externalMessageId/msgid/messageId` 去重，按 `chatid/roomId` 独立归档；未知群进入待绑定档案，避免不同客户群消息串档。
 - 企微会话内容存档Gateway会通过 `/api/wecom/archive/status` 回写连接、拉取、解密、ACK、错误、游标和最近消息时间；标准入站会复用AccountAgent群上下文、去重、风控和发送队列。
-- 企微接入页提供真实连接中心，能直接看到会话存档、智能机器人、测试群发送和统一出站Sidecar四条链路的配置缺口与运行状态；模拟入站只在高级调试折叠区出现。
+- 企微接入页提供真实连接中心，能直接看到会话存档、智能机器人、测试群发送和个人微信Sidecar四条链路的配置缺口与运行状态；模拟入站只在高级调试折叠区出现。
 - 会话存档Sidecar检查只访问 `/health`，不携带企微会话存档Secret或RSA私钥。
 - 电销、销售、VIP会话工作台从已有状态投影会话，不另起孤立数据库；绑定客户、回复入队、人工确认、草稿生成都会回写客户档案、事件、任务、队列和审计。
 - 会话工作台外部群回复必须经过风险判断，高风险内容不会自动进入发送调度；无真实出站通道时不会显示真实已发送。
@@ -107,7 +107,7 @@
 - 个人微信高风险任务必须人工放行后才会回到待发送队列，不能直接确认。
 - 个人微信发送链路区分 `sending`、`sent_pending_confirm` 和 `confirmed`；已提交发送不等于闭环完成，只有回读确认后才会写入客户事件。
 - `npm run personal-wechat:gateway` 只处理 Sidecar模式下的 `sending` 任务，成功后回写 `dispatched`，失败后回写 `fail`。
-- 统一出站Gateway健康检查不发送客户消息，只检查模式、Sidecar URL、`/health` 可达性和 `canSend/sendMode/supportsConfirm/supportsRecall` 能力声明。
+- 个人微信Gateway健康检查不拉取也不发送客户消息，只检查模式、Sidecar URL、`/health` 可达性和 `canReceive/canSend/sendMode/supportsAck/supportsConfirm/supportsRecall/loginStatus` 能力声明。
 - 模型配置支持ASR/TTS语音模型参数，系统自检会提示语音模型配置状态。
 - 前端模型配置页解释温度含义，降低误配风险；业务页面展示模型调用边界时不展示API Key明文。
 - 客户池和客户列表搜索筛选只影响前端展示，不写入客户档案，避免筛选操作污染业务状态；业务入口的阶段范围由客户作用域保留，重置筛选不会越权展示其他阶段客户。
@@ -134,11 +134,11 @@
 - Agent默认仍是本地规则系统；真实LLM增强已可按需调用，但还没有内容安全护栏、知识库版本控制、成本统计、调用日志和人工审批策略。
 - 企微会话内容存档当前固定了Gateway、`/health`、`/pull`、`/ack` 和标准化入站契约，真实拉取、消息解密、客户同意校验、客户联系加好友回调、企业通讯录、成员私聊全量同步、图片/文件下载入库、撤回/引用回复、权限审批、短信、外呼、交易系统接入后，还需要更完整的签名校验、重放保护、幂等键、失败重试和合规审计。
 - 会话工作台当前主要覆盖文本会话和队列闭环，图片、文件、引用、撤回、已读、群成员变更和多员工协作状态仍需生产化补齐。
-- 统一出站Sidecar 当前只有 Mock 和 Sidecar能力门禁/回调骨架，不具备生产级登录态保护、真实收发、自回显监听、设备风控、限频退避、掉线重连、二维码托管、账号封禁兜底和完整审批流。
+- 个人微信Sidecar 当前具备主系统接收/ACK/发送/确认契约，不具备生产级登录态保护、真实协议适配、设备风控、限频退避、掉线重连、二维码托管、账号封禁兜底和完整审批流。
 
 ## 本轮验证
 
-- `npm test`：61 个用例通过。
+- `npm test`：62 个用例通过。
 - `node --check`：核心 JS 文件通过。
 - API 冒烟：健康检查、自检、能力审计、模型配置、真实LLM连接测试、销售Agent LLM增强、企微配置脱敏、企微智能机器人配置检查、企微长连接真实认证、企微测试发送、企微草稿发送、企微模拟/长连接格式入站、企微会话存档标准入站、会话存档Gateway状态回写、聊天会话列表/详情/绑定/回复、`chatid/roomId` 群绑定、`msgid/messageId` 去重、个人微信Mock入站、SendScheduler调度、人工放行、Sidecar发送回调、个人微信发送失败、个人微信回读确认、闭环编排、批量本地Agent、任务批量状态、触达草稿批量状态、任务SLA、超时升级、成交结果、非法输入、静态状态文件拦截均通过。
 - UI smoke：真实浏览器点击业务分组导航、自检、模型配置、企微接入页、电销/销售/VIP会话工作台、客户池列表优先、客户新增二级页、双击客户进入详情、会话卡标签精简和桌面端会话高度约束、Key/Webhook脱敏、客户搜索筛选、总览角色工作台、任务筛选批量控件、草稿风险筛选批量控件、报价结构化筛选、Agent客户隔离、Agent无代码化输出、本地消息VIP上下文隔离、任务和SLA展示通过。

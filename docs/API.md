@@ -16,7 +16,7 @@
 | GET | `/api/model-config` | 返回全局LLM、ASR/TTS语音模型、Agent覆盖配置和每个Agent的最终生效模型；API Key只返回掩码和是否已配置 |
 | GET | `/api/wecom/config` | 返回企微连接配置、智能机器人状态、群绑定、路由、入站设置和最近发送/入站日志；Webhook、Bot ID、Secret和入站Secret只返回掩码和是否已配置 |
 | GET | `/api/wecom/aibot/check` | 检查企微智能机器人 Bot ID/Secret 是否完整，返回 bridge 启动条件和当前连接状态 |
-| GET | `/api/personal-wechat/config` | 返回统一出站Sidecar/AccountAgent 配置、Sidecar能力声明、群上下文、发送队列、决策和运行日志 |
+| GET | `/api/personal-wechat/config` | 返回个人微信Sidecar/AccountAgent 配置、Sidecar能力声明、群上下文、发送队列、决策和运行日志 |
 | GET | `/api/outbound-drafts` | 返回触达草稿队列、客户信息和待确认/已复制/已处理等统计 |
 
 ## 写入接口
@@ -51,12 +51,13 @@
 | POST | `/api/wecom/test-send` | 真实调用企微群机器人Webhook发送测试消息，结果写入 `wecomLogs` |
 | POST | `/api/wecom/inbound` | 写入企微模拟或长连接入站消息，按 `chatid` 独立归档并路由到本地Agent |
 | POST | `/api/wecom/archive/inbound` | 写入企微会话内容存档标准化入站消息，按 `roomId/chatId` 去重、归档并进入AccountAgent和SendScheduler链路 |
-| POST | `/api/personal-wechat/config` | 保存统一出站Sidecar/AccountAgent 配置 |
-| POST | `/api/personal-wechat/gateway/check` | 检查出站Sidecar模式和配置；Mock模式只记录本地演练，Sidecar模式访问 `sidecarUrl/health` 并读取 `canSend/sendMode/supportsConfirm/supportsRecall` |
+| POST | `/api/personal-wechat/config` | 保存个人微信Sidecar/AccountAgent 配置 |
+| POST | `/api/personal-wechat/gateway/check` | 检查个人微信Sidecar模式和配置；Mock模式只记录本地演练，Sidecar模式访问 `sidecarUrl/health` 并读取 `canReceive/canSend/supportsAck/loginStatus` 等能力 |
+| POST | `/api/personal-wechat/gateway/status` | Gateway脚本回写游标、最近拉取、ACK、登录态、错误和能力状态 |
 | POST | `/api/personal-wechat/inbound` | 写入个人微信外部群入站消息，按 `roomId` 维护群上下文、决策和发送队列 |
 | POST | `/api/personal-wechat/send-scheduler/run` | 运行 SendScheduler；Mock模式将 `queued` 调度为 `sent_pending_confirm` 用于本地演练，Sidecar模式必须 `canSend=true` 才会把 `queued` 调度为 `sending` |
 | POST | `/api/personal-wechat/send-jobs/:jobId/approve` | 人工放行高风险 `manual_required` 任务，放行后回到 `queued` 等待调度 |
-| POST | `/api/personal-wechat/send-jobs/:jobId/dispatched` | 统一出站Sidecar回写“已提交发送”，任务进入 `sent_pending_confirm` 等待回读 |
+| POST | `/api/personal-wechat/send-jobs/:jobId/dispatched` | 个人微信Sidecar回写“已提交发送”，任务进入 `sent_pending_confirm` 等待回读 |
 | POST | `/api/personal-wechat/send-jobs/:jobId/confirm` | 自回显或企微存档回读确认，把 `sent_pending_confirm/sending/sent` 任务标记为 `confirmed` |
 | POST | `/api/personal-wechat/send-jobs/:jobId/fail` | 标记个人微信Gateway发送失败，写入失败退避、账号错误和运行日志 |
 | POST | `/api/quotes` | 新增或更新报价 |
@@ -288,10 +289,16 @@ npm run wecom:archive -- --once
     "mode": "mock",
     "sidecarUrl": "http://127.0.0.1:8791",
     "sendEndpoint": "/send",
+    "receiveEndpoint": "/messages",
+    "ackEndpoint": "/ack",
     "canSend": false,
+    "canReceive": false,
     "sendMode": "proactive",
     "supportsConfirm": false,
-    "supportsRecall": false
+    "supportsRecall": false,
+    "supportsAck": false,
+    "loginStatus": "未连接",
+    "cursor": ""
   },
   "account": {
     "id": "personal_wx_default",
@@ -309,7 +316,7 @@ npm run wecom:archive -- --once
 `gateway.mode` 支持：
 
 - `mock`：本地演练模式，运行SendScheduler后任务进入 `sent_pending_confirm`，不会调用外部服务，不能视为真实发送。
-- `sidecar`：真实出站模式，必须先由 `/health` 声明 `canSend=true`，运行SendScheduler后任务才会进入 `sending`，由 `npm run personal-wechat:gateway` 调用 `sidecarUrl + sendEndpoint`。
+- `sidecar`：真实个人微信Sidecar模式。`/health` 声明 `canReceive=true` 后，`npm run personal-wechat:gateway` 可调用 `sidecarUrl + receiveEndpoint` 拉取消息并调用 `ackEndpoint`；声明 `canSend=true` 后，SendScheduler才会把任务调度为 `sending`，再由Gateway调用 `sidecarUrl + sendEndpoint`。
 - `disabled`：停用出站调度，任务保持待处理并写入Gateway停用日志。
 
 个人微信外部群入站：
@@ -417,7 +424,7 @@ npm run wecom:archive -- --once
 }
 ```
 
-`/api/personal-wechat/send-jobs/:jobId/dispatched` 由统一出站Sidecar调用，表示外部发送服务已经提交发送。任务会进入 `sent_pending_confirm`，但仍不算闭环完成，必须等待自回显或企微会话存档回读确认。
+`/api/personal-wechat/send-jobs/:jobId/dispatched` 由个人微信Sidecar调用，表示外部发送服务已经提交发送。任务会进入 `sent_pending_confirm`，但仍不算闭环完成，必须等待自回显或企微会话存档回读确认。
 
 确认个人微信发送任务：
 
@@ -429,25 +436,32 @@ npm run wecom:archive -- --once
 
 `/api/personal-wechat/send-jobs/:jobId/confirm` 用于 Mock 自回显或企微存档回读确认，会把发送任务标记为 `confirmed`，把回复写入本地会话和客户事件。该接口不是发送动作，不能用于把 `queued/manual_required` 任务直接改成已发送。
 
-启动统一出站Sidecar调度器：
+启动个人微信Sidecar Gateway：
 
 ```bash
 npm run personal-wechat:gateway
 ```
 
-只检查Sidecar出站配置：
+只检查Sidecar健康状态，不拉消息、不发送、不ACK：
 
 ```bash
 npm run personal-wechat:gateway -- --check
 ```
 
-只处理一轮待发送任务：
+只处理一轮拉取/发送/确认：
 
 ```bash
 npm run personal-wechat:gateway -- --once
 ```
 
-`personal-wechat:gateway` 会读取 `/api/personal-wechat/config`，只有 `gateway.canSend=true` 时才处理 `status=sending` 的任务，并调用 `gateway.sidecarUrl + gateway.sendEndpoint`。Sidecar成功返回后脚本调用 `dispatched`，失败时调用 `fail`。真实登录态、协议发送、二维码托管、自回显监听和账号风控仍由外部Sidecar承担。
+`personal-wechat:gateway` 会先调用 `/api/personal-wechat/gateway/check` 刷新Sidecar能力。`canReceive=true` 时调用 `gateway.sidecarUrl + receiveEndpoint` 拉取消息，写入 `/api/personal-wechat/inbound`，成功后按 `ackEndpoint` 回写游标；`canSend=true` 时处理 `status=sending` 的任务，调用 `gateway.sidecarUrl + sendEndpoint`。Sidecar成功返回后脚本调用 `dispatched`，失败时调用 `fail`；下一轮拉到自回显 `confirmations` 后调用 `confirm`。真实登录态、协议收发、二维码托管、自回显监听和账号风控仍由外部Sidecar承担。
+
+个人微信Sidecar最小接口：
+
+- `GET /health`：返回 `canReceive`、`canSend`、`supportsAck`、`supportsConfirm`、`supportsRecall`、`sendMode`、`loginStatus`。
+- `POST /messages`：接收 `{ accountId, cursor, limit }`，返回 `{ messages, confirmations, nextCursor }`。
+- `POST /ack`：接收 `{ accountId, cursor, messageIds }`，确认主系统已处理消息。
+- `POST /send`：接收 `{ jobId, accountId, roomId, roomName, text, triggerMessageIds }`，返回 `gatewayRequestId/externalMessageId`。
 
 检查个人微信Gateway：
 
@@ -455,7 +469,7 @@ npm run personal-wechat:gateway -- --once
 {}
 ```
 
-`/api/personal-wechat/gateway/check` 在 `mock` 模式下会记录“Mock检查通过”且 `canSend=false`；在 `sidecar` 模式下会访问 `gateway.sidecarUrl + /health`，读取 `canSend`、`sendMode`、`supportsConfirm`、`supportsRecall`，并把结果写入 `personalWechat.gateway.status`、运行日志和审计。检查不发送消息，也不携带客户消息内容。
+`/api/personal-wechat/gateway/check` 在 `mock` 模式下会记录“Mock检查通过”且 `canSend=false/canReceive=false`；在 `sidecar` 模式下会访问 `gateway.sidecarUrl + /health`，读取 `canReceive`、`canSend`、`sendMode`、`supportsAck`、`supportsConfirm`、`supportsRecall`、`loginStatus`，并把结果写入 `personalWechat.gateway.status`、运行日志和审计。检查不拉取消息、不发送消息，也不携带客户消息内容。
 
 标记个人微信发送失败：
 

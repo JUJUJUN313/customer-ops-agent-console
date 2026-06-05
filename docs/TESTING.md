@@ -10,7 +10,7 @@ npm test
 
 GitHub Actions 会在 Pull Request 和 `main` 推送时自动运行同一条 `npm test`，作为 `main` 合并保护的必需检查。
 
-当前覆盖 61 个用例：
+当前覆盖 62 个用例：
 
 - 外呼筛选 Agent 将高价值客户升级到销售链路。
 - VIP群分流 Agent 将售后问题路由给售后。
@@ -59,6 +59,7 @@ GitHub Actions 会在 Pull Request 和 `main` 推送时自动运行同一条 `np
 - 个人微信 AccountAgent 会把同一群连续客户消息合并到一个活跃发送任务。
 - 个人微信 SendScheduler 会按账号并发、同群FIFO和分钟上限调度低风险 `queued` 任务。
 - 个人微信 Sidecar 出站模式只有在 `/health` 声明 `canSend=true` 后才会进入 `sending`，Gateway回调后进入 `sent_pending_confirm`。
+- 个人微信 Sidecar 接收模式会保存 `receiveEndpoint/ackEndpoint`、`canReceive`、`supportsAck`、登录态和游标；Gateway可拉取消息、写入入站、ACK并等待自回显确认。
 - 个人微信 Sidecar 未声明发送能力时，SendScheduler不会伪装发送，会让任务保持待发送并写入错误原因。
 - 企微会话存档非文本消息会以占位文本入站，并生成客服人工查看任务。
 - 个人微信 Gateway 健康检查会写入Gateway状态、账号状态、运行日志和审计。
@@ -178,14 +179,14 @@ node --check scripts/personal-wechat-send-gateway.mjs
 - `npm run wecom:archive -- --check` 在缺少Sidecar或必填凭据时必须明确报错，并通过 `/api/wecom/archive/status` 回写Gateway状态，不能假装连接成功。
 - `npm run wecom:archive -- --check` 失败时必须在终端输出结构化 JSON，包含 `ok=false`、`missing` 和 `message`，并返回非0退出码。
 - `/api/wecom/archive/check-sidecar` 在配置缺失时应返回 `missing` 并写入 `检查失败`；配置完整但Sidecar不可达时应写入明确错误。
-- `/api/personal-wechat/gateway/check` 在Mock模式下应记录本地检查通过但 `canSend=false`；Sidecar模式缺URL、不可达或未声明 `canSend=true` 时应写入错误，不触发外部发送。
+- `/api/personal-wechat/gateway/check` 在Mock模式下应记录本地检查通过但 `canSend=false/canReceive=false`；Sidecar模式缺URL、不可达或未声明 `canSend=true/canReceive=true` 时应写入明确状态，不拉取消息、不触发外部发送。
 - 会话工作台默认应展示企微会话存档、企微智能机器人和个人微信/Sidecar真实来源；本地模拟会话只在“本地调试”筛选下出现。不同 `roomId/chatId/sessionId` 不得混到同一客户，电销/销售/VIP入口不得互相显示不相关会话。
 - 会话工作台绑定客户后，群绑定和客户档案引用应同步更新；未知会话或未知客户应返回明确错误。
 - 会话工作台外部群低风险回复应进入SendScheduler队列，高风险回复应进入人工确认；本地会话回复只生成本地草稿，不能显示真实已发送。
 - 个人微信 Mock 入站会写入 `personalWechat.groupContexts`；低风险客户消息生成 `queued` 任务，高风险消息生成 `manual_required` 任务，重复 `messageId` 不会重复生成决策或发送任务。
 - 同一群连续客户消息会合并到一个活跃任务，`triggerMessageIds` 应包含多条消息。
 - 运行 SendScheduler 后，Mock模式下符合并发、同群FIFO和分钟上限的 `queued` 任务应变为 `sent_pending_confirm`，等待自回显或会话存档回读确认。
-- Sidecar模式下，运行 SendScheduler 前必须先确认Gateway能力 `canSend=true`；满足能力后任务应先变为 `sending`，出站Gateway调用 `dispatched` 后才变为 `sent_pending_confirm`；未声明发送能力时任务必须保持 `queued`。
+- Sidecar模式下，运行个人微信Gateway前必须先确认 `/health` 能力；`canReceive=true` 时 `npm run personal-wechat:gateway -- --once` 应拉取消息、调用ACK并更新游标；运行 SendScheduler 前必须确认 `canSend=true`，满足能力后任务应先变为 `sending`，Gateway调用 `dispatched` 后才变为 `sent_pending_confirm`；未声明发送能力时任务必须保持 `queued`。
 - 高风险 `manual_required` 任务直接确认应被拒绝，必须先人工放行再调度。
 - 个人微信回读确认后，任务状态应为 `confirmed`，本地 `VIP模拟群` 会话和客户事件应出现 AccountAgent 回复；当前 `externalSideEffects` 保持 `false`。
 - 个人微信待发送任务超过 `maxQueueAgeSeconds` 后运行调度会被取消，不能继续发送旧回复。
@@ -207,8 +208,8 @@ node --check scripts/personal-wechat-send-gateway.mjs
 - 在模型配置页确认API Key输入框不回填明文，只展示掩码占位；勾选“清空已保存Key”并保存后，接口返回Key未配置。
 - 在模型配置页确认“温度（创造性）”旁有解释文案，能说明低温更稳定保守、高温更发散。
 - 在企微接入页确认Webhook不回显明文；未配置时发送按钮禁用，配置Webhook并启用后可发送测试消息。
-- 在企微接入页确认顶部“接入总控”展示会话存档、智能机器人、测试群发送和统一出站Sidecar四张状态卡。
-- 在企微接入页点击“检查存档Sidecar”和“检查出站Sidecar”，确认结果回写到状态卡和日志；缺配置、不可达或未声明 `canSend=true` 时显示明确原因。
+- 在企微接入页确认顶部“接入总控”展示会话存档、智能机器人、测试群发送和个人微信Sidecar四张状态卡。
+- 在企微接入页点击“检查存档Sidecar”和“检查个人微信Sidecar”，确认结果回写到状态卡和日志；缺配置、不可达或未声明 `canReceive/canSend` 时显示明确原因。
 - 在企微接入页发送已确认草稿后，确认草稿状态变为 `企微已发送`，最近企微记录出现成功日志。
 - 确认“模拟企微入站”“模拟会话存档入站”“个人微信Mock入站”只出现在高级调试折叠区，不作为销售/运营主流程入口。
 - 通过真实Sidecar `/pull` 或高级调试标准入站写入消息，确认会话存档状态、群上下文和发送队列刷新；非文本消息应以占位文本进入会话并生成客服人工查看任务。
@@ -221,7 +222,7 @@ node --check scripts/personal-wechat-send-gateway.mjs
 - 在会话工作台输入低风险回复，确认进入待发送队列；输入报价、退款、赔偿、合同等高风险回复，确认进入人工确认。
 - 在会话工作台默认“全部真实”下确认不展示本地模拟会话；切换到“本地调试”会话回复时，只生成本地触达草稿，不显示真实外发状态。
 - 在企微接入页个人微信区域写入低风险外部群消息，确认出现待自动发送任务；点击“运行发送调度”后Mock模式任务变为已提交待回读；点击“回读确认”后，确认任务变为已确认。
-- 在企微接入页个人微信区域切换Sidecar模式并保存后，先确认Sidecar `/health` 声明 `canSend=true`；写入低风险消息，运行调度后任务应变为发送中；外部Gateway回调后变为已提交待回读。未声明 `canSend=true` 时任务必须保持待发送。
+- 在企微接入页个人微信区域切换Sidecar模式并保存后，先确认Sidecar `/health` 声明 `canReceive/canSend/supportsAck/loginStatus`；运行 `npm run personal-wechat:gateway -- --once` 拉取真实消息，运行调度后任务应变为发送中；外部Gateway回调后变为已提交待回读，再通过自回显或确认回执变为已确认。未声明 `canSend=true` 时任务必须保持待发送。
 - 在企微接入页个人微信区域写入包含报价/锁价的高风险消息，确认任务停在人工确认；点击人工放行后才可进入调度；再写入员工回复，确认同群待发被取消。
 - 在模型配置页点击“测试全局连接”或“测试销售Agent连接”，确认缺Key时出现配置缺失；配置真实Key后会展示模型返回内容和耗时。
 - 在Agent控制台勾选“本次使用真实LLM增强”后运行销售承接，确认右侧出现“真实LLM增强”卡片，并在触达草稿里生成LLM增强草稿。
@@ -262,14 +263,14 @@ node --check scripts/personal-wechat-send-gateway.mjs
 
 ## 本轮P0/P1验收记录
 
-- `npm test`：61 个用例通过。
+- `npm test`：62 个用例通过。
 - `node --check src/app.js`、`src/systemActions.js`、`src/api.js`、`scripts/serve.mjs`、`scripts/wecom-archive-gateway.mjs`、`scripts/personal-wechat-send-gateway.mjs` 通过。
 - 使用当前已配置的全局LLM完成 `/api/model-config/test`，返回“连接成功”，耗时约1.6秒。
 - 使用当前已配置的全局LLM运行销售承接Agent增强，`execution.modelInvocation` 为“已调用”，生成本地LLM增强草稿且 `externalSideEffects=false`。
 - API冒烟创建2个P0任务并批量完成，确认 `completedAt` 写入；创建2条P0草稿并批量废弃，确认 `discardedAt` 写入且不触发外部发送。
 - 新增企微P1单元验收：Webhook脱敏保留、fake fetch测试发送、已确认草稿发送、自检接受 `企微已发送`、企微模拟入站均通过。
 - 新增会话存档和个人微信单账号 AccountAgent 单元验收：企微会话存档统一入站、同群连续客户消息合并、低风险自动队列、高风险人工确认/人工放行、重复消息去重、员工回复取消待发、SendScheduler并发调度、同群FIFO、分钟上限、Gateway健康检查、Sidecar发送回调、队列过期取消、失败退避和回读确认均通过。
-- 浏览器自动化验收：业务页面完成导航遍历，均可渲染、无框架错误、无重复DOM id、无控制台报错；企微接入页可进入“设置 > 企微接入”；接入总控四张状态卡、两个健康检查按钮、群绑定搜索框和日志筛选控件均唯一渲染；“检查出站Sidecar”返回 Mock 本地演练且 `canSend=false`，“检查存档Sidecar”在缺少 CorpID/Secret/私钥时给出明确缺项；模拟个人微信入站、模拟会话存档入站和模拟企微入站均位于关闭的高级调试折叠区；“查看发送测试”跳转到发送测试卡片并更新 `#wecom-send-test` hash。
+- 浏览器自动化验收：业务页面完成导航遍历，均可渲染、无框架错误、无重复DOM id、无控制台报错；企微接入页可进入“设置 > 企微接入”；接入总控四张状态卡、两个健康检查按钮、群绑定搜索框和日志筛选控件均唯一渲染；“检查个人微信Sidecar”返回 Mock 本地演练且 `canSend=false/canReceive=false`，“检查存档Sidecar”在缺少 CorpID/Secret/私钥时给出明确缺项；模拟个人微信入站、模拟会话存档入站和模拟企微入站均位于关闭的高级调试折叠区；“查看发送测试”跳转到发送测试卡片并更新 `#wecom-send-test` hash。
 - 本轮真实接入收敛浏览器验收：`VIP群管理 > VIP会话` 默认来源为“全部真实”，来源选项包含企微会话存档、企微机器人、个人微信/Sidecar和本地调试；状态筛选包含待绑定、待回复、高风险、待回读和发送失败；会话卡只展示待回复/高风险等行动标签；右侧面板独立滚动；控制台 error/warning 为空。
 - 本轮截图：`/tmp/customer-ops-qa/wecom-connection-center.png`、`/tmp/customer-ops-qa/vip-chat-workbench.png`。
 - 最终 `/api/diagnostics`：`ok=true`，失败0，警告0。

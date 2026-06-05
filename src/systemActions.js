@@ -917,8 +917,14 @@ function normalizePersonalWechatGateway(gateway = {}, current = DEFAULT_PERSONAL
   const mode = cleanLimitedText(gateway.mode, current.mode || "mock", 40);
   const hasSidecarUrl = Object.prototype.hasOwnProperty.call(gateway, "sidecarUrl");
   const hasSendEndpoint = Object.prototype.hasOwnProperty.call(gateway, "sendEndpoint");
+  const hasReceiveEndpoint = Object.prototype.hasOwnProperty.call(gateway, "receiveEndpoint");
+  const hasAckEndpoint = Object.prototype.hasOwnProperty.call(gateway, "ackEndpoint");
   const rawEndpoint = cleanLimitedText(hasSendEndpoint ? gateway.sendEndpoint : current.sendEndpoint, current.sendEndpoint || "/send", 120);
   const sendEndpoint = rawEndpoint.startsWith("/") ? rawEndpoint : `/${rawEndpoint}`;
+  const rawReceiveEndpoint = cleanLimitedText(hasReceiveEndpoint ? gateway.receiveEndpoint : current.receiveEndpoint, current.receiveEndpoint || "/messages", 120);
+  const receiveEndpoint = rawReceiveEndpoint.startsWith("/") ? rawReceiveEndpoint : `/${rawReceiveEndpoint}`;
+  const rawAckEndpoint = cleanLimitedText(hasAckEndpoint ? gateway.ackEndpoint : current.ackEndpoint, current.ackEndpoint || "/ack", 120);
+  const ackEndpoint = rawAckEndpoint.startsWith("/") ? rawAckEndpoint : `/${rawAckEndpoint}`;
   const sendMode = cleanLimitedText(gateway.sendMode, current.sendMode || "proactive", 40);
   return {
     mode: ["mock", "sidecar", "disabled"].includes(mode) ? mode : "mock",
@@ -928,13 +934,21 @@ function normalizePersonalWechatGateway(gateway = {}, current = DEFAULT_PERSONAL
         : ""
       : cleanLimitedText(current.sidecarUrl || "", "", 300),
     sendEndpoint,
+    receiveEndpoint,
+    ackEndpoint,
     canSend: gateway.canSend === undefined ? Boolean(current.canSend) : gateway.canSend === true || gateway.canSend === "true",
+    canReceive: gateway.canReceive === undefined ? Boolean(current.canReceive) : gateway.canReceive === true || gateway.canReceive === "true",
     sendMode: ["reply_window", "proactive"].includes(sendMode) ? sendMode : "proactive",
     supportsConfirm: gateway.supportsConfirm === undefined ? Boolean(current.supportsConfirm) : gateway.supportsConfirm === true || gateway.supportsConfirm === "true",
     supportsRecall: gateway.supportsRecall === undefined ? Boolean(current.supportsRecall) : gateway.supportsRecall === true || gateway.supportsRecall === "true",
+    supportsAck: gateway.supportsAck === undefined ? Boolean(current.supportsAck) : gateway.supportsAck === true || gateway.supportsAck === "true",
+    loginStatus: cleanLimitedText(gateway.loginStatus, current.loginStatus || "未连接", 80),
+    cursor: cleanLimitedText(gateway.cursor, current.cursor || "", 220),
     status: cleanLimitedText(gateway.status, current.status || "Mock待接", 60),
     lastConnectedAt: cleanLimitedText(gateway.lastConnectedAt, current.lastConnectedAt || "", 80),
     lastEventAt: cleanLimitedText(gateway.lastEventAt, current.lastEventAt || "", 80),
+    lastPulledAt: cleanLimitedText(gateway.lastPulledAt, current.lastPulledAt || "", 80),
+    lastAckAt: cleanLimitedText(gateway.lastAckAt, current.lastAckAt || "", 80),
     lastError: cleanLimitedText(gateway.lastError, current.lastError || "", 400)
   };
 }
@@ -3303,12 +3317,18 @@ export function updatePersonalWechatGatewayStatusAction(inputState, payload = {}
   gateway.status = cleanLimitedText(payload.status, gateway.status || "未配置", 60);
   gateway.lastEventAt = now;
   if (payload.canSend !== undefined) gateway.canSend = payload.canSend === true || payload.canSend === "true";
+  if (payload.canReceive !== undefined) gateway.canReceive = payload.canReceive === true || payload.canReceive === "true";
   if (payload.sendMode !== undefined) {
     const sendMode = cleanLimitedText(payload.sendMode, gateway.sendMode || "proactive", 40);
     gateway.sendMode = ["reply_window", "proactive"].includes(sendMode) ? sendMode : gateway.sendMode || "proactive";
   }
   if (payload.supportsConfirm !== undefined) gateway.supportsConfirm = payload.supportsConfirm === true || payload.supportsConfirm === "true";
   if (payload.supportsRecall !== undefined) gateway.supportsRecall = payload.supportsRecall === true || payload.supportsRecall === "true";
+  if (payload.supportsAck !== undefined) gateway.supportsAck = payload.supportsAck === true || payload.supportsAck === "true";
+  if (payload.loginStatus !== undefined) gateway.loginStatus = cleanLimitedText(payload.loginStatus, gateway.loginStatus || "未连接", 80);
+  if (payload.cursor !== undefined) gateway.cursor = cleanLimitedText(payload.cursor, gateway.cursor || "", 220);
+  if (payload.lastPulledAt !== undefined) gateway.lastPulledAt = cleanLimitedText(payload.lastPulledAt, gateway.lastPulledAt || "", 80);
+  if (payload.lastAckAt !== undefined) gateway.lastAckAt = cleanLimitedText(payload.lastAckAt, gateway.lastAckAt || "", 80);
   if (!payload.error && (payload.connected === true || payload.status === "检查通过" || payload.status === "Sidecar可达")) {
     gateway.lastConnectedAt = now;
   }
@@ -3317,8 +3337,9 @@ export function updatePersonalWechatGatewayStatusAction(inputState, payload = {}
   if (payload.error) {
     config.account.status = "Gateway异常";
     config.account.lastError = gateway.lastError;
+    if (payload.loginStatus === undefined) gateway.loginStatus = "未连接";
   } else if (gateway.mode === "sidecar") {
-    config.account.status = "Sidecar可达";
+    config.account.status = gateway.loginStatus && gateway.loginStatus !== "未连接" ? gateway.loginStatus : "Sidecar可达";
     config.account.lastError = "";
   } else if (gateway.mode === "mock") {
     config.account.status = "Mock运行中";

@@ -1507,10 +1507,16 @@ test("Sidecar出站模式需要Gateway发送回调后才能等待回读确认", 
       mode: "sidecar",
       sidecarUrl: "http://127.0.0.1:8788",
       sendEndpoint: "/send",
+      receiveEndpoint: "/messages",
+      ackEndpoint: "/ack",
       canSend: true,
+      canReceive: true,
       sendMode: "proactive",
       supportsConfirm: true,
-      supportsRecall: false
+      supportsRecall: false,
+      supportsAck: true,
+      loginStatus: "已登录",
+      cursor: "pwx-cursor-001"
     },
     account: {
       id: "pwx_sidecar",
@@ -1523,7 +1529,12 @@ test("Sidecar出站模式需要Gateway发送回调后才能等待回读确认", 
 
   assert.equal(state.personalWechat.gateway.mode, "sidecar");
   assert.equal(state.personalWechat.gateway.sidecarUrl, "http://127.0.0.1:8788");
+  assert.equal(state.personalWechat.gateway.receiveEndpoint, "/messages");
+  assert.equal(state.personalWechat.gateway.ackEndpoint, "/ack");
   assert.equal(state.personalWechat.gateway.canSend, true);
+  assert.equal(state.personalWechat.gateway.canReceive, true);
+  assert.equal(state.personalWechat.gateway.supportsAck, true);
+  assert.equal(state.personalWechat.gateway.loginStatus, "已登录");
 
   state = ingestPersonalWechatMessageAction(state, {
     customerId: "c003",
@@ -1578,19 +1589,31 @@ test("个人微信Gateway健康检查状态会写入日志和账号状态", () =
     status: "Sidecar可达",
     connected: true,
     canSend: true,
+    canReceive: true,
     sendMode: "reply_window",
     supportsConfirm: true,
     supportsRecall: true,
+    supportsAck: true,
+    loginStatus: "已登录",
+    cursor: "pwx-cursor-002",
+    lastPulledAt: "2026-06-04T10:40:00.000Z",
+    lastAckAt: "2026-06-04T10:40:01.000Z",
     detail: "Sidecar健康检查 200，12ms"
   });
   assert.equal(state.personalWechat.gateway.status, "Sidecar可达");
   assert.equal(state.personalWechat.gateway.canSend, true);
+  assert.equal(state.personalWechat.gateway.canReceive, true);
   assert.equal(state.personalWechat.gateway.sendMode, "reply_window");
   assert.equal(state.personalWechat.gateway.supportsConfirm, true);
   assert.equal(state.personalWechat.gateway.supportsRecall, true);
+  assert.equal(state.personalWechat.gateway.supportsAck, true);
+  assert.equal(state.personalWechat.gateway.loginStatus, "已登录");
+  assert.equal(state.personalWechat.gateway.cursor, "pwx-cursor-002");
+  assert.equal(state.personalWechat.gateway.lastPulledAt, "2026-06-04T10:40:00.000Z");
+  assert.equal(state.personalWechat.gateway.lastAckAt, "2026-06-04T10:40:01.000Z");
   assert.ok(state.personalWechat.gateway.lastConnectedAt);
   assert.equal(state.personalWechat.gateway.lastError, "");
-  assert.equal(state.personalWechat.account.status, "Sidecar可达");
+  assert.equal(state.personalWechat.account.status, "已登录");
   assert.equal(state.personalWechat.logs[0].type, "Gateway健康检查");
   assert.equal(state.personalWechat.logs[0].status, "成功");
 

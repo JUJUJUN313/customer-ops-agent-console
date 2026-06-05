@@ -356,9 +356,12 @@ async function handleApi(req, res, pathname) {
         status: "Mock检查通过",
         connected: true,
         canSend: false,
+        canReceive: false,
         sendMode: "proactive",
         supportsConfirm: false,
         supportsRecall: false,
+        supportsAck: false,
+        loginStatus: "Mock运行中",
         detail: "当前为Mock本地验证模式，不会调用外部Sidecar"
       }));
       return json(res, 200, { ok: true, mode: "mock", state: publicState(nextState) });
@@ -366,6 +369,8 @@ async function handleApi(req, res, pathname) {
     const missing = [];
     if (!gateway.sidecarUrl) missing.push("sidecarUrl");
     if (!gateway.sendEndpoint) missing.push("sendEndpoint");
+    if (!gateway.receiveEndpoint) missing.push("receiveEndpoint");
+    if (!gateway.ackEndpoint) missing.push("ackEndpoint");
     if (missing.length) {
       const detail = `个人微信Gateway配置未完成：${missing.join("、")}`;
       const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
@@ -381,6 +386,7 @@ async function handleApi(req, res, pathname) {
       const ok = Boolean(result.ok);
       const capability = result.body?.capabilities || result.body || {};
       const canSend = ok && (capability.canSend === true || capability.send?.enabled === true);
+      const canReceive = ok && (capability.canReceive === true || capability.receive?.enabled === true || capability.messages?.enabled === true);
       const sendMode = capability.sendMode === "reply_window" || capability.sendMode === "proactive"
         ? capability.sendMode
         : capability.send?.mode === "reply_window" || capability.send?.mode === "proactive"
@@ -388,28 +394,40 @@ async function handleApi(req, res, pathname) {
           : "proactive";
       const supportsConfirm = ok && (capability.supportsConfirm === true || capability.confirm?.enabled === true);
       const supportsRecall = ok && (capability.supportsRecall === true || capability.recall?.enabled === true);
+      const supportsAck = ok && (capability.supportsAck === true || capability.ack?.enabled === true);
+      const loginStatus = capability.loginStatus || capability.account?.loginStatus || capability.account?.status || (ok ? "Sidecar可达" : "未连接");
       const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
-        status: ok ? canSend ? "Sidecar可发送" : "Sidecar可达但不可发送" : "检查失败",
+        status: ok ? canSend || canReceive ? "Sidecar可用" : "Sidecar可达但能力不足" : "检查失败",
         connected: ok,
         canSend,
+        canReceive,
         sendMode,
         supportsConfirm,
         supportsRecall,
+        supportsAck,
+        loginStatus,
         detail: ok
-          ? `Sidecar健康检查 ${result.httpStatus}，${result.latencyMs}ms，发送能力 ${canSend ? "可用" : "不可用"}`
+          ? `Sidecar健康检查 ${result.httpStatus}，${result.latencyMs}ms，接收 ${canReceive ? "可用" : "不可用"}，发送 ${canSend ? "可用" : "不可用"}，登录态 ${loginStatus}`
           : `Sidecar健康检查失败 HTTP ${result.httpStatus}`,
-        error: ok ? canSend ? "" : "Sidecar未声明canSend=true" : `Sidecar健康检查失败 HTTP ${result.httpStatus}`
+        error: ok ? canSend || canReceive ? "" : "Sidecar未声明canSend=true或canReceive=true" : `Sidecar健康检查失败 HTTP ${result.httpStatus}`
       }));
-      return json(res, 200, { ok: ok && canSend, url: healthUrl, result, capability: { canSend, sendMode, supportsConfirm, supportsRecall }, state: publicState(nextState) });
+      return json(res, 200, { ok: ok && (canSend || canReceive), url: healthUrl, result, capability: { canSend, canReceive, sendMode, supportsConfirm, supportsRecall, supportsAck, loginStatus }, state: publicState(nextState) });
     } catch (error) {
       const nextState = await mutateState((state) => updatePersonalWechatGatewayStatusAction(state, {
         status: "检查失败",
         canSend: false,
+        canReceive: false,
         detail: "统一出站Sidecar不可达",
         error: error.message
       }));
       return json(res, 200, { ok: false, error: error.message, state: publicState(nextState) });
     }
+  }
+
+  if (req.method === "POST" && pathname === "/api/personal-wechat/gateway/status") {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => updatePersonalWechatGatewayStatusAction(currentState, body));
+    return json(res, 200, publicState(nextState));
   }
 
   if (req.method === "POST" && pathname === "/api/model-config/test") {

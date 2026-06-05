@@ -142,6 +142,12 @@ export const api = {
       body: JSON.stringify(payload)
     });
   },
+  updatePersonalWechatGatewayStatus(payload) {
+    return request("/api/personal-wechat/gateway/status", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
   ingestPersonalWechatMessage(payload) {
     return request("/api/personal-wechat/inbound", {
       method: "POST",
