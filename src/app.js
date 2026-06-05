@@ -2607,6 +2607,64 @@ function renderIntegrationCard({ title, subtitle, status, tone = "", body = "", 
   `;
 }
 
+function personalWechatLoginGuide(gateway = {}, enabled = true) {
+  const mode = gateway.mode || "mock";
+  const hasSidecarUrl = Boolean(gateway.sidecarUrl);
+  const hasQr = Boolean(gateway.loginQrCodeUrl || gateway.loginQrCodeText);
+  const loggedIn = /已登录|online|logged/i.test(gateway.loginStatus || "");
+  const sidecarMode = mode === "sidecar";
+  const endpointReady = Boolean(gateway.sendEndpoint && gateway.receiveEndpoint && gateway.ackEndpoint);
+  const healthReady = sidecarMode && hasSidecarUrl && endpointReady;
+  const receiveReady = healthReady && gateway.canReceive === true;
+  const sendReady = healthReady && gateway.canSend === true;
+  const steps = [
+    {
+      title: "1. 启动真实Sidecar",
+      ok: enabled && sidecarMode && hasSidecarUrl && endpointReady,
+      detail: sidecarMode
+        ? hasSidecarUrl
+          ? "Sidecar地址和端点已填写，可以检查 /health。"
+          : "还没有填写Sidecar URL，当前无法进入扫码登录。"
+        : "当前是Mock本地演练模式，不能登录真实微信。"
+    },
+    {
+      title: "2. 扫码登录个人微信",
+      ok: loggedIn,
+      pending: healthReady && hasQr && !loggedIn,
+      detail: loggedIn
+        ? `登录态：${gateway.loginStatus}`
+        : hasQr
+          ? "Sidecar已返回二维码，请用测试微信扫码后重新检查。"
+          : healthReady
+            ? "Sidecar可检查，但暂未返回二维码；需要Sidecar /health 提供 loginQrCodeUrl 或 loginQrCodeText。"
+            : "等待Sidecar配置完成后再获取二维码。"
+    },
+    {
+      title: "3. 开启收发能力",
+      ok: receiveReady && sendReady,
+      pending: receiveReady || sendReady,
+      detail: receiveReady && sendReady
+        ? "已声明 canReceive=true 和 canSend=true，可以做真实接收与出站联调。"
+        : receiveReady
+          ? "已可读取消息，但未声明 canSend=true，回复不会真实外发。"
+          : sendReady
+            ? "已可发送，但未声明 canReceive=true，无法验证真实入站和回读。"
+            : "Sidecar /health 还未声明 canReceive=true 或 canSend=true。"
+    }
+  ];
+  return `
+    <div class="login-guide">
+      ${steps.map((step) => `
+        <div class="login-step ${step.ok ? "step-ok" : step.pending ? "step-pending" : ""}">
+          <strong>${escapeHtml(step.title)}</strong>
+          <span>${escapeHtml(step.ok ? "完成" : step.pending ? "待处理" : "未就绪")}</span>
+          <p>${escapeHtml(step.detail)}</p>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderWecom() {
   const config = normalizeWecomConfigState(state.wecomConfig);
   const aibot = config.aibot;
@@ -2798,10 +2856,17 @@ function renderWecom() {
           <div class="field"><label>连续消息合并秒</label><input name="account.mergeWindowSeconds" type="number" min="5" max="300" value="${escapeHtml(personalAccount.mergeWindowSeconds)}"></div>
           <button class="primary-button full-span" type="submit" ${actionAttrs("save-personal-wechat-config")}>保存个人微信配置</button>
         </div>
+        <div class="info-box">
+          <strong>真实个人微信登录条件</strong>
+          <p>主系统不能直接登录微信；只有外部Sidecar运行并在 /health 返回登录二维码或已登录状态后，才能进入扫码测试。</p>
+          ${personalWechatLoginGuide(personalGateway, personalWechat.enabled)}
+        </div>
         ${personalGateway.loginQrCodeUrl || personalGateway.loginQrCodeText ? `<div class="info-box qr-login-box">
           <strong>需要扫码登录个人微信</strong>
           <p>${personalGateway.loginQrCodeUrl ? `二维码链接：${escapeHtml(personalGateway.loginQrCodeUrl)}` : "Sidecar已返回二维码文本，请在Sidecar控制台或二维码工具中扫码。"}</p>
+          ${personalGateway.loginQrCodeUrl ? `<img class="qr-preview" src="${escapeHtml(personalGateway.loginQrCodeUrl)}" alt="个人微信登录二维码">` : ""}
           ${personalGateway.loginQrCodeText ? `<textarea readonly>${escapeHtml(personalGateway.loginQrCodeText)}</textarea>` : ""}
+          <p>扫码后点击“检查个人微信Sidecar”，确认登录态变成已登录，并且Sidecar声明 canReceive=true 或 canSend=true。</p>
         </div>` : ""}
       </article>
 

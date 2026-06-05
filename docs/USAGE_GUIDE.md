@@ -433,6 +433,7 @@ Sidecar建议至少提供：
 - Sidecar模式通过 `/health` 声明 `canReceive=true` 后，可由 `npm run personal-wechat:gateway` 拉取真实个人微信消息并ACK；声明 `canSend=true` 后，调度任务才会进入“发送中”并调用外部Sidecar发送。
 - Sidecar成功回调后进入“已提交待回读”；下一轮拉到自回显或确认回执后才进入“已确认”。
 - 回读确认后才写入本地会话和客户事件。
+- 主系统不能直接登录微信。真实扫码登录由外部Sidecar负责；当 `/health` 返回 `loginQrCodeUrl` 或 `loginQrCodeText` 时，企微接入页会展示登录向导和二维码预览，扫码后再次点击“检查个人微信Sidecar”确认登录态和收发能力。
 
 推荐测试步骤：
 

@@ -732,6 +732,77 @@ h3 {
   font-size: 12px;
 }
 
+.qr-preview {
+  width: 160px;
+  height: 160px;
+  object-fit: contain;
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  margin: 8px 0;
+}
+
+.login-guide {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.login-step {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.login-step strong,
+.login-step span {
+  display: block;
+}
+
+.login-step strong {
+  font-size: 13px;
+}
+
+.login-step span {
+  width: fit-content;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.login-step p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.login-step.step-ok {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.login-step.step-ok span {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.login-step.step-pending {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.login-step.step-pending span {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
 .warning-tag {
   background: #fff7ed;
   color: #9a3412;

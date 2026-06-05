@@ -225,6 +225,7 @@ data/state.json
 - 高风险任务必须人工放行后才会回到 `queued`。
 - SendScheduler负责同群FIFO、账号并发、分钟上限、过期重判和失败退避。
 - Sidecar模式的 `/health` 会声明 `canReceive`、`canSend`、`supportsAck`、`supportsConfirm`、`loginStatus` 等能力。
+- 主系统不会直接登录微信；真实扫码登录由外部Sidecar完成。Sidecar `/health` 返回 `loginQrCodeUrl` 或 `loginQrCodeText` 后，企微接入页会展示登录向导和二维码预览，扫码后重新检查登录态。
 - `npm run personal-wechat:gateway` 可从 `receiveEndpoint` 拉取真实个人微信消息，写入 `/api/personal-wechat/inbound`，成功后调用 `ackEndpoint` 回写游标。
 - Mock模式下调度后进入 `sent_pending_confirm`，只用于本地流程验证，不代表真实发送。
 - Sidecar模式必须先通过 `/health` 声明 `canSend=true`，调度后才会进入 `sending`，由 `npm run personal-wechat:gateway` 调用外部发送服务；Gateway回调后进入 `sent_pending_confirm`。
