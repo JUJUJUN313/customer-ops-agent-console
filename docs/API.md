@@ -10,13 +10,14 @@
 | GET | `/api/state` | 读取前端可用系统状态；模型API Key、企微Webhook、Bot ID 和 Secret 会脱敏为空值，只返回是否已配置和掩码 |
 | GET | `/api/diagnostics` | 运行系统自检并返回报告 |
 | GET | `/api/capabilities` | 返回当前系统能力审计，标记本地可用、可运行、待建设和未接入能力 |
-| GET | `/api/chat/sessions` | 返回会话工作台统一投影，聚合企微会话存档、企微智能机器人、个人微信/Sidecar和本地调试会话；前端按电销、销售、VIP入口过滤，默认只展示真实来源 |
+| GET | `/api/chat/sessions` | 返回会话工作台统一投影，聚合企微会话存档、企微智能机器人、企微客户端实时链路和本地调试会话；前端按电销、销售、VIP入口过滤，默认只展示真实来源 |
 | GET | `/api/chat/sessions/:sessionId` | 返回单个会话详情、消息、客户档案、待发送任务、任务和报价 |
 | GET | `/api/tasks/sla` | 返回任务SLA报表，包含超时、临期、升级和完成统计 |
 | GET | `/api/model-config` | 返回全局LLM、ASR/TTS语音模型、Agent覆盖配置和每个Agent的最终生效模型；API Key只返回掩码和是否已配置 |
 | GET | `/api/wecom/config` | 返回企微连接配置、智能机器人状态、群绑定、路由、入站设置和最近发送/入站日志；Webhook、Bot ID、Secret和入站Secret只返回掩码和是否已配置 |
 | GET | `/api/wecom/aibot/check` | 检查企微智能机器人 Bot ID/Secret 是否完整，返回 bridge 启动条件和当前连接状态 |
-| GET | `/api/personal-wechat/config` | 返回个人微信Sidecar/AccountAgent 配置、Sidecar能力声明、群上下文、发送队列、决策和运行日志 |
+| GET | `/api/personal-wechat/config` | 返回内部兼容发送队列配置和运行状态 |
+| GET | `/api/wecom-client/realtime/config` | 返回企微客户端实时连接器配置、Monitor/Worker能力、员工账号、历史下载补账状态，以及复用的发送队列 |
 | GET | `/api/outbound-drafts` | 返回触达草稿队列、客户信息和待确认/已复制/已处理等统计 |
 
 ## 写入接口
@@ -41,7 +42,7 @@
 | POST | `/api/tasks/escalate` | 运行SLA巡检，将超时未完成任务升级到主管队列 |
 | POST | `/api/model-config` | 保存全局LLM、ASR/TTS语音模型和各Agent独立模型连接配置 |
 | POST | `/api/model-config/test` | 按全局或指定Agent生效模型配置真实测试OpenAI兼容LLM连接 |
-| POST | `/api/wecom/config` | 保存企微测试群机器人Webhook、企微智能机器人Bot ID/Secret、发送模式和本地入站设置 |
+| POST | `/api/wecom/config` | 保存企微测试群机器人Webhook、企微智能机器人Bot ID/Secret和发送模式；本地入站设置仅保留内部兼容 |
 | POST | `/api/wecom/archive/check-sidecar` | 检查会话存档Sidecar配置完整度，并尝试访问 `sidecarUrl/health`，结果回写存档状态和企微日志 |
 | POST | `/api/wecom/aibot/status` | bridge 进程回写长连接启动、认证、断开、错误和最后连接时间 |
 | POST | `/api/wecom/archive/status` | 会话存档Gateway回写启动、拉取、ACK、Sidecar连接、游标、seq、错误和可信状态 |
@@ -49,17 +50,28 @@
 | POST | `/api/chat/sessions/:sessionId/reply` | 在会话工作台回复；外部群低风险进入SendScheduler，高风险进入人工确认，本地会话只保存草稿 |
 | POST | `/api/chat/sessions/:sessionId/bind-customer` | 把外部群会话绑定到真实客户档案 |
 | POST | `/api/wecom/test-send` | 真实调用企微群机器人Webhook发送测试消息，结果写入 `wecomLogs` |
-| POST | `/api/wecom/inbound` | 写入企微模拟或长连接入站消息，按 `chatid` 独立归档并路由到本地Agent |
+| POST | `/api/wecom/inbound` | 写入企微长连接或内部兼容入站消息，按 `chatid` 独立归档并路由到本地Agent |
 | POST | `/api/wecom/archive/inbound` | 写入企微会话内容存档标准化入站消息，按 `roomId/chatId` 去重、归档并进入AccountAgent和SendScheduler链路 |
-| POST | `/api/personal-wechat/config` | 保存个人微信Sidecar/AccountAgent 配置 |
-| POST | `/api/personal-wechat/gateway/check` | 检查个人微信Sidecar模式和配置；Mock模式只记录本地演练，Sidecar模式访问 `sidecarUrl/health` 并读取 `canReceive/canSend/supportsAck/loginStatus` 等能力 |
+| POST | `/api/personal-wechat/config` | 保存内部兼容发送队列配置 |
+| POST | `/api/wecom-client/realtime/config` | 保存企微客户端实时连接器配置，并同步到AccountAgent/SendScheduler队列 |
+| POST | `/api/wecom-client/realtime/worker/check` | 检查本地企微客户端Worker `/health`，读取 `canReceive/canSend/supportsAck/loginStatus` 能力 |
+| POST | `/api/wecom-client/realtime/status` | 本地Worker回写实时未读监控、拉取、ACK、登录态、错误和历史下载补账状态 |
+| POST | `/api/wecom-client/realtime/inbound` | 写入企微客户端实时未读消息，来源固定为 `wecom-client-realtime`，立即触发上下文、Agent和发送队列 |
+| POST | `/api/wecom-client/realtime/inbound-batch` | 批量写入企微客户端实时未读消息；单条失败会出现在 `batchResult.failed`，成功项进入 `batchResult.accepted` 并可 ACK |
+| POST | `/api/wecom-client/realtime/send-scheduler/run` | 运行企微客户端实时发送调度；内部复用SendScheduler，同群FIFO、账号限频和高风险人工确认规则保持一致 |
+| POST | `/api/wecom-client/realtime/send-scheduler/peek` | 非变更式预览当前是否有可执行发送任务；Worker 用于决定是否继续看守当前业务会话 |
+| POST | `/api/wecom-client/realtime/send-jobs/:jobId/dispatched` | 本地企微客户端Worker回写“已执行发送动作”，任务进入等待历史下载/存档回读确认 |
+| POST | `/api/wecom-client/realtime/send-jobs/:jobId/confirm` | 自回显或服务商历史下载补账确认发送任务 |
+| POST | `/api/wecom-client/realtime/send-jobs/:jobId/fail` | 本地企微客户端Worker回写结构化失败，例如 `room_not_found`、`target_not_verified`、`client_locked`、`send_failed` |
+| POST | `/api/wecom-client/realtime/reconcile` | 服务商历史下载脚本补账确认发送任务；用于基础留档、审计和最终闭环确认 |
+| POST | `/api/personal-wechat/gateway/check` | 内部兼容队列健康检查，不作为当前企微控制台入口 |
 | POST | `/api/personal-wechat/gateway/status` | Gateway脚本回写游标、最近拉取、ACK、登录态、错误和能力状态 |
-| POST | `/api/personal-wechat/inbound` | 写入个人微信外部群入站消息，按 `roomId` 维护群上下文、决策和发送队列 |
-| POST | `/api/personal-wechat/send-scheduler/run` | 运行 SendScheduler；Mock模式将 `queued` 调度为 `sent_pending_confirm` 用于本地演练，Sidecar模式必须 `canSend=true` 才会把 `queued` 调度为 `sending` |
+| POST | `/api/personal-wechat/inbound` | 内部兼容群消息写入，当前主链路使用企微客户端实时入站 |
+| POST | `/api/personal-wechat/send-scheduler/run` | 内部兼容调度入口；当前企微控制台优先使用 `/api/wecom-client/realtime/send-scheduler/run` |
 | POST | `/api/personal-wechat/send-jobs/:jobId/approve` | 人工放行高风险 `manual_required` 任务，放行后回到 `queued` 等待调度 |
-| POST | `/api/personal-wechat/send-jobs/:jobId/dispatched` | 个人微信Sidecar回写“已提交发送”，任务进入 `sent_pending_confirm` 等待回读 |
+| POST | `/api/personal-wechat/send-jobs/:jobId/dispatched` | 内部发送执行器回写“已提交发送”，任务进入 `sent_pending_confirm` 等待回读 |
 | POST | `/api/personal-wechat/send-jobs/:jobId/confirm` | 自回显或企微存档回读确认，把 `sent_pending_confirm/sending/sent` 任务标记为 `confirmed` |
-| POST | `/api/personal-wechat/send-jobs/:jobId/fail` | 标记个人微信Gateway发送失败，写入失败退避、账号错误和运行日志 |
+| POST | `/api/personal-wechat/send-jobs/:jobId/fail` | 内部兼容失败回写，写入失败退避、账号错误和运行日志 |
 | POST | `/api/quotes` | 新增或更新报价 |
 | POST | `/api/quotes/subscribe` | 订阅报价型号 |
 | POST | `/api/sales-samples` | 新增销售话术样本，供销售承接Agent引用 |
@@ -245,7 +257,7 @@ npm run wecom:archive -- --once
 }
 ```
 
-企微模拟入站：
+企微内部入站兼容接口：
 
 ```json
 {
@@ -262,7 +274,7 @@ npm run wecom:archive -- --once
 }
 ```
 
-`/api/wecom/inbound` 会把 `VIP群` 映射为 `VIP模拟群`，把销售/电销企微映射为对应本地私聊渠道，然后复用本地消息路由和Agent。长连接 bridge 会传入企微消息的 `chatId`、`externalMessageId`、`requestId` 和 `senderId`；系统按 `externalMessageId` 去重，按 `chatId` 查找 `wecomBindings.groups`。未知群会自动创建“企微群待绑定”客户档案和待绑定群记录，避免不同客户群消息混档。
+`/api/wecom/inbound` 是研发和旧长连接兼容入口，不再作为业务界面的模拟写入入口。长连接 bridge 会传入企微消息的 `chatId`、`externalMessageId`、`requestId` 和 `senderId`；系统按 `externalMessageId` 去重，按 `chatId` 查找 `wecomBindings.groups`。未知群会自动创建“企微群待绑定”客户档案和待绑定群记录，避免不同客户群消息混档。日常消息验证优先使用测试企微实时Worker。
 
 机器人真实回复成功后，bridge 会再次调用 `/api/wecom/inbound` 写入一条出站记录：
 
@@ -278,48 +290,97 @@ npm run wecom:archive -- --once
 }
 ```
 
-`direction=outbound` 会在群上下文和会话工作台中显示为右侧出站消息，并写入 `wecomLogs.type=消息出站`、`externalSideEffects=true`。入站客户消息仍写入 `消息入站`。
+`direction=outbound` 会在群上下文和会话工作台中显示为右侧出站消息，并写入 `wecomLogs.type=消息出站`、`externalSideEffects=true`。客户消息仍按入站方向写入日志。
 
-个人微信单账号 AccountAgent 配置：
+企微客户端实时未读配置：
 
 ```json
 {
   "enabled": true,
-  "gateway": {
-    "mode": "mock",
+  "worker": {
+    "mode": "local-script",
     "sidecarUrl": "http://127.0.0.1:8791",
     "sendEndpoint": "/send",
     "receiveEndpoint": "/messages",
     "ackEndpoint": "/ack",
-    "canSend": false,
-    "canReceive": false,
-    "sendMode": "proactive",
-    "supportsConfirm": false,
-    "supportsRecall": false,
-    "supportsAck": false,
-    "loginStatus": "未连接",
-    "cursor": ""
+    "canSend": true,
+    "canReceive": true,
+    "supportsAck": true,
+    "supportsConfirm": true,
+    "loginStatus": "企微客户端已登录"
   },
-  "account": {
-    "id": "personal_wx_default",
-    "name": "个人微信托管号",
-    "displayName": "VIP群AccountAgent",
+  "employeeAccount": {
+    "id": "wecom_emp_001",
+    "name": "销售企微员工A",
+    "displayName": "销售企微员工A",
     "defaultCustomerId": "c003",
     "autoReply": true,
-    "requireApprovalForRisk": true,
-    "minSendIntervalSeconds": 3,
-    "maxQueueAgeSeconds": 60
+    "concurrency": 1
+  },
+  "archiveReconciler": {
+    "provider": "企微服务商历史下载",
+    "mode": "download-reconcile"
   }
 }
 ```
 
-`gateway.mode` 支持：
+企微客户端实时未读入站：
 
-- `mock`：本地演练模式，运行SendScheduler后任务进入 `sent_pending_confirm`，不会调用外部服务，不能视为真实发送。
-- `sidecar`：真实个人微信Sidecar模式。`/health` 声明 `canReceive=true` 后，`npm run personal-wechat:gateway` 可调用 `sidecarUrl + receiveEndpoint` 拉取消息并调用 `ackEndpoint`；声明 `canSend=true` 后，SendScheduler才会把任务调度为 `sending`，再由Gateway调用 `sidecarUrl + sendEndpoint`。
-- `disabled`：停用出站调度，任务保持待处理并写入Gateway停用日志。
+```json
+{
+  "messageId": "realtime_local_001",
+  "roomId": "wecom_room_83921",
+  "roomName": "[VIP-83921] 张总售后群",
+  "senderName": "张总",
+  "senderType": "customer",
+  "msgType": "text",
+  "text": "客户最新消息",
+  "sendAt": "2026-06-05T10:00:00+08:00",
+  "source": "wecom-client-realtime",
+  "confirmSource": "vendor-archive-download"
+}
+```
 
-个人微信外部群入站：
+`/api/wecom-client/realtime/inbound` 面向本地企微客户端未读识别脚本，不等待服务商历史下载。`/api/wecom-client/realtime/inbound-batch` 是 Worker 的优先入口，用一次状态写入处理一批未读消息；单条失败不会阻断其他消息，响应里的 `batchResult.accepted` 可用于 ACK，`batchResult.failed` 保留错误码等待下一轮重试。入站后会复用AccountAgent群上下文、去重、连续消息合并、员工回复取消、低风险自动队列和高风险人工确认。系统会过滤 `文件传输助手/邮件提醒/企业微信团队/客户联系/行业资讯/微信客服` 等非业务会话；未知业务群建档时只复用同名 `企微群待绑定` 占位档案，不合并真实客户档案。系统会维护 `roomVersion/quietUntilAt`，企微客户端实时链路默认静默5秒；静默窗口按入站消息 `sendAt` 计算，本地脚本会优先使用企微可见消息时间，缺失时使用本轮未读处理开始时间，避免读取耗时被重复计入静默等待。Worker 在读到业务会话后会以 1 秒间隔看守当前窗口；看守期间只回传新增消息，一旦 `/send-scheduler/peek` 发现可执行任务就退出看守。SendScheduler只会把已过静默期且任务版本仍等于当前会话版本的任务下发给本地脚本。服务商后台下载历史消息只调用 `/api/wecom-client/realtime/reconcile` 做补账确认，不承担实时响应。
+
+本地企微客户端自动化脚本：
+
+- `GET /health`：返回企微客户端是否运行、`canReceive/canSend`、`supportsAck/supportsConfirm`、`ackStateFile` 和 `noScreenshot=true`。
+- `POST /messages`：进入下一个未读会话并批量读取当前会话可见消息，产出标准 `InboundGroupMessage[]`；不判断静默时间、不生成回复。请求可带 `{ cursor, knownMessageIds, limit, maxItems, timeoutMs, includeRaw, currentOnly }`，Worker 会把系统已记录的最近消息 ID 放入 `knownMessageIds`。`currentOnly=true` 时不切未读、不搜索，只读取当前窗口，用于业务会话看守。脚本会按 `cursor/knownMessageIds/ACK` 过滤系统已处理消息，只返回当前系统未记录的新消息批次；响应附带 `roomId/roomName/readBatchId/visibleMessageIds/latestMessageIds/returnedMessageCount/timings`。发送人优先从同一消息行的头像按钮 `AXButton` 读取并绑定到消息文本；命中本机员工/机器人名时标记 `senderType=staff`，否则为 `customer`。`sendAt` 优先来自企微可见时间行，缺失时使用本轮未读处理开始时间，`observedAt` 记录实际读取完成时间。语音、图片、文件等非文本可见项先以占位消息入站，最终完整历史仍以服务商历史下载补账为准。
+- `POST /send`：接收 `{ roomName, expectedTitleToken, text, dryRun, allowSend, triggerRoomVersion, triggerLatestMessageId, triggerLatestText, triggerReadBatchId }`。`dryRun=true` 会真实演练搜索和标题校验，但不粘贴回复、不发送。脚本通过真实键盘聚焦、清空和粘贴触发企微搜索刷新，回车进入第一条高亮结果后校验标题；不按 `Down`，不保存截图。粘贴发送前会快读目标会话尾部少量消息，默认 `preSendGuardMaxItems=3`，最新消息必须匹配 `triggerLatestMessageId`；缺少 messageId 时才用 `triggerLatestText` 兜底。匹配成功后返回 `status=sent` 和 `preSendGuard.status=matched`。发送前发现新消息时返回 `status=aborted_new_messages`、`sent=false`、`messages/latestMessageId/latestText/preSendGuard`，Worker 会先入站并 ACK，再取消旧任务等待系统重新判断。无法确认目标最新消息时返回 `status=target_latest_unverified` 且不发送。没有 `expectedTitleToken`、没有显式允许发送、标题校验失败或客户端异常时，返回 `target_not_verified/send_blocked/client_locked/search_failed/input_box_failed/send_failed` 等结构化错误。
+- `POST /ack`：系统成功写入入站消息后回写 `{ messages: [{ messageId, roomId }], messageIds, cursor, roomId }`，本地脚本会记录 ACK，并按群保存最近 ACK 游标；ACK messageId 和按群 cursor 会持久化到小型 JSON 状态文件，脚本重启后仍会在 `/messages` 过滤已处理消息，避免多个群之间共用 cursor 导致重复回传。
+
+企微客户端本地发送动作回执：
+
+```json
+{
+  "gatewayMode": "wecom-client-local-script",
+  "gatewayRequestId": "local-action-001",
+  "externalMessageId": "",
+  "now": "2026-06-05T10:10:03.000Z"
+}
+```
+
+本地Worker失败时只写结构化错误，不上传截图：
+
+```json
+{
+  "error": "target_not_verified",
+  "now": "2026-06-05T10:10:05.000Z"
+}
+```
+
+历史下载补账确认：
+
+```json
+{
+  "jobIds": ["pwx_send_xxx"],
+  "confirmedMessageId": "vendor-archive-confirm-001",
+  "downloadedAt": "2026-06-05T10:15:00.000Z"
+}
+```
+
+内部兼容群消息写入：
 
 ```json
 {
@@ -334,7 +395,7 @@ npm run wecom:archive -- --once
 }
 ```
 
-`/api/personal-wechat/inbound` 会把个人微信外部群消息写入 `personalWechat.groupContexts`，同时复用本地 `VIP模拟群` 会话和VIP分流Agent。低风险客户消息生成 `queued` 发送任务，高风险报价、锁价、退款、赔偿、付款、合同和责任承诺类内容生成 `manual_required` 任务；员工或托管号消息只更新上下文并取消同群待发任务。重复 `messageId` 只写去重日志，不重复生成决策或队列。
+`/api/personal-wechat/inbound` 是内部兼容路径，会把企微实时链路标准化后的群消息写入兼容队列状态，同时复用VIP群会话和VIP分流Agent。低风险客户消息生成 `queued` 发送任务，高风险报价、锁价、退款、赔偿、付款、合同和责任承诺类内容生成 `manual_required` 任务；员工或企微自动化号消息只更新上下文并取消同群待发任务。重复 `messageId` 只写去重日志，不重复生成决策或队列。
 
 企微会话内容存档标准入站：
 
@@ -391,7 +452,7 @@ npm run wecom:archive -- --once
 
 外部群会话回复会进入 `PersonalWechatSendJob`：低风险为 `queued`，高风险为 `manual_required`。本地调试会话没有真实出站通道，因此只生成 `OutboundDraft`，不会标记真实发送。
 
-运行个人微信发送调度：
+运行企微兼容发送调度：
 
 ```json
 {
@@ -400,7 +461,7 @@ npm run wecom:archive -- --once
 }
 ```
 
-`/api/personal-wechat/send-scheduler/run` 只调度 `queued` 低风险任务或已经人工放行的高风险任务。调度会执行同群FIFO、账号并发 `concurrency`、最小发送间隔、分钟发送上限、队列过期重判、Gateway能力声明和失败退避检查。Mock模式通过后任务状态变为 `sent_pending_confirm`，只用于本地演练；Sidecar模式必须 `canSend=true` 才会变为 `sending`，等待出站Gateway真实提交发送。
+`/api/wecom-client/realtime/send-scheduler/run` 只调度 `queued` 低风险任务或已经人工放行的高风险任务。调度会执行同群FIFO、账号限频、最小发送间隔、分钟发送上限、队列过期重判、Worker能力声明和失败退避检查。队列过期从 `max(createdAt, validAfterAt/quietUntilAt)` 开始计算，避免刚读取保护和静默窗口消耗任务有效期。只有本地企微Worker声明 `canSend=true` 且系统预检通过，任务才会进入发送流程，等待本地脚本回写发送动作结果。
 
 人工放行高风险任务：
 
@@ -424,9 +485,9 @@ npm run wecom:archive -- --once
 }
 ```
 
-`/api/personal-wechat/send-jobs/:jobId/dispatched` 由个人微信Sidecar调用，表示外部发送服务已经提交发送。任务会进入 `sent_pending_confirm`，但仍不算闭环完成，必须等待自回显或企微会话存档回读确认。
+`/api/personal-wechat/send-jobs/:jobId/dispatched` 由内部兼容发送执行器调用，表示外部发送服务已经提交发送。任务会进入 `sent_pending_confirm`，但仍不算闭环完成，必须等待自回显或企微会话存档回读确认。
 
-确认个人微信发送任务：
+确认企微发送任务：
 
 ```json
 {
@@ -434,124 +495,8 @@ npm run wecom:archive -- --once
 }
 ```
 
-`/api/personal-wechat/send-jobs/:jobId/confirm` 用于 Mock 自回显或企微存档回读确认，会把发送任务标记为 `confirmed`，把回复写入本地会话和客户事件。该接口不是发送动作，不能用于把 `queued/manual_required` 任务直接改成已发送。
+`/api/personal-wechat/send-jobs/:jobId/confirm` 用于本地动作回执或企微存档回读确认，会把发送任务标记为 `confirmed`，把回复写入本地会话和客户事件。该接口不是发送动作，不能用于把 `queued/manual_required` 任务直接改成已发送。
 
-启动个人微信Sidecar Gateway：
-
-```bash
-npm run personal-wechat:gateway
-```
-
-只检查Sidecar健康状态，不拉消息、不发送、不ACK：
-
-```bash
-npm run personal-wechat:gateway -- --check
-```
-
-只处理一轮拉取/发送/确认：
-
-```bash
-npm run personal-wechat:gateway -- --once
-```
-
-`personal-wechat:gateway` 会先调用 `/api/personal-wechat/gateway/check` 刷新Sidecar能力。`canReceive=true` 时调用 `gateway.sidecarUrl + receiveEndpoint` 拉取消息，写入 `/api/personal-wechat/inbound`，成功后按 `ackEndpoint` 回写游标；`canSend=true` 时处理 `status=sending` 的任务，调用 `gateway.sidecarUrl + sendEndpoint`。Sidecar成功返回后脚本调用 `dispatched`，失败时调用 `fail`；下一轮拉到自回显 `confirmations` 后调用 `confirm`。真实登录态、协议收发、二维码托管、自回显监听和账号风控仍由外部Sidecar承担。
-
-个人微信Sidecar最小接口：
-
-- `GET /health`：返回 `canReceive`、`canSend`、`supportsAck`、`supportsConfirm`、`supportsRecall`、`sendMode`、`loginStatus`；如果需要扫码登录，可返回 `loginQrCodeUrl` 或 `loginQrCodeText`。
-- `POST /messages`：接收 `{ accountId, cursor, limit }`，返回 `{ messages, confirmations, nextCursor }`。
-- `POST /ack`：接收 `{ accountId, cursor, messageIds }`，确认主系统已处理消息。
-- `POST /send`：接收 `{ jobId, accountId, roomId, roomName, text, triggerMessageIds }`，返回 `gatewayRequestId/externalMessageId`。
-
-检查个人微信Gateway：
-
-```json
-{}
-```
-
-`/api/personal-wechat/gateway/check` 在 `mock` 模式下会记录“Mock检查通过”且 `canSend=false/canReceive=false`；在 `sidecar` 模式下会访问 `gateway.sidecarUrl + /health`，读取 `canReceive`、`canSend`、`sendMode`、`supportsAck`、`supportsConfirm`、`supportsRecall`、`loginStatus`，并把结果写入 `personalWechat.gateway.status`、运行日志和审计。检查不拉取消息、不发送消息，也不携带客户消息内容。
-
-标记个人微信发送失败：
-
-```json
-{
-  "error": "Gateway掉线",
-  "now": "2026-06-04T11:00:10.000Z"
-}
-```
-
-`/api/personal-wechat/send-jobs/:jobId/fail` 会把任务标记为 `failed`，写入 `retryAfterAt`、账号错误、运行日志和审计。生产Gateway接入后，该接口可由发送网关在失败回调中调用。
-
-绑定企微群到真实客户：
-
-```json
-{
-  "chatId": "chat_xxx",
-  "customerId": "c003",
-  "channel": "VIP群"
-}
-```
-
-批量更新任务状态：
-
-```json
-{
-  "taskIds": ["t_001", "t_002"],
-  "status": "已完成"
-}
-```
-
-任务合法状态：`待处理`、`跟进中`、`已完成`。批量完成会为每个任务写入 `completedAt`，并为对应客户写入任务事件。
-
-模型配置：
-
-```json
-{
-  "global": {
-    "provider": "DeepSeek兼容网关",
-    "apiUrl": "https://api.deepseek.com",
-    "apiKey": "sk-your-key",
-    "model": "deepseek-v4-flash",
-    "temperature": 0.3,
-    "maxTokens": 4096
-  },
-  "voice": {
-    "asr": {
-      "provider": "语音识别网关",
-      "apiUrl": "https://voice.example.com/asr",
-      "apiKey": "asr-key",
-      "model": "asr-large",
-      "language": "zh-CN"
-    },
-    "tts": {
-      "provider": "语音合成网关",
-      "apiUrl": "https://voice.example.com/tts",
-      "apiKey": "tts-key",
-      "model": "tts-pro",
-      "voice": "female-a",
-      "speed": 1.1
-    }
-  },
-  "agents": {
-    "sales": {
-      "provider": "销售专用网关",
-      "apiUrl": "https://sales.example.com/v1",
-      "apiKey": "sk-sales-key",
-      "model": "sales-agent-model",
-      "temperature": 0.65,
-      "maxTokens": 8192
-    },
-    "vip": {
-      "provider": "",
-      "apiUrl": "",
-      "apiKey": "",
-      "model": "",
-      "temperature": "",
-      "maxTokens": ""
-    }
-  }
-}
-```
 
 Agent独立配置完全留空时继承全局LLM；只填写部分字段时，未填写字段回退全局。模型配置页的测试按钮和Agent运行参数 `useLlm: true` 会真实调用LLM；默认Agent运行不调用外部模型。
 
@@ -587,12 +532,12 @@ Agent独立配置完全留空时继承全局LLM；只填写部分字段时，未
 }
 ```
 
-渠道消息入站：
+渠道消息写入（内部兼容，仅供API级测试）：
 
 ```json
 {
   "customerId": "c003",
-  "channel": "VIP模拟群",
+  "channel": "VIP群",
   "senderRole": "客户",
   "senderName": "周总",
   "message": "@销售 有两台售后维修怎么处理？"

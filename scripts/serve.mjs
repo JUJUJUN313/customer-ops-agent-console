@@ -13,6 +13,7 @@ import {
   buildOutboundDraftReport,
   buildPersonalWechatReport,
   buildTaskSlaReport,
+  buildWecomClientRealtimeReport,
   buildWecomConfigReport,
   bindChatSessionCustomerAction,
   createCustomerAction,
@@ -28,6 +29,8 @@ import {
   getChatSessionReport,
   ingestMessageAction,
   ingestPersonalWechatMessageAction,
+  ingestWecomClientRealtimeMessagesAction,
+  ingestWecomClientRealtimeMessageAction,
   ingestWecomArchiveMessageAction,
   ingestWecomMessageAction,
   recordOutcomeAction,
@@ -46,6 +49,8 @@ import {
   updateModelConfigAction,
   updatePersonalWechatConfigAction,
   updatePersonalWechatGatewayStatusAction,
+  updateWecomClientRealtimeConfigAction,
+  updateWecomClientRealtimeStatusAction,
   updateWecomBridgeStatusAction,
   updateWecomArchiveStatusAction,
   updateWecomGroupBindingAction,
@@ -54,6 +59,7 @@ import {
   updateTemplateAction,
   updateWecomConfigAction,
   replyChatSessionAction,
+  reconcileWecomClientArchiveAction,
   upsertQuoteAction
 } from "../src/systemActions.js";
 
@@ -176,6 +182,7 @@ function publicState(state) {
   copy.wecomBindings = { groups: wecomReport.bindings || [] };
   copy.wecomLogs = Array.isArray(state.wecomLogs) ? state.wecomLogs.slice(0, 100) : [];
   copy.personalWechat = buildPersonalWechatReport(state).config;
+  copy.wecomClientRealtime = buildWecomClientRealtimeReport(state).config;
   return copy;
 }
 
@@ -286,6 +293,10 @@ async function handleApi(req, res, pathname) {
 
   if (req.method === "GET" && pathname === "/api/personal-wechat/config") {
     return json(res, 200, buildPersonalWechatReport(readState()));
+  }
+
+  if (req.method === "GET" && pathname === "/api/wecom-client/realtime/config") {
+    return json(res, 200, buildWecomClientRealtimeReport(readState()));
   }
 
   if (req.method === "GET" && pathname === "/api/wecom/aibot/check") {
@@ -435,6 +446,110 @@ async function handleApi(req, res, pathname) {
         loginQrCodeText: "",
         detail: "个人微信连接器不可达",
         error: error.message
+      }));
+      return json(res, 200, { ok: false, error: error.message, state: publicState(nextState) });
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/wecom-client/realtime/worker/check") {
+    const currentState = readState();
+    const realtime = currentState.wecomClientRealtime || {};
+    const worker = realtime.worker || {};
+    if (worker.mode === "disabled") {
+      const nextState = await mutateState((state) => updateWecomClientRealtimeStatusAction(state, {
+        status: "检查失败",
+        error: "企微客户端Worker已停用",
+        worker: { status: "检查失败", canSend: false, canReceive: false, loginStatus: "未连接", lastError: "企微客户端Worker已停用" }
+      }));
+      return json(res, 200, { ok: false, missing: ["worker.mode"], state: publicState(nextState) });
+    }
+    if (worker.mode === "mock" || !worker.mode) {
+      const nextState = await mutateState((state) => updateWecomClientRealtimeStatusAction(state, {
+        status: "Mock本地演练",
+        worker: {
+          status: "Mock本地演练",
+          canSend: false,
+          canReceive: false,
+          supportsAck: false,
+          supportsConfirm: true,
+          loginStatus: "Mock运行中"
+        },
+        detail: "当前为Mock本地验证模式，未接入真实企微客户端本地脚本。"
+      }));
+      return json(res, 200, {
+        ok: false,
+        mode: "mock",
+        realReady: false,
+        error: "当前为Mock本地演练，未接入真实企微客户端本地脚本",
+        nextStep: "切换为local-script模式，填写Worker URL并启动本地企微客户端脚本后再检查。",
+        state: publicState(nextState)
+      });
+    }
+    const missing = [];
+    if (!worker.sidecarUrl) missing.push("worker.sidecarUrl");
+    if (!worker.sendEndpoint) missing.push("worker.sendEndpoint");
+    if (!worker.receiveEndpoint) missing.push("worker.receiveEndpoint");
+    if (!worker.ackEndpoint) missing.push("worker.ackEndpoint");
+    if (missing.length) {
+      const detail = `企微客户端Worker配置未完成：${missing.join("、")}`;
+      const nextState = await mutateState((state) => updateWecomClientRealtimeStatusAction(state, {
+        status: "检查失败",
+        error: detail,
+        worker: { status: "检查失败", lastError: detail }
+      }));
+      return json(res, 200, { ok: false, missing, state: publicState(nextState) });
+    }
+    try {
+      const healthUrl = endpointWithPath(worker.sidecarUrl, "/health");
+      const result = await checkHttpEndpoint(healthUrl, 5000);
+      const capability = result.body?.capabilities || result.body || {};
+      const ok = Boolean(result.ok) && capability.ok !== false && capability.clientStale !== true && capability.clientLocked !== true;
+      const canSend = ok && (capability.canSend === true || capability.send?.enabled === true);
+      const canReceive = ok && (capability.canReceive === true || capability.receive?.enabled === true || capability.messages?.enabled === true);
+      const supportsAck = ok && (capability.supportsAck === true || capability.ack?.enabled === true);
+      const supportsConfirm = ok && (capability.supportsConfirm !== false);
+      const loginStatus = capability.loginStatus || capability.account?.loginStatus || capability.account?.status || (ok ? "企微客户端可达" : "未连接");
+      const workerError = capability.error || capability.errorCode || (capability.clientStale ? "企微窗口不可交互" : capability.clientLocked ? "企微客户端锁屏暂停" : "");
+      const nextState = await mutateState((state) => updateWecomClientRealtimeStatusAction(state, {
+        status: ok ? canSend || canReceive ? "Worker可用" : "Worker可达但能力不足" : "检查失败",
+        worker: {
+          status: ok ? canSend || canReceive ? "Worker可用" : "Worker可达但能力不足" : "检查失败",
+          canSend,
+          canReceive,
+          supportsAck,
+          supportsConfirm,
+          loginStatus,
+          lastConnectedAt: ok ? new Date().toISOString() : "",
+          lastError: ok ? canSend || canReceive ? "" : "Worker未声明canSend=true或canReceive=true" : workerError || `Worker健康检查失败 HTTP ${result.httpStatus}`
+        },
+        detail: ok
+          ? `企微客户端Worker健康检查 ${result.httpStatus}，${result.latencyMs}ms，接收 ${canReceive ? "可用" : "不可用"}，发送 ${canSend ? "可用" : "不可用"}，登录态 ${loginStatus}`
+          : `企微客户端Worker健康检查失败 HTTP ${result.httpStatus}：${workerError || loginStatus}`,
+        error: ok ? canSend || canReceive ? "" : "Worker未声明canSend=true或canReceive=true" : workerError || `Worker健康检查失败 HTTP ${result.httpStatus}`
+      }));
+      return json(res, 200, {
+        ok: ok && (canSend || canReceive),
+        url: healthUrl,
+        result,
+        capability: {
+          canSend,
+          canReceive,
+          supportsAck,
+          supportsConfirm,
+          loginStatus,
+          clientStale: Boolean(capability.clientStale),
+          clientLocked: Boolean(capability.clientLocked),
+          errorCode: capability.errorCode || "",
+          error: capability.error || ""
+        },
+        state: publicState(nextState)
+      });
+    } catch (error) {
+      const nextState = await mutateState((state) => updateWecomClientRealtimeStatusAction(state, {
+        status: "检查失败",
+        error: error.message,
+        worker: { status: "检查失败", canSend: false, canReceive: false, loginStatus: "未连接", lastError: error.message },
+        detail: "企微客户端Worker不可达"
       }));
       return json(res, 200, { ok: false, error: error.message, state: publicState(nextState) });
     }
@@ -621,10 +736,39 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, publicState(nextState));
   }
 
+  if (req.method === "POST" && pathname === "/api/wecom-client/realtime/config") {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => updateWecomClientRealtimeConfigAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  if (req.method === "POST" && pathname === "/api/wecom-client/realtime/status") {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => updateWecomClientRealtimeStatusAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
   if (req.method === "POST" && pathname === "/api/personal-wechat/inbound") {
     const body = await readBody(req);
     const nextState = await mutateState((currentState) => ingestPersonalWechatMessageAction(currentState, body));
     return json(res, 200, publicState(nextState));
+  }
+
+  if (req.method === "POST" && pathname === "/api/wecom-client/realtime/inbound") {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => ingestWecomClientRealtimeMessageAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  if (req.method === "POST" && pathname === "/api/wecom-client/realtime/inbound-batch") {
+    const body = await readBody(req);
+    let batchResult = null;
+    const nextState = await mutateState((currentState) => {
+      const result = ingestWecomClientRealtimeMessagesAction(currentState, body);
+      batchResult = result.result;
+      return result.state;
+    });
+    return json(res, 200, { ...publicState(nextState), batchResult });
   }
 
   if (req.method === "POST" && pathname === "/api/personal-wechat/send-scheduler/run") {
@@ -633,31 +777,53 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, publicState(nextState));
   }
 
-  const personalWechatConfirmMatch = pathname.match(/^\/api\/personal-wechat\/send-jobs\/([^/]+)\/confirm$/);
-  if (req.method === "POST" && personalWechatConfirmMatch) {
+  if (req.method === "POST" && pathname === "/api/wecom-client/realtime/send-scheduler/run") {
     const body = await readBody(req);
-    const nextState = await mutateState((currentState) => confirmPersonalWechatSendJobAction(currentState, personalWechatConfirmMatch[1], body));
+    const nextState = await mutateState((currentState) => runPersonalWechatSendSchedulerAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  if (req.method === "POST" && pathname === "/api/wecom-client/realtime/send-scheduler/peek") {
+    const body = await readBody(req);
+    const previewState = runPersonalWechatSendSchedulerAction(readState(), body);
+    return json(res, 200, publicState(previewState));
+  }
+
+  if (req.method === "POST" && pathname === "/api/wecom-client/realtime/reconcile") {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => reconcileWecomClientArchiveAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  const personalWechatConfirmMatch = pathname.match(/^\/api\/personal-wechat\/send-jobs\/([^/]+)\/confirm$/);
+  const wecomClientConfirmMatch = pathname.match(/^\/api\/wecom-client\/realtime\/send-jobs\/([^/]+)\/confirm$/);
+  if (req.method === "POST" && (personalWechatConfirmMatch || wecomClientConfirmMatch)) {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => confirmPersonalWechatSendJobAction(currentState, (personalWechatConfirmMatch || wecomClientConfirmMatch)[1], body));
     return json(res, 200, publicState(nextState));
   }
 
   const personalWechatApproveMatch = pathname.match(/^\/api\/personal-wechat\/send-jobs\/([^/]+)\/approve$/);
-  if (req.method === "POST" && personalWechatApproveMatch) {
+  const wecomClientApproveMatch = pathname.match(/^\/api\/wecom-client\/realtime\/send-jobs\/([^/]+)\/approve$/);
+  if (req.method === "POST" && (personalWechatApproveMatch || wecomClientApproveMatch)) {
     const body = await readBody(req);
-    const nextState = await mutateState((currentState) => approvePersonalWechatSendJobAction(currentState, personalWechatApproveMatch[1], body));
+    const nextState = await mutateState((currentState) => approvePersonalWechatSendJobAction(currentState, (personalWechatApproveMatch || wecomClientApproveMatch)[1], body));
     return json(res, 200, publicState(nextState));
   }
 
   const personalWechatDispatchedMatch = pathname.match(/^\/api\/personal-wechat\/send-jobs\/([^/]+)\/dispatched$/);
-  if (req.method === "POST" && personalWechatDispatchedMatch) {
+  const wecomClientDispatchedMatch = pathname.match(/^\/api\/wecom-client\/realtime\/send-jobs\/([^/]+)\/dispatched$/);
+  if (req.method === "POST" && (personalWechatDispatchedMatch || wecomClientDispatchedMatch)) {
     const body = await readBody(req);
-    const nextState = await mutateState((currentState) => markPersonalWechatSendJobDispatchedAction(currentState, personalWechatDispatchedMatch[1], body));
+    const nextState = await mutateState((currentState) => markPersonalWechatSendJobDispatchedAction(currentState, (personalWechatDispatchedMatch || wecomClientDispatchedMatch)[1], body));
     return json(res, 200, publicState(nextState));
   }
 
   const personalWechatFailMatch = pathname.match(/^\/api\/personal-wechat\/send-jobs\/([^/]+)\/fail$/);
-  if (req.method === "POST" && personalWechatFailMatch) {
+  const wecomClientFailMatch = pathname.match(/^\/api\/wecom-client\/realtime\/send-jobs\/([^/]+)\/fail$/);
+  if (req.method === "POST" && (personalWechatFailMatch || wecomClientFailMatch)) {
     const body = await readBody(req);
-    const nextState = await mutateState((currentState) => failPersonalWechatSendJobAction(currentState, personalWechatFailMatch[1], body));
+    const nextState = await mutateState((currentState) => failPersonalWechatSendJobAction(currentState, (personalWechatFailMatch || wecomClientFailMatch)[1], body));
     return json(res, 200, publicState(nextState));
   }
 

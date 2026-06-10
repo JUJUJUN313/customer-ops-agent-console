@@ -4,6 +4,11 @@
 
 ### 新增
 
+- 新增企微客户端实时未读链路：`wecomClientRealtime` 状态、`/api/wecom-client/realtime/*` API 和 `scripts/wecom-client-realtime-worker.mjs`，用于本地脚本识别企微客户端未读外部群、写入实时入站、调度企微员工客户端发送并等待历史下载补账确认。
+- 企微客户端实时链路新增系统态静默窗口和会话版本预检：本地脚本只负责读取/发送短动作；系统维护 `roomVersion/quietUntilAt`，静默未结束或任务版本落后时不会下发企微UI发送。
+- 新增 `npm run wecom:realtime`：持续检查企微客户端本地Worker、拉取未读消息、ACK、运行SendScheduler、处理 `sending` 任务并回写动作结果；发送命令显式带 `noScreenshot=true`，系统不生成截图或录屏文件。
+- 新增企微客户端实时补账接口：`POST /api/wecom-client/realtime/reconcile` 用于服务商历史下载脚本确认发送任务，服务商后台下载只作为基础留档、审计和最终确认，不作为实时消息源。
+- 新增企微客户端实时测试：覆盖实时未读入站、复用AccountAgent队列、员工抢先回复取消自动任务、历史下载补账确认，以及状态中不出现截图路径。
 - 新增企微智能机器人真实联调闭环：普通测试群中通过企微成员选择器真实 @ “测试机器人 1” 后，bridge 已验证可读取真实群消息并按 `chatid` 写入会话工作台；临时开启 `aibot.autoReply` 后，机器人可在企微群内真实回复。
 - 新增企微机器人出站回写：bridge 成功调用 `replyStream` 后会把机器人回复以 `direction=outbound` 写入 `/api/wecom/inbound`，会话工作台展示为出站消息，企微日志记录为 `消息出站` 且 `externalSideEffects=true`。
 - 增强企微长连接稳定性：bridge 在真实帧缺少 `msgid` 时会生成稳定消息指纹，避免通用事件和类型事件重复入站；机器人出站回写按 `externalMessageId` 幂等处理，重复回写不会在会话里显示两次。
@@ -14,15 +19,19 @@
 - 收敛个人微信接入产品语义：将界面主入口从“Sidecar/Gateway”改为“个人微信连接器”，新增“连接个人微信”入口，Mock检查不再返回真实检查通过，而是明确提示“未接入真实个人微信”。
 - 增强个人微信确认回执闭环：Sidecar 只返回 `confirmations`、没有新消息时也会 ACK `confirmationIds/confirmedMessageIds`；同一任务重复回读确认保持幂等，不重复写会话。
 - 新增个人微信真实契约联调：使用临时Sidecar验证 `canReceive=true/canSend=true/supportsAck=true` 后，已跑通“拉取客户消息 -> ACK -> SendScheduler进入sending -> Sidecar发送 -> sent_pending_confirm -> 自回显confirmed”完整闭环。
-- 新增真实企微/个微接入收敛：企微接入页调整为真实连接中心，突出会话存档主读取、智能机器人测试入口和个人微信Sidecar，模拟入站统一折叠到高级调试区。
+- 新增真实企微/个微接入收敛：企微接入页调整为真实连接中心，突出会话存档主读取、智能机器人测试入口和个人微信Sidecar；本地模拟入站不再作为业务界面入口。
 - 新增会话存档ACK闭环：`scripts/wecom-archive-gateway.mjs` 成功写入 `/api/wecom/archive/inbound` 后会调用Sidecar `/ack` 回写 `cursor/seq/messageIds`，并把 `lastAckAt` 回写到状态。
 - 新增会话存档非文本兜底：图片、文件、语音等无正文消息会以占位文本进入会话，并生成客服人工查看任务，避免真实拉取时丢消息。
 - 新增个人微信Sidecar能力门禁：Sidecar `/health` 必须声明 `canReceive=true` 才会拉取消息，声明 `canSend=true` 后SendScheduler才会把任务调度到 `sending`；否则任务保持待处理并写入明确原因。
 - 新增业务会话工作台能力层：默认聚合企微会话存档、企微智能机器人和个人微信/统一Sidecar真实来源，提供类企微/微信三栏聊天界面、会话搜索、来源筛选、状态筛选、客户绑定、回复入队、客户档案、任务、报价和发送队列展示；本地模拟只在“本地调试”筛选中出现。
-- 导航按业务重新收口：群聊管理改为“VIP群管理”，仅保留VIP客户、VIP会话、报价订阅、群触达草稿和群聊任务；企微接入和消息入站移入设置。
+- 导航按业务重新收口：群聊管理改为“VIP群管理”，仅保留VIP客户、VIP会话、报价订阅、群触达草稿和群聊任务；企微接入移入设置，本地模拟消息入口不再展示。
 - 客户池改为列表优先：进入客户档案/电销客户池/销售客户/VIP客户时先看到客户列表，右上角“新增档案”进入二级新增页，双击客户行进入二级详情维护页。
 - 会话工作台按业务入口拆分：电销管理新增“电销会话”，销售管理新增“销售会话”，VIP群管理提供“VIP会话”；三者复用统一会话能力，但默认按渠道、客户阶段和会员状态过滤，避免业务人员看到不相关群。
 - 会话卡片展示优化：左侧会话名称超长省略，卡片标签只保留待绑定、待回复、高风险等行动状态；工作台在桌面端按视口高度约束，左侧列表、中间聊天流和右侧详情各自滚动。
+- 企微客户端实时入站增加系统层非业务会话过滤，`文件传输助手/邮件提醒/企业微信团队/客户联系/行业资讯/微信客服` 不再创建客户档案、群上下文、任务或发送队列。
+- 企微客户端未知业务群自动建档改为复用同名 `企微群待绑定` 占位档案，避免测试群或同一群因不同临时 `roomId` 被重复识别成多个客户档案。
+- SendScheduler 队列过期改为从 `max(createdAt, validAfterAt/quietUntilAt)` 开始计算，并在 realtime worker 输出 `schedulerDispatched/schedulerSkipped/schedulerExpired`，便于区分发送、保护跳过和过期取消。
+- 企微客户端 `/send` 新增发送前快读保护：进入目标会话后只读尾部少量消息，最新消息必须匹配 `triggerLatestMessageId` 才会粘贴发送；发现新消息时返回 `aborted_new_messages`，Worker 先入站 ACK 再取消旧任务，无法确认最新消息时返回 `target_latest_unverified` 且不发送。
 - 新增聊天API：`GET /api/chat/sessions`、`GET /api/chat/sessions/:sessionId`、`POST /api/chat/sessions/:sessionId/reply`、`POST /api/chat/sessions/:sessionId/bind-customer`。
 - 新增企微会话内容存档Gateway脚本：`scripts/wecom-archive-gateway.mjs` 和 `npm run wecom:archive`，支持 `--check`、`--once` 和轮询Sidecar `/pull`。
 - 扩展 `wecomConfig.archive`：新增 `corpId`、`archiveSecret`、`privateKey`、`privateKeyVersion`、`seq`、`pollIntervalSeconds`、`limit`、`gatewayMode`、`sidecarUrl` 和 `trustedStatus`，并保持Secret/私钥脱敏。
@@ -63,12 +72,13 @@
 
 ### 验证
 
-- `npm test`：新增企微机器人出站回写断言；既有企微会话存档入站去重、非文本占位任务、会话工作台投影/绑定/回复、会话存档Gateway状态回写、个人微信Sidecar能力门禁、个人微信Gateway健康检查、同群连续客户消息合并、SendScheduler并发调度/回读确认、人工放行、Sidecar发送回调、分钟上限和发送失败退避断言继续覆盖。
+- `npm test`：66 个用例通过；新增企微客户端实时未读入站、复用AccountAgent队列、无截图证据、员工抢先回复取消自动任务和历史下载补账确认断言。既有企微会话存档入站去重、非文本占位任务、会话工作台投影/绑定/回复、会话存档Gateway状态回写、个人微信Sidecar能力门禁、个人微信Gateway健康检查、同群连续客户消息合并、SendScheduler并发调度/回读确认、人工放行、Sidecar发送回调、分钟上限和发送失败退避断言继续覆盖。
 - `node --check src/app.js`
 - `node --check src/systemActions.js`
 - `node --check src/api.js`
 - `node --check scripts/serve.mjs`
 - `node --check scripts/wecom-archive-gateway.mjs`
+- `node --check scripts/wecom-client-realtime-worker.mjs`
 - `node --check scripts/personal-wechat-send-gateway.mjs`
 - 本地API冒烟：`/api/health` 正常；`/api/diagnostics` 返回 `ok=true`、失败0、警告0；`/api/personal-wechat/gateway/check` 在Mock模式返回检查通过；`/api/wecom/archive/check-sidecar` 在配置缺失时返回明确缺项并写入日志。
 - CLI冒烟：`npm run wecom:archive -- --check` 在缺少 `corpId/archiveSecret/privateKey` 时输出 JSON 缺项并返回退出码1；`npm run personal-wechat:gateway -- --check` 在Mock模式输出 idle 状态且不触发外部发送。
@@ -80,7 +90,7 @@
 
 - 新增 `docs/USAGE_GUIDE.md` 完整使用文档，覆盖系统定位、启动方式、数据安全、业务闭环、导航结构、各模块实际用法、Agent能力、外部动作边界、LLM/企微/个人微信Mock验收流程、多人协作规范、常见问题和生产化待补足事项。
 - 新增业务分组侧边栏：一级菜单包含总览、客户管理、电销管理、销售管理、VIP群管理、设置，页面被收拢到二级菜单；电销、销售、VIP客户和会话入口按业务归属拆分。
-- 新增企微接入页面，支持配置企微测试群机器人Webhook、发送测试消息、发送已确认草稿和模拟企微入站。
+- 新增企微接入页面，支持配置企微测试群机器人Webhook、发送测试消息、发送已确认草稿和企微入站兼容接口。
 - 新增企微智能机器人长连接 bridge：`scripts/wecom-aibot-bridge.mjs` 使用 `@wecom/aibot-node-sdk` 通过 WebSocket 读取真实机器人消息。
 - 新增 `wecomBindings.groups`，按企微 `chatid` 维护客户群绑定，未知群自动生成待绑定档案，避免不同客户群消息串档。
 - 新增企微入站 `externalMessageId/msgid` 去重，重复消息只写去重日志，不重复生成任务或Agent输出。
@@ -93,7 +103,7 @@
 - 新增 `/api/wecom/aibot/check`、`/api/wecom/aibot/status`、`/api/wecom/group-bindings`。
 - 新增企微接入页“智能机器人长连接”和“群聊归档绑定”区域，可保存 Bot ID/Secret、查看桥接状态、绑定 `chatid` 到客户档案。
 - 新增 `src/wecomClient.js`，封装企微群机器人 `text`/`markdown` 消息发送、Webhook校验、超时控制和响应解析。
-- 新增 `wecomConfig` 和 `wecomLogs` 状态，用于保存企微发送路由、入站配置、测试发送/草稿发送/模拟入站日志。
+- 新增 `wecomConfig` 和 `wecomLogs` 状态，用于保存企微发送路由、入站配置、测试发送/草稿发送/入站日志。
 - 新增 `/api/wecom/config`、`/api/wecom/test-send`、`/api/wecom/inbound` 和 `/api/outbound-drafts/:draftId/send-wecom`。
 - 新增触达草稿状态 `企微已发送`，成功发送到企微测试群后写入 `wecomDelivery` 和客户事件。
 - 新增 `/api/tasks/batch-status`，支持批量更新任务状态，逐条写入客户事件并汇总审计。
@@ -125,7 +135,7 @@
 - README 和项目说明新增完整使用文档入口，并明确涉及使用方式、业务流程、模型配置、企微/个人微信接入、Agent能力或外部动作边界变化时必须同步更新完整使用文档。
 - `/api/state` 新增企微Webhook脱敏，前端只读取是否已配置和掩码，不回显完整Webhook或入站Secret。
 - `/api/state` 和 `/api/wecom/config` 新增企微智能机器人 Bot ID/Secret 脱敏，前端只读取是否已配置和掩码。
-- 企微接入能力从“测试群Webhook发送 + 本地模拟入站”扩展为“智能机器人长连接读取 + Webhook灰度发送”，自动回复默认关闭。
+- 企微接入能力从“测试群Webhook发送 + API级入站兼容”扩展为“智能机器人长连接读取 + Webhook灰度发送”，自动回复默认关闭。
 - 普通草稿状态接口拒绝直接写入 `企微已发送`，必须通过企微发送接口成功后才会标记外部副作用。
 - 企微发送模式支持 `manualApproval` 和 `testOnly`；测试模式下禁止业务草稿发送。
 - 企微接入入口当前已统一放到设置模块，避免混入VIP群业务菜单。
@@ -147,7 +157,7 @@
 - 系统蓝图排版改为更适合半屏卡片的三列结构，减少窄列文本挤压。
 - Agent控制台改为销售/运营可用的Agent工作台，展示客户摘要、业务动作、客户判断、话术草稿、推荐报价、触达草稿和任务。
 - Agent控制台输出按当前客户过滤；AgentRun新增客户归属，切换客户后不会展示其他客户的最近建议。
-- 本地消息页VIP分流上下文按当前客户过滤，切换客户后不会展示其他客户的群分流摘要。
+- 会话工作台VIP分流上下文按当前客户过滤，切换客户后不会展示其他客户的群分流摘要。
 - Agent建议区在桌面端固定在可视范围内并独立滚动，长输出不会把操作区冲出视野。
 - 表格增加外边界和稳定表头，移动端导航改为横向滚动，模型配置卡片内部表单改为更易读的两列。
 - Agent控制台继续展示本地规则引擎、真实LLM是否调用、外部触达副作用未触发，避免把规则Agent或模型增强误解为真实外呼/企微发送。
@@ -167,7 +177,7 @@
 
 ### 验证
 
-- `npm test`：48 个用例通过，新增批量任务状态、批量草稿状态、真实LLM连接测试、Agent LLM增强、API Key保留/清空、客户归属、企微Webhook脱敏、企微智能机器人凭据脱敏、企微测试发送、企微草稿发送、企微模拟入站、`chatid` 独立建档、群绑定改绑、`msgid` 去重、个人微信低风险队列、高风险人工确认、重复消息去重、队列过期取消和单账号限频断言。
+- `npm test`：48 个用例通过，新增批量任务状态、批量草稿状态、真实LLM连接测试、Agent LLM增强、API Key保留/清空、客户归属、企微Webhook脱敏、企微智能机器人凭据脱敏、企微测试发送、企微草稿发送、企微入站兼容接口、`chatid` 独立建档、群绑定改绑、`msgid` 去重、个人微信低风险队列、高风险人工确认、重复消息去重、队列过期取消和单账号限频断言。
 - `node --check src/app.js`
 - `node --check src/systemActions.js`
 - `node --check src/agentEngine.js`
@@ -241,6 +251,7 @@
 - 成交后自动创建VIP维护小群任务；继续培育自动回到电销触达任务。
 - 闭环编排Agent不再依赖当前选中客户，可在无选中客户时为全量客户生成计划。
 - 非法负责人角色、非法渠道发送角色和非法SLA参考时间会被拒绝，不再写入状态。
+- 清理本地状态中的 `文件传输助手` 历史档案、日志和 Agent 运行残留，并将重复 `测试群` 待绑定档案合并到单一占位客户；清理后客户档案为 20 个，系统诊断 `ok=true`。
 
 ### 验证
 

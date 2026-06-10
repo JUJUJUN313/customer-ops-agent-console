@@ -188,7 +188,7 @@ export function extractMessageSignals(text = "", state = initialState) {
   };
 }
 
-export function buildConversationContext(state, customerId, channel = "VIP模拟群", limit = 6) {
+export function buildConversationContext(state, customerId, channel = "VIP群", limit = 6) {
   const conversations = (state.conversations || []).filter(
     (conversation) => conversation.customerId === customerId && (!channel || conversation.channel === channel)
   );
@@ -486,7 +486,7 @@ export function runDialerAgent(inputState, customerId) {
     customer.tags.push(nextTag);
   }
   appendEvent(state, customerId, {
-    channel: "模拟外呼",
+    channel: "外呼",
     type: "外呼摘要",
     text: highIntent
       ? "客户表达明确采购计划，适合直接转销售承接会员卡。"
@@ -525,7 +525,7 @@ export function runNurtureAgent(inputState, customerId, message) {
     pushUnique(customer.tags, model);
   }
   appendEvent(state, customerId, {
-    channel: "电销模拟私聊",
+    channel: "电销企微",
     type: "客户回复",
     text: message
   });
@@ -570,7 +570,7 @@ export function runSalesAgent(inputState, customerId, message) {
   const recommendations = recommendQuotes(state, customer, 2);
   const playbook = buildSalesPlaybook(customer, signal, recommendations, state.salesSamples || []);
   appendEvent(state, customerId, {
-    channel: "销售模拟私聊",
+    channel: "销售企微",
     type: "客户回复",
     text: message
   });
@@ -612,12 +612,12 @@ export function runVipAgent(inputState, customerId, message) {
   const customer = requireCustomer(state, customerId);
   ensureCustomerLists(customer);
   const signal = classifyMessage(message, state);
-  const conversationContext = buildConversationContext(state, customerId, "VIP模拟群");
+  const conversationContext = buildConversationContext(state, customerId, "VIP群");
   for (const model of signal.models) {
     pushUnique(customer.watchedModels, model);
   }
   appendEvent(state, customerId, {
-    channel: "VIP模拟群",
+    channel: "VIP群",
     type: "群内提问",
     text: message
   });

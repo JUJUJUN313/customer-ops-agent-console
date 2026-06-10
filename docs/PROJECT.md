@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-本项目是“智能客服与客户运营中台”的本地可运行版。当前阶段使用本地 API、JSON 状态存储、本地消息入口、触达草稿队列、企微会话内容存档Sidecar读取契约、企微智能机器人长连接/测试群机器人连接器、个人微信Sidecar Gateway + 单账号 AccountAgent + SendScheduler 和规则型 Agent，把从客户筛选到销售承接、VIP维护、报价订阅和数据回流的业务链路跑通。系统会真实写入本地状态；不会真实外呼、发短信或同步CRM。默认Agent不调用外部大模型，只有模型连接测试或勾选真实LLM增强时才会调用已配置模型；配置企微Webhook后，人工确认草稿可以真实发送到企微测试群机器人；启用会话存档入口并配置Sidecar后，可以通过 `/health`、`/pull`、`/ack` 验证存档消息读取、去重、ACK和群归档；配置智能机器人 Bot ID/Secret 并启动 bridge 后，可以读取真实企微智能机器人消息并按 `chatid` 独立归档客户群；个人微信Sidecar声明 `canReceive=true` 后可通过 `receiveEndpoint` 拉取消息并ACK，声明 `canSend=true` 后才会真实调度发送。
+本项目是“智能客服与客户运营中台”的本地可运行版。当前阶段使用本地 API、JSON 状态存储、触达草稿队列、企微会话内容存档Sidecar读取契约、企微客户端实时未读Worker契约、AccountAgent + SendScheduler 和规则型 Agent，把从电销分层、销售承接、VIP群维护、报价订阅到数据回流的业务链路跑通。系统会真实写入本地状态；不会真实外呼、发短信或同步CRM。当前业务界面按三线能力重组：电销运营负责历史消息分析、客户分层和群发计划；销售运营负责优先级任务、客户摘要和推荐回复；VIP群维护负责实时企微收发、高风险确认和历史补账。默认Agent不调用外部大模型，只有模型连接测试或勾选真实LLM增强时才会调用已配置模型；配置企微客户端实时Worker后，可以通过 `/messages` 读取本地脚本识别到的未读外部群，由系统维护静默窗口和会话版本，再通过 `/send` 执行企微员工客户端自动化发送，最终由服务商历史下载补账确认。
 
 ## 当前可运行链路
 
@@ -25,7 +25,7 @@ flowchart LR
   P --> K["VIP群分流Agent"]
   V["企微会话存档Sidecar /pull + /ack"] --> P
   X["企微长连接bridge"] --> P
-  Z["个人微信Sidecar + AccountAgent"] --> S["SendScheduler受控调度"]
+  Z["企微客户端实时Worker + AccountAgent"] --> S["SendScheduler受控调度"]
   S --> P
   X --> Y["chatid群绑定"]
   Z --> R["roomId群上下文"]
@@ -43,15 +43,17 @@ flowchart LR
 ## 已实现模块
 
 - 总览：核心指标、端到端链路、电销/销售角色工作台、页面内结构化系统蓝图、最近 Agent 输出摘要、审计日志。
-- 侧边导航：按总览、客户管理、电销管理、销售管理、VIP群管理、设置组织一级模块，并在二级菜单下放置对应业务页面；电销、销售、VIP分别拥有自己的客户、会话和任务入口，企微接入和消息入站归设置。
+- 侧边导航：按总览、电销运营、销售运营、VIP群维护、客户档案、系统设置组织一级模块；审批和任务放回各自业务页，聊天式会话窗口不再作为主业务入口。
 - 客户旅程：状态机、客户池、客户 360 简档、事件流，支持搜索和阶段/会员/负责人筛选。
 - 客户管理：全量客户档案列表优先展示；新增档案和客户详情维护是客户池内二级页面，列表右上角新增，双击客户行进入详情维护；电销、销售、VIP入口会按各自业务阶段预设客户范围。
 - Agent 控制台：面向销售和运营使用的Agent工作台，展示客户摘要、常用客户消息、业务动作、客户判断、建议话术、推荐报价、触达草稿和后续待办，不展示原始代码或 JSON。
 - 模型配置：配置全局 LLM API URL、API Key、模型名、温度和输出Token，配置ASR/TTS语音模型，并支持各Agent独立LLM覆盖；温度表示回答稳定/发散程度，支持真实LLM连接测试和Agent按需LLM增强，ASR/TTS当前仍只保存连接参数。
-- 业务会话工作台：在“电销管理 > 电销会话”、“销售管理 > 销售会话”和“VIP群管理 > VIP会话”下提供类微信/企微三栏界面；底层统一聚合企微会话存档、企微智能机器人和个人微信/统一Sidecar真实来源，本地模拟仅在“本地调试”筛选中出现；前端默认按业务范围过滤，支持会话搜索、来源/状态筛选、客户绑定、聊天回复、风险提示、任务/报价/发送队列查看。
-- 企微接入：提供真实连接中心，保存企微会话内容存档入口、企微智能机器人 Bot ID/Secret，启动长连接 bridge 读取真实消息，按 `chatid/roomId` 独立归档客户群并维护群绑定；智能机器人测试入口已验证普通测试群真实 @ 入站和回调窗口内真实回复，回复成功后会写入会话工作台出站消息；会话存档Gateway固定Sidecar `/health`、`/pull`、`/ack` 契约，非文本消息占位入站并生成客服人工查看任务；个人微信Sidecar必须声明 `canReceive=true/canSend=true` 才能真实读取或调度。Webhook、Bot ID、Secret、会话存档Secret和RSA私钥不在前端明文展示。
+- 电销运营：展示电销客户池、客户分层、历史消息分析结果、推荐群发批次和审批入口；第一版只生成名单与文案，人工确认后再接企微后台群发任务创建。
+- 销售运营：展示销售优先级任务、客户详情、历史摘要、Agent推荐回复和企微应用H5工作台设计入口；销售只按任务人工回复，系统不自动代发。
+- VIP群维护：展示实时企微读取状态、自动回复队列、高风险人工确认、待处理群、群绑定和历史补账状态；底层仍保留会话归档，但主界面不展示完整聊天窗口。
+- 企微接入：保存企微会话内容存档入口、企微客户端实时Worker和群绑定；会话存档Gateway固定 `/health`、`/pull`、`/ack` 契约，非文本消息占位入站并生成客服人工查看任务；企微客户端实时Worker必须声明 `canReceive=true/canSend=true` 才能真实读取未读或调度企微员工客户端发送，系统侧会用静默窗口和 `roomVersion` 拦截过早或过期回复，发送命令不包含截图留证，历史下载只做补账确认。Webhook、Bot ID、Secret、会话存档Secret和RSA私钥不在前端明文展示。
 - 销售学习：沉淀成交/培育话术样本、质检分、异议点和适用卡种，供销售承接Agent引用。
-- 消息入站：放在设置中，用于写入电销私聊、销售私聊、VIP群本地消息，沉淀本地会话窗口并展示群成员、消息和@对象。
+- 测试企微入站：本地模拟消息入口已从业务界面收起；消息验证通过测试企微群、本地企微Worker和历史留档补账完成。
 - 触达草稿：Agent和人工可生成待确认触达文案，支持搜索、状态/渠道/优先级/风险筛选、确认、复制、发送企微测试群、批量处理、人工已处理和废弃；只有企微发送成功会写入外部副作用。
 - 任务中心：统一承接销售线索、售后分流、报价咨询和人工任务，支持搜索、角色/负责人/状态/优先级/SLA筛选、批量状态更新、SLA截止、临期/超时识别、主管升级和完成时间回写。
 - 报价订阅：归属VIP群管理，支持结构化报价维护、型号搜索、品牌/配置/库存/价格范围筛选、型号订阅、报价行为回流。
@@ -65,12 +67,12 @@ flowchart LR
 - 增加前端“系统自检”页面和顶部“运行系统自检”按钮。
 - 增加客户、任务、报价、模板等输入边界校验。
 - 增强前端 API 错误解析，用户会看到明确错误原因。
-- 扩充测试到 64 个用例，覆盖正常链路、异常输入、脏数据、销售学习、会话上下文、闭环编排、任务SLA、任务批量处理、触达草稿批量处理、状态集合缺失恢复、LLM/语音模型配置、API Key保留/清空、真实LLM连接测试、Agent执行边界、企微配置脱敏、企微测试发送、企微草稿发送、企微模拟入站、会话存档标准入站、会话存档非文本占位任务、会话工作台投影/绑定/回复、会话存档Gateway状态回写、智能机器人凭据脱敏、按 `chatid/roomId` 独立建档、`msgid/messageId` 去重、机器人出站回写幂等，以及个人微信单账号 AccountAgent Gateway健康检查、`canReceive/canSend/supportsAck`能力、确认回执ACK、重复回读确认幂等、低风险队列、高风险人工确认/人工放行、连续消息合并、SendScheduler调度、Sidecar发送回调、失败退避、队列过期取消和分钟限频。
+- 扩充测试到 76 个用例，覆盖正常链路、异常输入、脏数据、销售学习、消息上下文、闭环编排、任务SLA、任务批量处理、触达草稿批量处理、状态集合缺失恢复、LLM/语音模型配置、API Key保留/清空、真实LLM连接测试、Agent执行边界、企微配置脱敏、企微测试发送、企微草稿发送、企微入站兼容接口、会话存档标准入站、会话存档非文本占位任务、消息投影/绑定/回复、会话存档Gateway状态回写、智能机器人凭据脱敏、按 `chatid/roomId` 独立建档、`msgid/messageId` 去重、机器人出站回写幂等，以及企微客户端实时Worker、`canReceive/canSend/supportsAck`能力、确认回执ACK、重复回读确认幂等、低风险队列、高风险人工确认/人工放行、连续消息合并、SendScheduler调度、发送回调、失败退避、队列过期取消和分钟限频。
 - 完善界面展示逻辑：空客户/加载失败保护、操作中禁用、防重复提交、报价筛选保持、移动端按钮堆叠展示。
 - 优化界面排版和展示逻辑：顶部操作区固定、移动端导航按业务分组折叠、表格表头稳定、Agent建议区可视内滚动、系统蓝图减少窄列挤压。
 - 修复Agent控制台输出串客户风险：AgentRun记录客户归属，控制台只展示当前客户对应的最新Agent建议。
 - 修复本地消息VIP上下文串客户风险：VIP分流结果按当前客户过滤，切换客户后不会展示其他客户的群分流摘要。
-- 增加临时 CDP UI smoke 验收方式，真实点击导航、自检、批量本地Agent、本地消息入站、报价订阅和任务状态更新。
+- 增加临时 CDP UI smoke 验收方式，真实点击导航、自检、批量本地Agent、测试企微入站链路、报价订阅和任务状态更新。
 - 增加能力审计与闭环编排：识别本地可用、可运行、待建设和未接入能力，并为所有客户生成下一步运营动作。
 - 增强销售、VIP和报价Agent：销售交接包、话术playbook、@错人纠偏、报价推荐理由和触达文案。
 - 增加稳定性审计与防脏数据校验：非法阶段、客户风险、任务状态、任务优先级、销售结果会被拒绝写入，重复报价按自然键更新，自检覆盖更多脏状态。
@@ -92,14 +94,14 @@ flowchart LR
 - 增加客户池筛选：客户旅程和客户管理页支持搜索客户名/联系人/手机号/标签/机型，并按阶段、会员状态和负责人筛选。
 - 增加P0运营工作台能力：总览新增电销/销售角色工作台；任务中心新增组合筛选和批量状态更新；触达草稿新增风险识别、组合筛选和批量处理；报价订阅新增型号、配置、库存和价格范围筛选。
 - 完成当前全局LLM真实验收：使用已配置的DeepSeek兼容网关完成连接测试和销售承接Agent LLM增强，增强结果写入本地待确认草稿且 `externalSideEffects=false`。
-- 增加业务分组侧边栏：一级菜单按总览、客户管理、电销管理、销售管理、VIP群管理、设置聚合，二级菜单进入具体页面，并支持电销/销售/VIP客户、会话、任务和群聊草稿的预设筛选；企微接入和消息入站移入设置。
+- 增加业务分组侧边栏：一级菜单按总览、客户管理、电销管理、销售管理、VIP群管理、设置聚合，二级菜单进入具体页面，并支持电销/销售/VIP客户、会话、任务和群聊草稿的预设筛选；企微接入移入设置，模拟消息入口不再作为业务导航展示。
 - 增加企微P1连接器：新增 `wecomConfig`、`wecomLogs`、企微接入页和 `/api/wecom/*` 接口；支持Webhook脱敏保存、测试发送、已确认草稿发送到企微测试群、本地企微入站模拟和系统自检。
-- 增加企微P2长连接桥接：新增 `scripts/wecom-aibot-bridge.mjs`、`wecomBindings`、智能机器人 Bot ID/Secret 脱敏配置、`/api/wecom/aibot/check`、`/api/wecom/aibot/status`、`/api/wecom/group-bindings`；bridge 使用 `@wecom/aibot-node-sdk` 连接企微 WebSocket，真实认证通过后可读取消息，系统按 `chatid` 独立归档、按 `msgid` 去重，未知群进入待绑定档案；真实回复成功后会通过 `direction=outbound` 回写机器人出站消息，避免会话工作台漏掉机器人已回内容。
-- 增加业务会话工作台：新增 `ChatSession` 投影和 `/api/chat/sessions`、`/api/chat/sessions/:sessionId`、`/api/chat/sessions/:sessionId/reply`、`/api/chat/sessions/:sessionId/bind-customer`，把企微会话存档、智能机器人和个人微信/Sidecar会话统一到聊天能力层；前端在电销、销售、VIP入口按渠道、阶段和会员状态过滤展示，默认只看真实来源；外部群低风险回复进入SendScheduler，高风险进入人工确认，本地调试会话只保存草稿，不伪装真实发送。
+- 增加企微P2长连接桥接：新增 `scripts/wecom-aibot-bridge.mjs`、`wecomBindings`、智能机器人 Bot ID/Secret 脱敏配置、`/api/wecom/aibot/check`、`/api/wecom/aibot/status`、`/api/wecom/group-bindings`；bridge 使用 `@wecom/aibot-node-sdk` 连接企微 WebSocket，真实认证通过后可读取消息，系统按 `chatid` 独立归档、按 `msgid` 去重，未知群进入待绑定档案；真实回复成功后会通过 `direction=outbound` 回写机器人出站消息，避免消息归档漏掉机器人已回内容。
+- 增加消息归档投影：新增 `ChatSession` 投影和 `/api/chat/sessions`、`/api/chat/sessions/:sessionId`、`/api/chat/sessions/:sessionId/reply`、`/api/chat/sessions/:sessionId/bind-customer`，把企微会话存档、智能机器人和旧兼容会话统一到底层消息能力；当前主界面不再展示聊天窗口，电销/销售/VIP分别转成分层群发、销售任务和VIP维护队列。
 - 增加会话存档主读取链路：新增企微 `archive` 配置、`/api/wecom/archive/inbound`、`/api/wecom/archive/status` 和 `scripts/wecom-archive-gateway.mjs`，用于通过Sidecar拉取/解密企微会话存档消息，成功入站后调用Sidecar `/ack` 回写游标和消息ID，并复用AccountAgent群上下文、去重、风控和SendScheduler链路；非文本消息以占位文本进入会话并生成客服人工查看任务。
-- 增强个人微信单账号 AccountAgent：新增 `personalWechat` 状态、`/api/personal-wechat/*` 接口和企微接入页个人微信区域；按 `roomId` 维护外部群上下文，低风险消息生成 `queued` 单账号发送任务，高风险消息生成 `manual_required` 人工确认任务，人工放行后才回到 `queued`，连续客户消息会合并到一个活跃任务，重复 `messageId` 去重，员工或托管号回复会取消同群待发，SendScheduler执行同群FIFO、账号并发、分钟上限、队列过期重判、失败退避、Sidecar发送回调和回读确认。
-- 增强个人微信Sidecar Gateway：`scripts/personal-wechat-send-gateway.mjs` 和 `npm run personal-wechat:gateway` 支持 `/health` 能力检查、`receiveEndpoint` 拉取消息、`ackEndpoint` 回写游标、`sendEndpoint` 出站发送和自回显确认；Mock模式调度后进入 `sent_pending_confirm`，Sidecar模式必须先声明 `canSend=true` 才会进入 `sending`，外部Gateway提交发送后进入 `sent_pending_confirm`，最终仍需回读确认。
-- 增加企微/个微接入总控：企微接入页顶部新增会话存档、智能机器人、测试群发送和个人微信Sidecar四张状态卡；新增 `/api/wecom/archive/check-sidecar`、`/api/personal-wechat/gateway/check`；模拟入站移入高级调试折叠区；群聊归档绑定支持搜索，最近企微记录支持按类型筛选。
+- 增强历史兼容发送队列：保留 `personalWechat` 内部状态和 `/api/personal-wechat/*` 兼容接口，供企微客户端实时Worker复用同群FIFO、高风险人工确认、连续消息合并、失败退避和回读确认能力；当前业务界面不再展示个人微信接入入口。
+- 增强旧版Gateway兼容层：`scripts/personal-wechat-send-gateway.mjs` 保留为历史兼容脚本，不作为当前三线业务工作台的生产入口。
+- 增加企微接入总控：新增会话存档、智能机器人测试、测试群发送和实时Worker状态能力；新增 `/api/wecom/archive/check-sidecar`、`/api/personal-wechat/gateway/check`；模拟入站已从业务界面移除；群聊归档绑定支持搜索，最近企微记录支持按类型筛选。
 
 ## 文档同步规则
 

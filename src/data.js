@@ -53,6 +53,7 @@ export const initialState = {
       maxQueueAgeSeconds: 60,
       failureBackoffSeconds: 30,
       mergeWindowSeconds: 45,
+      quietWindowSeconds: 0,
       status: "未连接",
       lastEventAt: "",
       lastError: ""
@@ -60,6 +61,65 @@ export const initialState = {
     groupContexts: [],
     sendJobs: [],
     decisions: [],
+    logs: []
+  },
+  wecomClientRealtime: {
+    enabled: true,
+    monitor: {
+      mode: "local-script",
+      pollIntervalSeconds: 2,
+      unreadDetection: "client-unread-list",
+      status: "未启动",
+      lastSeenAt: "",
+      lastError: ""
+    },
+    worker: {
+      mode: "local-script",
+      sidecarUrl: "",
+      sendEndpoint: "/send",
+      receiveEndpoint: "/messages",
+      ackEndpoint: "/ack",
+      canSend: false,
+      canReceive: false,
+      supportsAck: false,
+      supportsConfirm: true,
+      loginStatus: "未连接",
+      cursor: "",
+      status: "Mock待接",
+      lastConnectedAt: "",
+      lastEventAt: "",
+      lastPulledAt: "",
+      lastAckAt: "",
+      lastError: ""
+    },
+    employeeAccount: {
+      id: "wecom_employee_default",
+      name: "企微员工自动化号",
+      displayName: "企微员工助手",
+      defaultCustomerId: "c003",
+      assignedRoomIds: [],
+      assignedCustomerIds: [],
+      autoReply: true,
+      requireApprovalForRisk: true,
+      minSendIntervalSeconds: 3,
+      concurrency: 1,
+      maxSendsPerMinute: 20,
+      maxQueueAgeSeconds: 60,
+      failureBackoffSeconds: 30,
+      mergeWindowSeconds: 45,
+      quietWindowSeconds: 5,
+      status: "未连接",
+      lastEventAt: "",
+      lastError: ""
+    },
+    archiveReconciler: {
+      provider: "企微服务商历史下载",
+      mode: "download-reconcile",
+      status: "待补账",
+      lastDownloadedAt: "",
+      lastConfirmedAt: "",
+      lastError: ""
+    },
     logs: []
   },
   wecomBindings: {
@@ -529,7 +589,7 @@ export const initialState = {
     {
       id: "e001",
       customerId: "c001",
-      channel: "模拟企微私聊",
+      channel: "企微私聊",
       type: "客户回复",
       text: "最近 iPhone 13 还有稳定报价吗？会员卡能不能便宜点？",
       time: "09:18"
@@ -537,7 +597,7 @@ export const initialState = {
     {
       id: "e002",
       customerId: "c003",
-      channel: "VIP模拟群",
+      channel: "VIP群",
       type: "群内提问",
       text: "@销售 上周那批 Mate60 有两台售后怎么处理？顺便今天报价发一下。",
       time: "09:42"
@@ -545,7 +605,7 @@ export const initialState = {
     {
       id: "e003",
       customerId: "c002",
-      channel: "销售模拟私聊",
+      channel: "销售企微",
       type: "客户回复",
       text: "如果黑金卡能保证优先报价和稳定货源，我这周可以定。",
       time: "10:06"
@@ -555,7 +615,7 @@ export const initialState = {
     {
       id: "conv_c003_vip",
       customerId: "c003",
-      channel: "VIP模拟群",
+      channel: "VIP群",
       title: "成都华联通讯会员小群",
       members: [
         { name: "周总", role: "客户" },

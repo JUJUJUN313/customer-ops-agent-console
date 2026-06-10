@@ -38,7 +38,7 @@ test("VIP群分流Agent能把售后问题路由给售后", () => {
 
 test("会话上下文能汇总最近群消息和未完成任务", () => {
   const state = cloneState(initialState);
-  const context = buildConversationContext(state, "c003", "VIP模拟群");
+  const context = buildConversationContext(state, "c003", "VIP群");
   assert.equal(context.messageCount, 2);
   assert.ok(context.recentMessages.some((message) => message.mentions.includes("销售")));
   assert.ok(context.unresolvedTasks.some((task) => task.ownerRole === "售后"));

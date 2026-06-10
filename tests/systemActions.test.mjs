@@ -10,6 +10,7 @@ import {
   buildOutboundDraftReport,
   buildPersonalWechatReport,
   buildTaskSlaReport,
+  buildWecomClientRealtimeReport,
   buildWecomConfigReport,
   bindChatSessionCustomerAction,
   approvePersonalWechatSendJobAction,
@@ -25,6 +26,8 @@ import {
   getChatSessionReport,
   ingestMessageAction,
   ingestPersonalWechatMessageAction,
+  ingestWecomClientRealtimeMessagesAction,
+  ingestWecomClientRealtimeMessageAction,
   ingestWecomArchiveMessageAction,
   markPersonalWechatSendJobDispatchedAction,
   recordOutcomeAction,
@@ -44,10 +47,13 @@ import {
   updateOutboundDraftStatusAction,
   updatePersonalWechatConfigAction,
   updatePersonalWechatGatewayStatusAction,
+  updateWecomClientRealtimeConfigAction,
+  reconcileWecomClientArchiveAction,
   updateTaskAction,
   updateTemplateAction,
   updateWecomArchiveStatusAction,
   updateWecomConfigAction,
+  updateWecomClientRealtimeStatusAction,
   updateWecomGroupBindingAction,
   ingestWecomMessageAction,
   upsertQuoteAction
@@ -62,13 +68,13 @@ test("系统动作能串起Agent、渠道消息、任务和报价订阅", () => 
 
   state = ingestMessageAction(state, {
     customerId: "c003",
-    channel: "VIP模拟群",
+    channel: "VIP群",
     message: "@销售 有两台售后维修怎么处理？",
     senderRole: "客户",
     senderName: "周总"
   });
   assert.ok(state.tasks.some((task) => task.ownerRole === "售后"));
-  const vipConversation = state.conversations.find((conversation) => conversation.customerId === "c003" && conversation.channel === "VIP模拟群");
+  const vipConversation = state.conversations.find((conversation) => conversation.customerId === "c003" && conversation.channel === "VIP群");
   assert.ok(vipConversation.messages.some((message) => message.text.includes("售后维修") && message.mentions.includes("销售")));
   assert.equal(state.agentRuns[0].repeatedIssue, true);
 
@@ -231,7 +237,7 @@ test("运营动作会校验客户、任务、报价和模板输入", () => {
   assert.throws(() => upsertQuoteAction(state, { model: "Bad", price: "-1" }), /non-negative/);
   assert.throws(() => updateCustomerAction(state, "c001", { risk: "极高" }), /Invalid customer risk/);
   assert.throws(() => updateTemplateAction(state, "tpl_welcome", { risk: "极高" }), /Invalid template risk/);
-  assert.throws(() => ingestMessageAction(state, { customerId: "c003", channel: "VIP模拟群", message: "测试", senderRole: "访客" }), /Invalid sender role/);
+  assert.throws(() => ingestMessageAction(state, { customerId: "c003", channel: "VIP群", message: "测试", senderRole: "访客" }), /Invalid sender role/);
   assert.throws(() => buildTaskSlaReport(state, "坏时间"), /Invalid reference time/);
   assert.throws(() => escalateOverdueTasksAction(state, { now: "坏时间" }), /Invalid reference time/);
 });
@@ -801,7 +807,7 @@ test("已确认触达草稿可发送企微并通过自检", async () => {
   assert.equal(diagnostics.ok, true);
 });
 
-test("企微模拟入站会进入本地会话和对应Agent", () => {
+test("企微兼容入站会进入本地会话和对应Agent", () => {
   const state = ingestWecomMessageAction(seedState(), {
     customerId: "c003",
     channel: "VIP群",
@@ -809,7 +815,7 @@ test("企微模拟入站会进入本地会话和对应Agent", () => {
     senderRole: "客户",
     senderName: "周总"
   });
-  const conversation = state.conversations.find((item) => item.customerId === "c003" && item.channel === "VIP模拟群");
+  const conversation = state.conversations.find((item) => item.customerId === "c003" && item.channel === "VIP群");
   assert.ok(conversation.messages.at(-1).text.includes("维修进度"));
   assert.equal(state.agentRuns[0].agent, "VIP群分流Agent");
   assert.equal(state.wecomLogs[0].type, "消息入站");
@@ -995,7 +1001,7 @@ test("个人微信AccountAgent低风险入站会生成单账号发送队列并�
   assert.equal(state.personalWechat.logs[0].type, "发送确认");
   assert.ok(
     state.conversations
-      .find((conversation) => conversation.customerId === "c003" && conversation.channel === "VIP模拟群")
+      .find((conversation) => conversation.customerId === "c003" && conversation.channel === "VIP群")
       .messages.some((message) => message.senderRole === "私域" && message.text.includes("整理需求"))
   );
   assert.equal(buildPersonalWechatReport(state).summary.confirmedJobs, 1);
@@ -1369,7 +1375,7 @@ test("聊天工作台回复会按风险进入发送队列或人工确认", () =>
 test("本地会话回复只保存草稿，不标记真实发送", () => {
   let state = ingestMessageAction(seedState(), {
     customerId: "c003",
-    channel: "VIP模拟群",
+    channel: "VIP群",
     message: "@客服 我想咨询会员权益",
     senderRole: "客户",
     senderName: "周总"
@@ -1606,6 +1612,667 @@ test("Sidecar出站模式需要Gateway发送回调后才能等待回读确认", 
   assert.equal(job.confirmedMessageId, "archive-echo-001");
 });
 
+test("企微客户端实时未读入站复用AccountAgent队列且不生成截图证据", () => {
+  let state = updateWecomClientRealtimeConfigAction(seedState(), {
+    enabled: true,
+    worker: {
+      mode: "local-script",
+      sidecarUrl: "http://127.0.0.1:8791",
+      sendEndpoint: "/send",
+      receiveEndpoint: "/messages",
+      ackEndpoint: "/ack",
+      canSend: true,
+      canReceive: true,
+      supportsAck: true,
+      supportsConfirm: true,
+      loginStatus: "企微客户端已登录",
+      status: "Worker可用"
+    },
+    employeeAccount: {
+      id: "wecom_emp_001",
+      name: "销售企微员工A",
+      displayName: "销售企微员工A",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      concurrency: 2
+    }
+  });
+
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    customerId: "c003",
+    roomId: "wecom_room_83921",
+    roomName: "[VIP-83921] 张总售后群",
+    messageId: "wecom-realtime-001",
+    senderType: "customer",
+    senderName: "周总",
+    text: "收到，我把资料补一下，流程怎么走？",
+    sendAt: "2026-06-05T10:00:00+08:00"
+  });
+
+  const report = buildWecomClientRealtimeReport(state);
+  assert.equal(report.summary.canReceive, true);
+  assert.equal(report.summary.canSend, true);
+  assert.equal(report.summary.queuedJobs, 1);
+  assert.equal(state.personalWechat.sendJobs[0].accountId, "wecom_emp_001");
+  assert.equal(state.personalWechat.sendJobs[0].source, "wecom-client-realtime");
+  assert.equal(state.personalWechat.groupContexts[0].messages[0].source, "wecom-client-realtime");
+  assert.equal(state.wecomClientRealtime.logs.some((log) => "screenshotPath" in log), false);
+  assert.equal(JSON.stringify(state).includes("screenshotPath"), false);
+  assert.equal(diagnoseState(state).ok, true);
+});
+
+test("企微客户端实时状态回写会同步Worker、ACK和结构化日志", () => {
+  let state = updateWecomClientRealtimeConfigAction(seedState(), {
+    enabled: true,
+    worker: {
+      mode: "local-script",
+      sidecarUrl: "http://127.0.0.1:8791",
+      canSend: true,
+      canReceive: true,
+      supportsAck: true,
+      status: "Worker可用"
+    },
+    employeeAccount: {
+      id: "wecom_emp_status",
+      name: "企微状态测试号",
+      displayName: "企微状态测试号",
+      defaultCustomerId: "c003"
+    }
+  });
+
+  state = updateWecomClientRealtimeStatusAction(state, {
+    type: "实时未读已ACK",
+    status: "实时未读已ACK",
+    roomId: "wecom_room_status",
+    roomName: "[VIP-status] 状态测试群",
+    worker: {
+      cursor: "wecom-status-002",
+      lastAckAt: "2026-06-05T10:30:05.000Z",
+      lastPulledAt: "2026-06-05T10:30:04.000Z",
+      status: "实时未读已ACK"
+    },
+    detail: "ACK 2 条企微客户端消息"
+  });
+
+  assert.equal(state.wecomClientRealtime.worker.cursor, "wecom-status-002");
+  assert.equal(state.wecomClientRealtime.worker.lastAckAt, "2026-06-05T10:30:05.000Z");
+  assert.equal(state.wecomClientRealtime.monitor.status, "实时未读已ACK");
+  assert.equal(state.personalWechat.gateway.cursor, "wecom-status-002");
+  assert.equal(state.wecomClientRealtime.logs[0].type, "实时未读已ACK");
+  assert.equal(state.wecomClientRealtime.logs[0].roomId, "wecom_room_status");
+  assert.equal(state.wecomClientRealtime.logs.some((log) => "screenshotPath" in log), false);
+
+  state = updateWecomClientRealtimeStatusAction(state, {
+    type: "实时未读入站失败",
+    status: "实时未读入站失败",
+    roomId: "wecom_room_status",
+    errorCode: "inbound_write_failed",
+    error: "Inbound group message text is required",
+    detail: "消息入站失败，等待下一轮重试。"
+  });
+
+  assert.equal(state.wecomClientRealtime.monitor.lastError, "Inbound group message text is required");
+  assert.equal(state.wecomClientRealtime.logs[0].status, "失败");
+  assert.equal(state.wecomClientRealtime.logs[0].errorCode, "inbound_write_failed");
+  assert.equal(diagnoseState(state).ok, true);
+});
+
+test("企微客户端实时批量未读会保留读取批次并合并触发消息", () => {
+  let state = updateWecomClientRealtimeConfigAction(seedState(), {
+    enabled: true,
+    worker: {
+      mode: "local-script",
+      sidecarUrl: "http://127.0.0.1:8791",
+      canSend: true,
+      canReceive: true,
+      supportsAck: true,
+      loginStatus: "企微客户端已登录"
+    },
+    employeeAccount: {
+      id: "wecom_emp_batch",
+      name: "企微批量读取测试号",
+      displayName: "企微批量读取测试号",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      quietWindowSeconds: 3
+    }
+  });
+
+  const common = {
+    customerId: "c003",
+    roomId: "wecom_room_batch",
+    roomName: "[VIP-batch] 批量读取测试群",
+    senderType: "customer",
+    senderName: "客户",
+    readBatchId: "wecom_read_batch_001",
+    observedAt: "2026-06-05T10:20:01.000Z",
+    senderConfidence: "medium",
+    readSource: "wecom-client-accessibility"
+  };
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    ...common,
+    messageId: "wecom-batch-001",
+    msgType: "text",
+    text: "我先发第一条需求",
+    sendAt: "2026-06-05T10:20:00.000Z",
+    visibleOrder: 12
+  });
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    ...common,
+    messageId: "wecom-batch-002",
+    msgType: "voice",
+    text: "[voice消息]",
+    sendAt: "2026-06-05T10:20:02.000Z",
+    visibleOrder: 13
+  });
+
+  const context = state.personalWechat.groupContexts.find((item) => item.roomId === "wecom_room_batch");
+  assert.equal(context.messages.length, 2);
+  assert.equal(context.messages[0].readBatchId, "wecom_read_batch_001");
+  assert.equal(context.messages[1].msgType, "voice");
+  assert.equal(context.messages[1].visibleOrder, 13);
+  assert.equal(context.latestReadBatchId, "wecom_read_batch_001");
+  assert.equal(context.roomVersion, 2);
+
+  const job = state.personalWechat.sendJobs[0];
+  assert.equal(job.triggerMessageIds.length, 2);
+  assert.equal(job.triggerReadBatchId, "wecom_read_batch_001");
+  assert.equal(job.validAfterAt, "2026-06-05T10:20:05.000Z");
+});
+
+test("企微客户端实时批量入站会隔离单条失败并减少整批写入风险", () => {
+  let state = updateWecomClientRealtimeConfigAction(seedState(), {
+    enabled: true,
+    worker: {
+      mode: "local-script",
+      sidecarUrl: "http://127.0.0.1:8791",
+      canSend: true,
+      canReceive: true,
+      supportsAck: true,
+      loginStatus: "企微客户端已登录"
+    },
+    employeeAccount: {
+      id: "wecom_emp_batch_api",
+      name: "企微批量API测试号",
+      displayName: "企微批量API测试号",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      quietWindowSeconds: 0
+    }
+  });
+
+  const result = ingestWecomClientRealtimeMessagesAction(state, {
+    messages: [
+      {
+        customerId: "c003",
+        roomId: "wecom_room_batch_api",
+        roomName: "[VIP-batch-api] 批量API测试群",
+        messageId: "wecom-batch-api-001",
+        senderType: "customer",
+        senderName: "客户",
+        text: "第一条有效消息",
+        sendAt: "2026-06-05T10:35:00.000Z"
+      },
+      {
+        customerId: "c003",
+        roomId: "wecom_room_batch_api",
+        roomName: "[VIP-batch-api] 批量API测试群",
+        messageId: "wecom-batch-api-bad",
+        senderType: "customer",
+        senderName: "客户",
+        text: "",
+        sendAt: "2026-06-05T10:35:01.000Z"
+      },
+      {
+        customerId: "c003",
+        roomId: "wecom_room_batch_api",
+        roomName: "[VIP-batch-api] 批量API测试群",
+        messageId: "wecom-batch-api-002",
+        senderType: "customer",
+        senderName: "客户",
+        text: "第二条有效消息",
+        sendAt: "2026-06-05T10:35:02.000Z"
+      }
+    ]
+  });
+  state = result.state;
+
+  assert.equal(result.result.total, 3);
+  assert.equal(result.result.accepted.length, 2);
+  assert.equal(result.result.failed.length, 1);
+  assert.equal(result.result.failed[0].messageId, "wecom-batch-api-bad");
+  const context = state.personalWechat.groupContexts.find((item) => item.roomId === "wecom_room_batch_api");
+  assert.equal(context.messages.length, 2);
+  assert.equal(context.roomVersion, 2);
+  assert.equal(state.personalWechat.sendJobs[0].triggerMessageIds.length, 2);
+  assert.equal(state.wecomClientRealtime.logs[0].type, "实时批量入站");
+  assert.equal(state.wecomClientRealtime.logs[0].status, "部分失败");
+  assert.equal(diagnoseState(state).ok, true);
+});
+
+test("企微客户端实时发送调度等待静默窗口且连续消息只更新系统任务", () => {
+  let state = updateWecomClientRealtimeConfigAction(seedState(), {
+    enabled: true,
+    worker: {
+      mode: "local-script",
+      sidecarUrl: "http://127.0.0.1:8791",
+      canSend: true,
+      canReceive: true,
+      supportsConfirm: true,
+      loginStatus: "企微客户端已登录"
+    },
+    employeeAccount: {
+      id: "wecom_emp_quiet",
+      name: "企微静默测试号",
+      displayName: "企微静默测试号",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      quietWindowSeconds: 3
+    }
+  });
+
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    customerId: "c003",
+    roomId: "wecom_room_quiet",
+    roomName: "[VIP-quiet] 静默测试群",
+    messageId: "wecom-quiet-001",
+    senderType: "customer",
+    senderName: "客户",
+    text: "先问一下流程",
+    sendAt: "2026-06-05T10:00:00.000Z"
+  });
+
+  const firstJobId = state.personalWechat.sendJobs[0].jobId;
+  assert.equal(state.personalWechat.groupContexts[0].roomVersion, 1);
+  assert.equal(state.personalWechat.sendJobs[0].triggerRoomVersion, 1);
+  assert.equal(state.personalWechat.sendJobs[0].validAfterAt, "2026-06-05T10:00:03.000Z");
+  state.personalWechat.sendJobs[0].createdAt = "2026-06-05T10:00:00.000Z";
+
+  state = runPersonalWechatSendSchedulerAction(state, { now: "2026-06-05T10:00:01.000Z" });
+  let job = state.personalWechat.sendJobs.find((item) => item.jobId === firstJobId);
+  assert.equal(job.status, "queued");
+  assert.ok(job.error.includes("静默窗口"));
+  assert.equal(state.personalWechat.logs[0].type, "静默等待");
+
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    customerId: "c003",
+    roomId: "wecom_room_quiet",
+    roomName: "[VIP-quiet] 静默测试群",
+    messageId: "wecom-quiet-002",
+    senderType: "customer",
+    senderName: "客户",
+    text: "再补充一个数量",
+    sendAt: "2026-06-05T10:00:02.000Z"
+  });
+  job = state.personalWechat.sendJobs.find((item) => item.jobId === firstJobId);
+  assert.equal(state.personalWechat.groupContexts[0].roomVersion, 2);
+  assert.equal(job.triggerRoomVersion, 2);
+  assert.equal(job.triggerMessageIds.length, 2);
+  assert.equal(job.validAfterAt, "2026-06-05T10:00:05.000Z");
+  job.createdAt = "2026-06-05T10:00:02.000Z";
+
+  state = runPersonalWechatSendSchedulerAction(state, { now: "2026-06-05T10:00:04.000Z" });
+  job = state.personalWechat.sendJobs.find((item) => item.jobId === firstJobId);
+  assert.equal(job.status, "queued");
+
+  state = runPersonalWechatSendSchedulerAction(state, { now: "2026-06-05T10:00:06.000Z" });
+  job = state.personalWechat.sendJobs.find((item) => item.jobId === firstJobId);
+  assert.equal(job.status, "sending");
+  assert.equal(job.sentAt, "");
+  assert.equal(state.personalWechat.gateway.status, "等待Sidecar发送");
+});
+
+test("企微客户端实时入站会忽略非业务会话且不创建客户档案", () => {
+  let state = updateWecomClientRealtimeConfigAction(seedState(), {
+    enabled: true,
+    worker: {
+      mode: "local-script",
+      sidecarUrl: "http://127.0.0.1:8791",
+      canSend: true,
+      canReceive: true
+    },
+    employeeAccount: {
+      id: "wecom_emp_ignore",
+      name: "企微忽略测试号",
+      displayName: "企微忽略测试号",
+      autoReply: true
+    }
+  });
+  const customerCount = state.customers.length;
+
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    roomId: "wecom_local_file_transfer",
+    roomName: "文件传输助手",
+    messageId: "wecom-ignore-001",
+    senderType: "customer",
+    senderName: "文件传输助手",
+    text: "这不是业务消息"
+  });
+
+  assert.equal(state.customers.length, customerCount);
+  assert.equal(state.personalWechat.groupContexts.length, 0);
+  assert.equal(state.personalWechat.sendJobs.length, 0);
+  assert.equal(state.personalWechat.logs[0].type, "非业务会话忽略");
+});
+
+test("企微客户端实时入站会复用同名待绑定客户档案", () => {
+  let state = updateWecomClientRealtimeConfigAction(seedState(), {
+    enabled: true,
+    worker: {
+      mode: "local-script",
+      sidecarUrl: "http://127.0.0.1:8791",
+      canSend: true,
+      canReceive: true
+    },
+    employeeAccount: {
+      id: "wecom_emp_placeholder_reuse",
+      name: "企微待绑定复用测试号",
+      displayName: "企微待绑定复用测试号",
+      autoReply: true,
+      quietWindowSeconds: 0
+    }
+  });
+
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    roomId: "wecom_placeholder_reuse_a",
+    roomName: "测试群",
+    messageId: "wecom-placeholder-reuse-a",
+    senderType: "customer",
+    senderName: "客户A",
+    text: "请回复流程"
+  });
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    roomId: "wecom_placeholder_reuse_b",
+    roomName: "测试群 (6)",
+    messageId: "wecom-placeholder-reuse-b",
+    senderType: "customer",
+    senderName: "客户B",
+    text: "我也问一下流程"
+  });
+
+  const placeholderCustomers = state.customers.filter((customer) =>
+    customer.tags?.includes("企微群待绑定") &&
+    customer.name === "测试群"
+  );
+  assert.equal(placeholderCustomers.length, 1);
+  assert.equal(state.personalWechat.groupContexts.length, 1);
+  assert.equal(new Set(state.personalWechat.groupContexts.map((context) => context.customerId)).size, 1);
+  assert.deepEqual(state.personalWechat.groupContexts[0].aliasRoomIds, ["wecom_placeholder_reuse_b"]);
+  const binding = state.wecomBindings.groups.find((item) =>
+    item.chatId === "wecom_placeholder_reuse_a"
+    || item.aliasChatIds?.includes("wecom_placeholder_reuse_b")
+  );
+  assert.ok(binding);
+  assert.deepEqual(binding.aliasChatIds, ["wecom_placeholder_reuse_b"]);
+});
+
+test("企微客户端实时发送调度会在系统侧取消落后版本任务", () => {
+  let state = updateWecomClientRealtimeConfigAction(seedState(), {
+    enabled: true,
+    worker: {
+      mode: "local-script",
+      sidecarUrl: "http://127.0.0.1:8791",
+      canSend: true,
+      canReceive: true,
+      supportsConfirm: true,
+      loginStatus: "企微客户端已登录"
+    },
+    employeeAccount: {
+      id: "wecom_emp_stale",
+      name: "企微过期测试号",
+      displayName: "企微过期测试号",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      quietWindowSeconds: 3
+    }
+  });
+
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    customerId: "c003",
+    roomId: "wecom_room_stale",
+    roomName: "[VIP-stale] 过期测试群",
+    messageId: "wecom-stale-001",
+    senderType: "customer",
+    senderName: "客户",
+    text: "帮我发一下流程",
+    sendAt: "2026-06-05T10:10:00.000Z"
+  });
+
+  const jobId = state.personalWechat.sendJobs[0].jobId;
+  state.personalWechat.sendJobs[0].createdAt = "2026-06-05T10:10:00.000Z";
+  state.personalWechat.groupContexts[0].roomVersion = 2;
+  state = runPersonalWechatSendSchedulerAction(state, { now: "2026-06-05T10:10:05.000Z" });
+
+  const job = state.personalWechat.sendJobs.find((item) => item.jobId === jobId);
+  assert.equal(job.status, "cancelled");
+  assert.ok(job.error.includes("已落后当前版本"));
+  assert.equal(state.personalWechat.logs[0].type, "发送前版本过期");
+});
+
+test("企微客户端Worker发送前预检失败会取消任务且不进入退避重试", () => {
+  let state = updateWecomClientRealtimeConfigAction(seedState(), {
+    enabled: true,
+    worker: {
+      mode: "local-script",
+      sidecarUrl: "http://127.0.0.1:8791",
+      canSend: true,
+      canReceive: true
+    },
+    employeeAccount: {
+      id: "wecom_emp_preflight",
+      name: "企微预检测试号",
+      displayName: "企微预检测试号",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      quietWindowSeconds: 0
+    }
+  });
+
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    customerId: "c003",
+    roomId: "wecom_room_preflight",
+    roomName: "[VIP-preflight] 预检测试群",
+    messageId: "wecom-preflight-001",
+    senderType: "customer",
+    senderName: "客户",
+    text: "发一下流程"
+  });
+  const jobId = state.personalWechat.sendJobs[0].jobId;
+  state = runPersonalWechatSendSchedulerAction(state, { now: "2026-06-05T10:20:00.000Z" });
+  assert.equal(state.personalWechat.sendJobs[0].status, "sending");
+
+  state = failPersonalWechatSendJobAction(state, jobId, {
+    status: "cancelled",
+    errorCode: "preflight_room_version_stale",
+    error: "发送前预检失败：会话已有新消息，取消旧回复。",
+    now: "2026-06-05T10:20:01.000Z"
+  });
+
+  const job = state.personalWechat.sendJobs.find((item) => item.jobId === jobId);
+  assert.equal(job.status, "cancelled");
+  assert.equal(job.retryAfterAt, "");
+  assert.equal(state.personalWechat.groupContexts[0].pendingSendJobId, "");
+  assert.equal(state.personalWechat.logs[0].type, "发送取消");
+  assert.equal(state.personalWechat.logs[0].errorCode, "preflight_room_version_stale");
+});
+
+test("企微客户端发送调度只跳过本轮刚读取到新消息的会话", () => {
+  let state = updateWecomClientRealtimeConfigAction(seedState(), {
+    enabled: true,
+    worker: {
+      mode: "local-script",
+      sidecarUrl: "http://127.0.0.1:8791",
+      canSend: true,
+      canReceive: true
+    },
+    employeeAccount: {
+      id: "wecom_emp_room_guard",
+      name: "企微会话保护测试号",
+      displayName: "企微会话保护测试号",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      quietWindowSeconds: 0,
+      concurrency: 2
+    }
+  });
+
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    customerId: "c003",
+    roomId: "wecom_room_guard_a",
+    roomName: "读取中测试群A",
+    messageId: "wecom-room-guard-a-001",
+    senderType: "customer",
+    senderName: "客户A",
+    text: "请回复流程"
+  });
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    customerId: "c003",
+    roomId: "wecom_room_guard_b",
+    roomName: "可发送测试群B",
+    messageId: "wecom-room-guard-b-001",
+    senderType: "customer",
+    senderName: "客户B",
+    text: "请回复流程"
+  });
+
+  state = runPersonalWechatSendSchedulerAction(state, {
+    now: "2026-06-05T10:22:00.000Z",
+    skipRoomIds: ["wecom_room_guard_a"],
+    skipReason: "本轮刚读取到该会话新消息，等待下一轮静默/版本判断后再发送。"
+  });
+
+  const jobA = state.personalWechat.sendJobs.find((job) => job.roomId === "wecom_room_guard_a");
+  const jobB = state.personalWechat.sendJobs.find((job) => job.roomId === "wecom_room_guard_b");
+  assert.equal(jobA.status, "queued");
+  assert.ok(jobA.error.includes("本轮刚读取"));
+  assert.equal(jobB.status, "sending");
+  assert.equal(state.personalWechat.logs[0].type, "等待Gateway发送");
+  assert.equal(state.personalWechat.logs[1].type, "读取后等待");
+});
+
+test("企微客户端锁屏暂停发送会保留队列并退避重试", () => {
+  let state = updateWecomClientRealtimeConfigAction(seedState(), {
+    enabled: true,
+    worker: {
+      mode: "local-script",
+      sidecarUrl: "http://127.0.0.1:8791",
+      canSend: true,
+      canReceive: true,
+      supportsConfirm: true,
+      loginStatus: "企微客户端已登录"
+    },
+    employeeAccount: {
+      id: "wecom_lock_employee",
+      name: "企微锁屏测试号",
+      displayName: "企微锁屏测试号",
+      defaultCustomerId: "c003",
+      autoReply: true,
+      quietWindowSeconds: 0,
+      failureBackoffSeconds: 30
+    }
+  });
+
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    customerId: "c003",
+    roomId: "wecom_room_locked",
+    roomName: "[VIP-locked] 锁屏测试群",
+    messageId: "wecom-locked-001",
+    senderType: "customer",
+    senderName: "客户",
+    text: "帮我看一下流程"
+  });
+  const jobId = state.personalWechat.sendJobs[0].jobId;
+  state = runPersonalWechatSendSchedulerAction(state, { now: "2026-06-05T10:25:00.000Z" });
+  assert.equal(state.personalWechat.sendJobs[0].status, "sending");
+
+  state = failPersonalWechatSendJobAction(state, jobId, {
+    errorCode: "client_locked",
+    error: "screen_locked: macOS console is locked; GUI automation is paused",
+    now: "2026-06-05T10:25:01.000Z"
+  });
+
+  const job = state.personalWechat.sendJobs.find((item) => item.jobId === jobId);
+  assert.equal(job.status, "queued");
+  assert.equal(job.retryAfterAt, "2026-06-05T10:25:31.000Z");
+  assert.equal(state.personalWechat.groupContexts[0].pendingSendJobId, jobId);
+  assert.equal(state.personalWechat.logs[0].type, "发送暂停");
+  assert.equal(state.personalWechat.logs[0].errorCode, "client_locked");
+});
+
+test("企微客户端实时员工回复会取消同群自动回复并保留历史下载补账确认", () => {
+  let state = updateWecomClientRealtimeConfigAction(seedState(), {
+    enabled: true,
+    worker: {
+      mode: "local-script",
+      sidecarUrl: "http://127.0.0.1:8791",
+      canSend: true,
+      canReceive: true,
+      supportsConfirm: true,
+      loginStatus: "企微客户端已登录"
+    },
+    employeeAccount: {
+      id: "wecom_emp_002",
+      name: "私域企微员工B",
+      displayName: "私域企微员工B",
+      defaultCustomerId: "c003",
+      autoReply: true
+    }
+  });
+
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    customerId: "c003",
+    roomId: "wecom_room_cancel",
+    roomName: "[VIP-10001] 员工抢先回复群",
+    messageId: "wecom-cancel-001",
+    senderType: "customer",
+    senderName: "客户",
+    text: "这个流程麻烦发我一下"
+  });
+  const cancelledJobId = state.personalWechat.sendJobs[0].jobId;
+
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    customerId: "c003",
+    roomId: "wecom_room_cancel",
+    roomName: "[VIP-10001] 员工抢先回复群",
+    messageId: "wecom-cancel-staff-001",
+    senderType: "staff",
+    senderName: "销售企微员工",
+    text: "我来处理，已经同步流程。"
+  });
+  assert.equal(state.personalWechat.sendJobs.find((job) => job.jobId === cancelledJobId).status, "cancelled");
+
+  state = ingestWecomClientRealtimeMessageAction(state, {
+    customerId: "c003",
+    roomId: "wecom_room_confirm",
+    roomName: "[VIP-10002] 补账确认群",
+    messageId: "wecom-confirm-001",
+    senderType: "customer",
+    senderName: "客户",
+    text: "收到，帮我确认一下流程",
+    sendAt: "2026-06-05T10:09:55.000Z"
+  });
+  const jobId = state.personalWechat.sendJobs[0].jobId;
+  state.personalWechat.sendJobs[0].createdAt = "2026-06-05T10:09:58.000Z";
+  state = runPersonalWechatSendSchedulerAction(state, { now: "2026-06-05T10:10:00.000Z" });
+  state = markPersonalWechatSendJobDispatchedAction(state, jobId, {
+    now: "2026-06-05T10:10:03.000Z",
+    gatewayMode: "wecom-client-local-script",
+    gatewayRequestId: "local-action-001"
+  });
+  state = reconcileWecomClientArchiveAction(state, {
+    jobIds: [jobId],
+    confirmedMessageId: "vendor-archive-confirm-001",
+    downloadedAt: "2026-06-05T10:15:00.000Z",
+    now: "2026-06-05T10:15:01.000Z"
+  });
+
+  const confirmedJob = state.personalWechat.sendJobs.find((job) => job.jobId === jobId);
+  assert.equal(confirmedJob.status, "confirmed");
+  assert.equal(confirmedJob.confirmedMessageId, "vendor-archive-confirm-001");
+  assert.equal(state.wecomClientRealtime.archiveReconciler.status, "补账已确认");
+  assert.equal(state.wecomClientRealtime.archiveReconciler.lastError, "");
+});
+
 test("个人微信Gateway健康检查状态会写入日志和账号状态", () => {
   let state = seedState();
   state = updatePersonalWechatConfigAction(state, {
@@ -1717,7 +2384,7 @@ test("个人微信重复回读确认保持幂等并拒绝不同回显", () => {
     confirmedMessageId: "echo-repeat-001"
   });
   const conversationCount = state.conversations
-    .find((conversation) => conversation.customerId === "c003" && conversation.channel === "VIP模拟群")
+    .find((conversation) => conversation.customerId === "c003" && conversation.channel === "VIP群")
     .messages.length;
 
   state = confirmPersonalWechatSendJobAction(state, jobId, {
@@ -1728,7 +2395,7 @@ test("个人微信重复回读确认保持幂等并拒绝不同回显", () => {
   assert.equal(state.personalWechat.sendJobs.find((job) => job.jobId === jobId).status, "confirmed");
   assert.equal(state.personalWechat.logs[0].type, "重复回读确认");
   assert.equal(
-    state.conversations.find((conversation) => conversation.customerId === "c003" && conversation.channel === "VIP模拟群").messages.length,
+    state.conversations.find((conversation) => conversation.customerId === "c003" && conversation.channel === "VIP群").messages.length,
     conversationCount
   );
   assert.throws(() => confirmPersonalWechatSendJobAction(state, jobId, {
@@ -1872,22 +2539,22 @@ test("销售样本输入和自检会拦截异常样本", () => {
 
 test("渠道入站会沉淀会话上下文并拒绝空消息", () => {
   let state = seedState();
-  const before = state.conversations.find((conversation) => conversation.customerId === "c003" && conversation.channel === "VIP模拟群").messages.length;
+  const before = state.conversations.find((conversation) => conversation.customerId === "c003" && conversation.channel === "VIP群").messages.length;
   state = ingestMessageAction(state, {
     customerId: "c003",
-    channel: "VIP模拟群",
+    channel: "VIP群",
     message: "@销售 刚才那两台售后有没有进展？",
     senderRole: "客户",
     senderName: "周总"
   });
-  const conversation = state.conversations.find((item) => item.customerId === "c003" && item.channel === "VIP模拟群");
+  const conversation = state.conversations.find((item) => item.customerId === "c003" && item.channel === "VIP群");
   assert.equal(conversation.messages.length, before + 1);
   assert.equal(conversation.messages.at(-1).senderName, undefined);
   assert.equal(conversation.messages.at(-1).sender, "周总");
   assert.equal(state.agentRuns[0].customerId, "c003");
   assert.equal(state.agentRuns[0].customerName, "成都华联通讯");
   assert.ok(state.agentRuns[0].conversationContext.recentMessages.length >= 3);
-  assert.throws(() => ingestMessageAction(state, { customerId: "c003", channel: "VIP模拟群", message: "" }), /Channel message is required/);
+  assert.throws(() => ingestMessageAction(state, { customerId: "c003", channel: "VIP群", message: "" }), /Channel message is required/);
 });
 
 test("闭环编排Agent动作不依赖当前选中客户", () => {
@@ -1951,7 +2618,7 @@ test("系统诊断会发现非法阶段、任务状态和闭环计划引用", ()
   broken.tasks[0].dueAt = "坏时间";
   broken.events[0].text = "";
   broken.workflowPlans = [{ customerId: "missing", objective: "坏计划" }];
-  broken.conversations.push({ id: "conv_bad", customerId: "missing", channel: "VIP模拟群", messages: [{ id: "m_bad", text: "", senderRole: "" }] });
+  broken.conversations.push({ id: "conv_bad", customerId: "missing", channel: "VIP群", messages: [{ id: "m_bad", text: "", senderRole: "" }] });
   const report = diagnoseState(broken);
   assert.equal(report.ok, false);
   for (const name of ["客户ID唯一", "客户阶段有效", "客户意向分有效", "任务状态有效", "任务优先级有效", "任务负责人角色有效", "任务SLA时间有效", "事件内容可用", "会话引用客户有效", "会话消息可用", "闭环计划引用客户有效"]) {

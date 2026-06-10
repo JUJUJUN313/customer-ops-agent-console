@@ -7,14 +7,18 @@ import {
 
 const viewTitles = {
   overview: "总览",
+  telemarketingOps: "电销运营",
+  salesOps: "销售运营",
+  vipOps: "VIP群维护",
+  settingsHub: "系统设置",
   journey: "客户旅程",
-  customers: "客户管理",
-  chat: "会话工作台",
+  customers: "客户档案",
+  chat: "消息归档投影",
   agents: "Agent控制台",
   modelConfig: "模型配置",
-  wecom: "企微接入",
+  wecom: "企微控制台",
   learning: "销售学习",
-  channels: "本地消息",
+  channels: "内部调试",
   drafts: "触达草稿",
   tasks: "任务中心",
   quotes: "报价订阅",
@@ -159,7 +163,7 @@ const defaultPersonalWechatState = {
     loginQrCodeUrl: "",
     loginQrCodeText: "",
     cursor: "",
-    status: "Mock待接",
+    status: "待接入",
     lastConnectedAt: "",
     lastEventAt: "",
     lastPulledAt: "",
@@ -167,10 +171,12 @@ const defaultPersonalWechatState = {
     lastError: ""
   },
   account: {
-    id: "personal_wx_default",
-    name: "个人微信托管号",
-    displayName: "VIP群AccountAgent",
+    id: "wecom_employee_default",
+    name: "企微员工自动化号",
+    displayName: "企微员工助手",
     defaultCustomerId: "c003",
+    assignedRoomIds: [],
+    assignedCustomerIds: [],
     autoReply: true,
     requireApprovalForRisk: true,
     minSendIntervalSeconds: 3,
@@ -179,6 +185,7 @@ const defaultPersonalWechatState = {
     maxQueueAgeSeconds: 60,
     failureBackoffSeconds: 30,
     mergeWindowSeconds: 45,
+    quietWindowSeconds: 5,
     status: "未连接",
     lastEventAt: "",
     lastError: ""
@@ -238,17 +245,21 @@ const toast = document.querySelector("#toast");
 
 const defaultNavGroupByView = {
   overview: "overview",
-  workflow: "overview",
+  telemarketingOps: "telemarketing",
+  salesOps: "sales",
+  vipOps: "groupchat",
+  settingsHub: "settings",
+  workflow: "settings",
   journey: "customer",
   customers: "customer",
-  quotes: "groupchat",
+  quotes: "settings",
   chat: "groupchat",
   channels: "settings",
   wecom: "settings",
-  drafts: "groupchat",
+  drafts: "telemarketing",
   tasks: "sales",
-  agents: "sales",
-  learning: "sales",
+  agents: "settings",
+  learning: "settings",
   modelConfig: "settings",
   templates: "settings",
   system: "settings"
@@ -288,49 +299,49 @@ const customerScopeDefinitions = {
 const chatScopeDefinitions = {
   telemarketing: {
     key: "telemarketing",
-    navTitle: "电销会话",
-    title: "电销会话工作台",
+    navTitle: "电销消息归档",
+    title: "电销消息归档投影",
     label: "电销培育",
-    subtitle: "只展示电销沉淀企微和托管号真实会话，用于继续筛选意向并转交销售。",
-    emptyTitle: "暂无电销会话",
-    emptyDetail: "电销企微、企微机器人或托管号消息入站后，会在这里形成独立聊天窗口。",
-    channels: ["电销企微", "电销企微培育", "电销模拟私聊"],
+    subtitle: "只展示电销沉淀企微和企微员工号会话，用于继续筛选意向并转交销售。",
+    emptyTitle: "暂无电销消息",
+    emptyDetail: "电销企微消息进入后，会在这里形成独立聊天窗口。",
+    channels: ["电销企微", "电销企微培育", "电销企微"],
     stages: ["待筛选", "待外呼", "电销企微培育"],
     keywords: ["电销", "外呼", "培育", "待筛选", "待外呼"]
   },
   sales: {
     key: "sales",
-    navTitle: "销售会话",
-    title: "销售会话工作台",
+    navTitle: "销售消息归档",
+    title: "销售消息归档投影",
     label: "销售承接",
-    subtitle: "只展示销售企微和托管号真实会话，用于判断意图、沉淀话术并推进成交。",
-    emptyTitle: "暂无销售会话",
-    emptyDetail: "销售企微或托管号消息入站后，会在这里形成独立聊天窗口。",
-    channels: ["销售企微", "销售企微承接", "销售模拟私聊", "企微私聊"],
+    subtitle: "只展示销售企微和企微员工号会话，用于判断意图、沉淀话术并推进成交。",
+    emptyTitle: "暂无销售消息",
+    emptyDetail: "销售企微消息进入后，会在这里形成独立聊天窗口。",
+    channels: ["销售企微", "销售企微承接", "销售企微", "企微私聊"],
     stages: ["销售企微承接", "销售跟进"],
     keywords: ["销售", "会员卡", "承接"]
   },
   vip: {
     key: "vip",
-    navTitle: "VIP会话",
-    title: "VIP会话工作台",
+    navTitle: "VIP消息归档",
+    title: "VIP消息归档投影",
     label: "VIP群维护",
     subtitle: "只展示已购会员和VIP小群相关会话，用于售前、售后、报价、投诉和群内问题分流。",
-    emptyTitle: "暂无VIP会话",
-    emptyDetail: "VIP群、会话存档或个人微信托管号入站后，会在这里形成独立聊天窗口。",
-    channels: ["VIP群", "VIP模拟群"],
+    emptyTitle: "暂无VIP消息",
+    emptyDetail: "VIP群、实时读取或历史留档消息进入后，会在这里形成独立聊天窗口。",
+    channels: ["VIP群", "VIP群"],
     stages: ["VIP维护"],
     memberStatuses: ["金卡", "黑金卡", "已购卡"],
     keywords: ["VIP", "会员", "群", "售后", "报价", "投诉"]
   },
   all: {
     key: "all",
-    navTitle: "会话工作台",
-    title: "全量会话工作台",
+    navTitle: "消息归档投影",
+    title: "全量消息归档投影",
     label: "全部业务",
-    subtitle: "展示全部企微会话存档、智能机器人和个人微信/Sidecar会话；本地模拟只在调试来源中查看。",
+    subtitle: "展示已接入的客户会话；本地验证会话只在调试筛选中查看。",
     emptyTitle: "暂无会话",
-    emptyDetail: "会话存档、个人微信或本地消息入站后，会在这里形成独立聊天窗口。",
+    emptyDetail: "企微外部群消息进入后，会在这里形成独立聊天窗口。",
     channels: [],
     stages: [],
     keywords: []
@@ -977,10 +988,7 @@ function viewTitleForCurrentContext() {
   if (activeView === "customers") return customerScopeDefinition().navTitle;
   if (activeView === "chat") return chatScopeDefinition().navTitle;
   if (activeView === "quotes") return "报价订阅";
-  if (activeView === "channels") {
-    if (activeNavGroup === "telemarketing") return "电销消息";
-    return "消息入站";
-  }
+  if (activeView === "channels") return "内部调试";
   return viewTitles[activeView];
 }
 
@@ -996,32 +1004,32 @@ function renderEmptyState(title, detail, action = "") {
 
 function renderTruthPanel() {
   const llmStatus = state.modelConfig?.global?.apiKeyConfigured
-    ? "真实LLM已配置，可在模型配置页测试，也可在Agent控制台勾选增强后调用；调用结果只写本地增强草稿。"
-    : "真实LLM调用路径已接好，但需要先在模型配置页保存API Key后才能测试或增强。";
+    ? "模型已配置，可用于Agent增强和文案生成。"
+    : "模型调用路径已接好，保存API Key后即可启用增强。";
   const wecomConfig = normalizeWecomConfigState(state.wecomConfig);
   const wecomReady = wecomConfig.enabled && wecomRoutes().some((route) => route.enabled && route.webhookConfigured);
   const archive = wecomConfig.archive || {};
   const archiveConfigured = archive.enabled && archive.gatewayMode === "sidecar" && archive.sidecarUrl && archive.corpId && archive.archiveSecretConfigured && archive.privateKeyConfigured;
-  const personalGateway = normalizePersonalWechatState(state.personalWechat).gateway;
-  const outboundReady = personalGateway.mode === "sidecar" && personalGateway.canSend === true;
+  const realtimeWorker = state.wecomClientRealtime?.worker || {};
+  const outboundReady = realtimeWorker.canSend === true;
   const wecomStatus = archiveConfigured
-    ? "企微会话存档主读取链路已配置，可通过Sidecar拉取和ACK真实会话消息。"
-    : "企微会话存档主读取链路已接好，需要补齐CorpID、Secret、RSA私钥和Sidecar后才能真实拉取。";
+    ? "企微历史留档链路已配置，可用于审计和补账确认。"
+    : "企微历史留档链路已接好，补齐企业配置后即可启用。";
   const outboundStatus = outboundReady
-    ? "个人微信连接器已声明canSend=true，低风险回复可进入真实出站调度，仍需回读确认。"
-    : "个人微信连接器未声明canSend=true，回复只会入队、人工确认或保存草稿，不会伪装已发送。";
+    ? "企微低风险回复可进入发送调度，发送后等待回读确认。"
+    : "企微回复会先进入队列或人工确认，本地发送脚本未就绪时不会标记为已发送。";
   const testSendStatus = wecomReady
-    ? "测试群机器人可发送人工确认后的草稿。"
-    : "测试群机器人需配置Webhook后才能发送测试消息。";
+    ? "企微灰度发送已配置，可用于受控验证。"
+    : "企微灰度发送未配置，不影响客户和任务管理。";
   return `
     <section class="truth-panel">
       <div>
         <strong>当前真实可用</strong>
-        <span>客户档案、任务队列、报价维护、销售样本、本地消息、规则Agent、闭环编排、自检和审计都会真实写入本地状态。${llmStatus}${wecomStatus}${outboundStatus}${testSendStatus}</span>
+        <span>客户档案、任务队列、报价维护、销售样本、历史消息摘要、规则Agent、闭环编排、自检和审计都会真实写入本地状态。${llmStatus}${wecomStatus}${outboundStatus}${testSendStatus}</span>
       </div>
       <div>
         <strong>当前未接入</strong>
-        <span>真实外呼、短信发送、企微私聊读取、CRM/交易系统同步尚未接入；会话存档SDK/协议拉取、解密、客户同意、个人微信登录态和主动发送由外部连接器生产化承接。</span>
+        <span>真实外呼、短信发送、CRM/交易系统同步尚未接入；企微实时读取、自动回复和历史补账按配置逐步开启。</span>
       </div>
     </section>
   `;
@@ -1064,7 +1072,7 @@ function renderSystemBlueprint() {
   const stages = [
     { title: "客户池/交易数据", detail: "交易额、关注型号、会员状态进入统一客户档案", tone: "data" },
     { title: "电销筛选", detail: "外呼评分，区分直转销售、企微培育和待回访", tone: "dialer" },
-    { title: "培育沉淀", detail: "本地消息识别型号、意向和回复，沉淀标签", tone: "nurture" },
+    { title: "企微会话沉淀", detail: "企微消息识别型号、意向和回复，沉淀标签", tone: "nurture" },
     { title: "销售承接", detail: "会员卡推荐、异议处理、销售任务和话术草稿", tone: "sales" },
     { title: "VIP维护", detail: "群问题分流、售后/客服/销售协作与报价推荐", tone: "vip" },
     { title: "数据回流优化", detail: "点击、订阅、成交、任务结果回写档案和策略", tone: "loop" }
@@ -1783,6 +1791,611 @@ function renderRoleWorkbenchCard(role) {
   `;
 }
 
+function customerMatchesStages(customer, stages = []) {
+  return stages.includes(customer.stage);
+}
+
+function businessCustomers(scopeKey) {
+  const scope = customerScopeDefinitions[scopeKey] || customerScopeDefinitions.all;
+  return state.customers
+    .filter((customer) => !scope.stages?.length || customerMatchesStages(customer, scope.stages))
+    .sort((a, b) => Number(b.intentScore || 0) - Number(a.intentScore || 0));
+}
+
+function normalizeRoomDisplayName(value = "") {
+  return String(value || "")
+    .replace(/\s+/g, "")
+    .replace(/[（(]\d+[）)]$/u, "")
+    .toLowerCase();
+}
+
+function isNonBusinessVipRoom(room = {}) {
+  const roomName = String(room.roomName || room.chatName || room.title || "").trim();
+  const roomId = String(room.roomId || room.chatId || "").trim().toLowerCase();
+  const normalizedName = normalizeRoomDisplayName(roomName);
+  const hiddenName = !normalizedName
+    || ["文件传输助手", "邮件提醒", "客户联系", "微信客服", "企业微信团队"].some((name) => roomName.includes(name))
+    || ["文件传输助手", "邮件提醒", "客户联系", "微信客服", "企业微信团队"].some((name) => normalizedName.includes(normalizeRoomDisplayName(name)));
+  const hiddenId = roomId.includes("system_dispatch")
+    || roomId.includes("idle_dispatch");
+  return hiddenName || hiddenId;
+}
+
+function vipRoomSortScore(item = {}) {
+  const statusScore = item.status === "已绑定" ? 10000000000000 : 0;
+  const latest = Date.parse(item.lastMessageAt || item.updatedAt || item.createdAt || "") || 0;
+  const messageScore = Math.max(0, Number(item.messageCount || 0)) * 1000;
+  const idText = String(item.roomId || item.chatId || "").toLowerCase();
+  const systemPenalty = idText.includes("system_dispatch") || idText.includes("idle_dispatch") ? -100000000000000 : 0;
+  return statusScore + latest + messageScore + systemPenalty;
+}
+
+function uniqueVisibleVipRooms(items = [], idKey = "roomId", nameKey = "roomName") {
+  const byRoom = new Map();
+  for (const item of items) {
+    if (isNonBusinessVipRoom(item)) continue;
+    const key = normalizeRoomDisplayName(item[nameKey] || item.roomName || item.chatName)
+      || String(item[idKey] || item.roomId || item.chatId || "");
+    if (!key) continue;
+    const existing = byRoom.get(key);
+    if (!existing || vipRoomSortScore(item) > vipRoomSortScore(existing)) byRoom.set(key, item);
+  }
+  return [...byRoom.values()].sort((a, b) => vipRoomSortScore(b) - vipRoomSortScore(a));
+}
+
+function businessTasks(role) {
+  return state.tasks
+    .filter((task) => task.ownerRole === role && task.status !== "已完成")
+    .sort((a, b) => {
+      const priorityRank = { 高: 0, 中: 1, 低: 2 };
+      const priorityDiff = (priorityRank[a.priority] ?? 9) - (priorityRank[b.priority] ?? 9);
+      if (priorityDiff) return priorityDiff;
+      return taskDueAt(a).getTime() - taskDueAt(b).getTime();
+    });
+}
+
+function latestRunByAgent(agentName) {
+  return (state.agentRuns || []).find((run) => run.agent === agentName) || null;
+}
+
+function customerInsightText(customer) {
+  const events = eventsFor(customer.id).slice(0, 3).map((event) => event.text).filter(Boolean);
+  const models = (customer.watchedModels || []).slice(0, 3).join("、") || "暂无明确型号";
+  const tags = (customer.tags || []).slice(0, 4).join("、") || "暂无标签";
+  return `${customer.stage}，意向分${customer.intentScore || 0}，关注${models}，标签${tags}${events.length ? `；最近记录：${events[0]}` : ""}`;
+}
+
+function telemarketingSegments(customers) {
+  return [
+    {
+      title: "高意向转销售",
+      status: "建议转交",
+      customers: customers.filter((customer) => Number(customer.intentScore || 0) >= 75 || (customer.tags || []).includes("明确意向")),
+      criteria: "意向分>=75，或历史消息/标签已识别明确意向。",
+      message: "您好，看到您近期关注的型号和会员权益比较明确，我让销售同事给您整理一版更完整的报价和权益说明。",
+      owner: "销售队列"
+    },
+    {
+      title: "报价培育群发",
+      status: "待确认",
+      customers: customers.filter((customer) => Number(customer.intentScore || 0) >= 50 && Number(customer.intentScore || 0) < 75),
+      criteria: "中等意向、关注型号明确，适合推送报价变化或会员权益。",
+      message: "您好，本周您关注的型号报价有更新，我们整理了近期货源和会员权益，方便您有采购计划时参考。",
+      owner: "电销队列"
+    },
+    {
+      title: "低活跃唤醒",
+      status: "低优先级",
+      customers: customers.filter((customer) => Number(customer.intentScore || 0) < 50),
+      criteria: "意向较低或最近未形成明确采购计划，只做轻触达。",
+      message: "您好，近期报价和货源有变化，如后面有采购计划，可以随时让我们帮您查最新行情。",
+      owner: "电销队列"
+    }
+  ];
+}
+
+function renderTelemarketingCampaignCard(segment) {
+  const excluded = businessCustomers("telemarketing").length - segment.customers.length;
+  return `
+    <article class="business-card">
+      <div class="agent-customer-head">
+        <div>
+          <strong>${escapeHtml(segment.title)}</strong>
+          <span>${escapeHtml(segment.criteria)}</span>
+        </div>
+        <span class="status-pill">${escapeHtml(segment.status)}</span>
+      </div>
+      <div class="profile-grid">
+        <div class="profile-item"><span>目标人数</span><strong>${segment.customers.length}</strong></div>
+        <div class="profile-item"><span>排除人数</span><strong>${Math.max(0, excluded)}</strong></div>
+        <div class="profile-item"><span>负责人</span><strong>${escapeHtml(segment.owner)}</strong></div>
+        <div class="profile-item"><span>执行方式</span><strong>人工确认后下发</strong></div>
+      </div>
+      <p class="event-text">${escapeHtml(segment.message)}</p>
+      <div class="tag-list">
+        ${segment.customers.slice(0, 6).map((customer) => `<span class="tag">${escapeHtml(customer.name)}</span>`).join("") || `<span class="tag">暂无客户</span>`}
+      </div>
+      <div class="button-row">
+        <button class="small-button" type="button" data-jump-section="telemarketingApprovals">进入审批</button>
+        <button class="ghost-button" type="button" disabled>企微后台任务创建待接入</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderTelemarketingOps() {
+  const customers = businessCustomers("telemarketing");
+  const segments = telemarketingSegments(customers);
+  const selected = customers.find((customer) => customer.id === state.selectedCustomerId) || customers[0] || selectedCustomer();
+  const dialerRun = latestRunByAgent("外呼筛选Agent");
+  const nurtureRun = latestRunByAgent("电销培育Agent");
+  const drafts = sortedDrafts().filter((draft) => ["企微私聊", "短信", "人工触达", "电话外呼"].includes(draft.channel));
+  return `
+    <section class="grid four">
+      ${cardKpi("电销客户", customers.length, "待筛选/待外呼/培育")}
+      ${cardKpi("高意向", segments[0].customers.length, "建议转销售")}
+      ${cardKpi("可群发", segments[1].customers.length, "报价/权益培育")}
+      ${cardKpi("待确认文案", drafts.filter((draft) => draft.status === "待确认").length, "触达前人工审核")}
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">电销分析 Agent</h2>
+            <p class="panel-subtitle">基于历史消息、交易数据和客户标签判断分层，不做实时回复。</p>
+          </div>
+        </div>
+        <div class="toolbar">
+          <div class="field">
+            <label for="agentCustomer">分析客户</label>
+            <select id="agentCustomer">${customerOptions(selected, customers.length ? customers : state.customers)}</select>
+          </div>
+        </div>
+        ${selected ? customerAgentSummary(selected) : renderEmptyState("暂无电销客户", "客户进入待筛选、待外呼或电销企微培育阶段后会出现在这里。")}
+        <div class="button-row">
+          <button class="primary-button" data-agent="dialer" ${actionAttrs("agent-dialer")}>运行电销分析 Agent</button>
+          <button class="small-button" data-agent="nurture" ${actionAttrs("agent-nurture")}>分析历史回复</button>
+          <button class="small-button" type="button" data-jump-section="telemarketingApprovals">查看群发审批</button>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">最近分析结果</h2>
+            <p class="panel-subtitle">展示最近电销 Agent 输出，方便判断分层依据和下一步动作。</p>
+          </div>
+        </div>
+        <div class="event-list">
+          ${[dialerRun, nurtureRun].filter(Boolean).map((run) => `
+            <div class="event-item">
+              <div class="event-meta">${escapeHtml(run.agent)} · ${escapeHtml(run.nextAction || run.intent || "分析完成")}</div>
+              <div class="event-text">${escapeHtml(summarizeAgentRun(run))}</div>
+            </div>
+          `).join("") || renderEmptyState("暂无电销分析", "先选择客户运行电销分析 Agent。")}
+        </div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">客户分层</h2>
+          <p class="panel-subtitle">分层来自客户档案、标签和历史消息分析结果，用于决定是否转销售、继续培育或低频唤醒。</p>
+        </div>
+      </div>
+      <div class="integration-grid">
+        ${segments.map((segment) => renderIntegrationCard({
+          title: segment.title,
+          subtitle: segment.criteria,
+          status: `${segment.customers.length} 人`,
+          tone: segment.title.includes("高意向") ? "success" : "",
+          body: segment.customers.slice(0, 4).map((customer) => `${customer.name}：${customerInsightText(customer)}`).join("；") || "当前暂无匹配客户。",
+          tags: [segment.owner, segment.status]
+        })).join("")}
+      </div>
+    </section>
+
+    <section class="panel" id="telemarketingApprovals">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">推荐群发批次与审批</h2>
+          <p class="panel-subtitle">第一版只生成名单和文案，进入人工确认后再创建企微后台群发任务。</p>
+        </div>
+      </div>
+      <div class="event-list">
+        ${segments.map(renderTelemarketingCampaignCard).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderSalesTaskMini(task) {
+  const customer = getCustomer(state, task.customerId);
+  const sla = taskSlaMeta(task);
+  return `
+    <div class="business-card">
+      <div class="agent-customer-head">
+        <div>
+          <strong>${escapeHtml(task.title)}</strong>
+          <span>${escapeHtml(customer?.name || "未知客户")} · ${escapeHtml(task.reason || "销售跟进")}</span>
+        </div>
+        <span class="priority-pill ${priorityClass(task.priority)}">${escapeHtml(task.priority)}</span>
+      </div>
+      <div class="tag-list">
+        <span class="tag">${escapeHtml(task.status)}</span>
+        <span class="tag">${escapeHtml(taskOwnerValue(task))}</span>
+        <span class="tag">${escapeHtml(sla.label)}</span>
+      </div>
+      <div class="button-row">
+        <button class="small-button" data-task="${escapeHtml(task.id)}" data-status="跟进中" ${actionAttrs(`task-${task.id}-doing`)} ${task.status === "跟进中" ? "disabled" : ""}>跟进</button>
+        <button class="small-button" data-task="${escapeHtml(task.id)}" data-status="已完成" ${actionAttrs(`task-${task.id}-done`)} ${task.status === "已完成" ? "disabled" : ""}>完成</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderSalesOps() {
+  const customers = businessCustomers("sales");
+  const tasks = businessTasks("销售");
+  const selected = customers.find((customer) => customer.id === state.selectedCustomerId) || customers[0] || selectedCustomer();
+  const salesRun = latestRunByAgent("销售承接Agent");
+  const samples = state.salesSamples || [];
+  const suggestedReply = salesRun?.suggestedReply || selected?.handoffSummary || "先确认采购计划、会员权益关注点和当前异议，再给出可承诺范围内的下一步建议。";
+  return `
+    <section class="grid four">
+      ${cardKpi("销售客户", customers.length, "承接/跟进阶段")}
+      ${cardKpi("待办任务", tasks.length, "按优先级排序")}
+      ${cardKpi("高优先级", tasks.filter((task) => task.priority === "高").length, "建议优先处理")}
+      ${cardKpi("话术样本", samples.length, "成交复盘沉淀")}
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+          <h2 class="panel-title">销售优先级任务</h2>
+          <p class="panel-subtitle">销售只需要按优先级处理任务；系统给出客户摘要和推荐回复，不自动代发。</p>
+        </div>
+          <button class="small-button" type="button" data-jump-section="salesTaskQueue">进入任务台</button>
+        </div>
+        <div class="event-list" id="salesTaskQueue">
+          ${tasks.slice(0, 8).map(renderSalesTaskMini).join("") || renderEmptyState("暂无销售任务", "电销升级或销售 Agent 分析后会生成销售跟进任务。")}
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">客户详情与推荐回复</h2>
+            <p class="panel-subtitle">用于企微应用 H5 展示：客户档案、历史摘要、Agent建议和下一步动作。</p>
+          </div>
+        </div>
+        <div class="toolbar">
+          <div class="field">
+            <label for="agentCustomer">销售客户</label>
+            <select id="agentCustomer">${customerOptions(selected, customers.length ? customers : state.customers)}</select>
+          </div>
+        </div>
+        ${selected ? `
+          <div class="profile-grid">
+            <div class="profile-item"><span>客户</span><strong>${escapeHtml(selected.name)}</strong></div>
+            <div class="profile-item"><span>阶段</span><strong>${escapeHtml(selected.stage)}</strong></div>
+            <div class="profile-item"><span>意向分</span><strong>${escapeHtml(selected.intentScore || 0)}</strong></div>
+            <div class="profile-item"><span>推荐卡种</span><strong>${escapeHtml(selected.targetCard || "待判断")}</strong></div>
+          </div>
+          <h3 style="margin-top:14px">历史摘要</h3>
+          <p class="event-text">${escapeHtml(customerInsightText(selected))}</p>
+          <h3 style="margin-top:14px">Agent 推荐回复</h3>
+          <div class="draft-content">${escapeHtml(suggestedReply)}</div>
+          <div class="button-row">
+            <button class="primary-button" data-agent="sales" ${actionAttrs("agent-sales")}>生成销售建议</button>
+            <button class="small-button" type="button" data-view="customers" data-nav-group="customer" data-nav-preset="salesCustomers">查看档案</button>
+          </div>
+        ` : renderEmptyState("暂无销售客户", "客户进入销售企微承接或销售跟进阶段后会出现在这里。")}
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">企微应用 H5 工作台</h2>
+          <p class="panel-subtitle">第一版在企微内打开销售任务台；聊天侧边栏后续再接入。</p>
+        </div>
+      </div>
+      <div class="flow-row">
+        <div class="flow-node"><strong>身份识别</strong><span>企微员工身份映射到销售负责人。</span></div>
+        <div class="flow-node"><strong>任务列表</strong><span>只展示当前销售可处理的客户和任务。</span></div>
+        <div class="flow-node"><strong>客户详情</strong><span>展示历史摘要、标签、会员意向和推荐回复。</span></div>
+        <div class="flow-node"><strong>结果回写</strong><span>完成、暂缓、转交会写回客户事件和任务状态。</span></div>
+      </div>
+    </section>
+  `;
+}
+
+function renderVipOps() {
+  const realtime = state.wecomClientRealtime || {};
+  const realtimeWorker = realtime.worker || {};
+  const realtimeMonitor = realtime.monitor || {};
+  const queue = normalizePersonalWechatState(state.personalWechat);
+  const jobs = queue.sendJobs || [];
+  const visibleJobs = jobs.filter((job) => !isNonBusinessVipRoom(job));
+  const contexts = queue.groupContexts || [];
+  const bindings = Array.isArray(state.wecomBindings?.groups) ? state.wecomBindings.groups : [];
+  const visibleContexts = uniqueVisibleVipRooms(contexts, "roomId", "roomName");
+  const visibleBindings = uniqueVisibleVipRooms(bindings, "chatId", "chatName");
+  const mergedRoomCount = Math.max(0, contexts.filter((item) => !isNonBusinessVipRoom(item)).length + bindings.filter((item) => !isNonBusinessVipRoom(item)).length - visibleContexts.length - visibleBindings.length);
+  const pendingJobs = visibleJobs.filter((job) => ["queued", "sending", "sent", "sent_pending_confirm"].includes(job.status));
+  const manualJobs = visibleJobs.filter((job) => job.status === "manual_required");
+  const failedJobs = visibleJobs.filter((job) => ["failed", "cancelled"].includes(job.status));
+  const recentLogs = [
+    ...((realtime.logs || []).map((log) => ({ ...log, sourceGroup: "实时收发" }))),
+    ...(state.wecomLogs || []).map((log) => ({ ...log, sourceGroup: "企微记录" }))
+  ].slice(0, 6);
+  const archive = normalizeWecomConfigState(state.wecomConfig).archive || {};
+  return `
+    <section class="grid four">
+      ${cardKpi("实时读取", realtimeWorker.canReceive ? "可读取" : realtime.enabled ? "等待本地Agent" : "未启用", realtimeMonitor.lastSeenAt ? `最近 ${formatDateTime(realtimeMonitor.lastSeenAt)}` : "未读触发后更新")}
+      ${cardKpi("待发送", pendingJobs.length, `人工确认 ${manualJobs.length}`)}
+      ${cardKpi("业务群", Math.max(visibleContexts.length, visibleBindings.length), mergedRoomCount ? `已合并重复记录 ${mergedRoomCount}` : "按群绑定客户")}
+      ${cardKpi("异常", failedJobs.length, realtimeWorker.lastError || archive.lastError || "无最新异常")}
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">VIP实时维护状态</h2>
+          <p class="panel-subtitle">这里只展示业务状态：实时读取、自动回复队列、高风险确认和历史补账。</p>
+        </div>
+        <div class="toolbar">
+          <button class="small-button" id="checkWecomClientRealtimeWorker" type="button" ${actionAttrs("wecom-client-worker-check")}>检查本地Agent</button>
+          <button class="primary-button" id="runPersonalWechatScheduler" type="button" ${actionAttrs("wecom-scheduler")} ${pendingJobs.length || manualJobs.length ? "" : "disabled"}>运行发送调度</button>
+        </div>
+      </div>
+      <div class="integration-grid">
+        ${renderIntegrationCard({
+          title: "本地企微Agent",
+          subtitle: "常驻识别未读并执行受控发送",
+          status: realtimeWorker.canReceive || realtimeWorker.canSend ? "运行可用" : "待启动",
+          tone: realtimeWorker.canReceive || realtimeWorker.canSend ? "success" : "warning",
+          body: "保持企微登录和本地Agent运行；锁屏/休眠会影响客户端自动化。",
+          tags: [realtime.enabled ? "已启用" : "未启用", realtimeWorker.canReceive ? "可读取" : "待读取", realtimeWorker.canSend ? "可发送" : "待发送"]
+        })}
+        ${renderIntegrationCard({
+          title: "回复风控",
+          subtitle: "低风险排队，高风险人工确认",
+          status: manualJobs.length ? `${manualJobs.length} 条待确认` : "正常",
+          tone: manualJobs.length ? "warning" : "success",
+          body: "报价、退款、赔偿、合同、付款等内容不会自动发送。",
+          tags: [`待发送 ${pendingJobs.length}`, `失败 ${failedJobs.length}`, "发送前防漏读"]
+        })}
+        ${renderIntegrationCard({
+          title: "历史补账",
+          subtitle: "服务商历史下载/存档确认",
+          status: archive.enabled ? archive.status || "待补账" : "未启用",
+          tone: archive.enabled ? "" : "warning",
+          body: "实时响应不等待历史下载；最终审计以历史记录补账为准。",
+          tags: [archive.lastPulledAt ? `最近拉取 ${formatDateTime(archive.lastPulledAt)}` : "暂无拉取", archive.trustedStatus || "待验证"]
+        })}
+      </div>
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">自动回复队列</h2>
+            <p class="panel-subtitle">只展示触发摘要、判断结果和发送状态，不展示完整聊天窗口。</p>
+          </div>
+        </div>
+        <div class="event-list">
+          ${visibleJobs.slice(0, 10).map(renderWecomSendJob).join("") || renderEmptyState("暂无业务回复任务", "VIP群出现客户消息后，低风险回复会进入这里。")}
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">待处理群</h2>
+            <p class="panel-subtitle">按群展示最近入站摘要和客户绑定状态。</p>
+          </div>
+        </div>
+        <div class="event-list">
+          ${visibleContexts.slice(0, 8).map(renderPersonalWechatContext).join("") || renderEmptyState("暂无业务群上下文", "本地Agent读取到VIP群消息后会在这里形成群维护记录。")}
+        </div>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">群聊绑定</h2>
+            <p class="panel-subtitle">未知群需要绑定客户后，消息才会稳定回写到正确档案。</p>
+          </div>
+        </div>
+        <div class="event-list">
+          ${visibleBindings.slice(0, 8).map((binding) => `
+            <div class="business-card ${binding.status === "已绑定" ? "success-card" : "warning-card"}" data-wecom-binding-card>
+              <div class="agent-customer-head">
+                <div>
+                  <strong>${escapeHtml(binding.chatName || "未命名企微群")}</strong>
+                  <span>${escapeHtml(customerName(binding.customerId))} · ${escapeHtml(binding.channel || "VIP群")}</span>
+                </div>
+                <span class="status-pill">${escapeHtml(binding.status || "待绑定")}</span>
+              </div>
+              <div class="form-grid compact-form">
+                <input type="hidden" data-wecom-bind-chat value="${escapeHtml(binding.chatId)}">
+                <div class="field"><label>绑定客户</label><select data-wecom-bind-customer>${customerOptions(getCustomer(state, binding.customerId) || selectedCustomer())}</select></div>
+                <div class="field"><label>业务渠道</label><select data-wecom-bind-channel><option ${binding.channel === "VIP群" ? "selected" : ""}>VIP群</option><option ${binding.channel === "销售企微" ? "selected" : ""}>销售企微</option><option ${binding.channel === "电销企微" ? "selected" : ""}>电销企微</option></select></div>
+                <button class="small-button full-span" type="button" data-save-wecom-binding ${actionAttrs(`wecom-bind-${binding.chatId}`)}>保存绑定</button>
+              </div>
+            </div>
+          `).join("") || renderEmptyState("暂无业务群绑定", "VIP群消息入站后会出现待绑定群。")}
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">最近动作记录</h2>
+            <p class="panel-subtitle">结构化记录读取、调度、发送和补账结果。</p>
+          </div>
+        </div>
+        <div class="event-list">
+          ${recentLogs.map((log) => `
+            <div class="event-item">
+              <div class="event-meta">${escapeHtml(log.type || log.sourceGroup || "企微记录")} · ${escapeHtml(log.status || "未知")} · ${escapeHtml(formatDateTime(log.createdAt))}</div>
+              <div class="event-text">${escapeHtml(log.contentPreview || log.error || log.detail || "无详情")}</div>
+            </div>
+          `).join("") || renderEmptyState("暂无动作记录", "启动本地Agent或保存配置后会显示状态。")}
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderApprovals() {
+  const tasks = state.tasks.filter((task) => task.status !== "已完成");
+  const manualJobs = normalizePersonalWechatState(state.personalWechat).sendJobs.filter((job) => job.status === "manual_required");
+  const campaignDrafts = sortedDrafts().filter((draft) => draft.status !== "已废弃" && ["企微私聊", "短信", "人工触达", "电话外呼", "VIP群"].includes(draft.channel));
+  const overdueTasks = tasks.filter((task) => taskSlaMeta(task).label === "已超时" || task.escalated);
+  return `
+    <section class="grid four">
+      ${cardKpi("开放任务", tasks.length, "销售/电销/VIP")}
+      ${cardKpi("群发草稿", campaignDrafts.length, "待确认或待处理")}
+      ${cardKpi("高风险回复", manualJobs.length, "需人工放行")}
+      ${cardKpi("SLA异常", overdueTasks.length, "超时或已升级")}
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">VIP高风险回复确认</h2>
+            <p class="panel-subtitle">高风险内容必须人工判断后才能进入发送队列。</p>
+          </div>
+        </div>
+        <div class="event-list">
+          ${manualJobs.map(renderWecomSendJob).join("") || renderEmptyState("暂无高风险回复", "报价、退款、赔偿、合同等内容会在这里等待确认。")}
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">电销群发审批</h2>
+            <p class="panel-subtitle">确认名单和文案后，再进入企微后台群发任务创建。</p>
+          </div>
+        </div>
+        <div class="draft-list">
+          ${campaignDrafts.slice(0, 6).map(renderDraftCard).join("") || renderEmptyState("暂无群发草稿", "电销分析或人工新增草稿后会出现在这里。")}
+        </div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">统一任务队列</h2>
+          <p class="panel-subtitle">销售跟进、客户转交、售后/VIP问题和SLA异常统一处理。</p>
+        </div>
+        <button class="primary-button" id="escalateTasks" ${actionAttrs("escalate-tasks")}>运行SLA巡检升级</button>
+      </div>
+      ${taskFilterControls(filteredTasks())}
+      <div class="task-list">
+        ${filteredTasks().map(taskCard).join("") || renderEmptyState("暂无匹配任务", "可以调整筛选条件。")}
+      </div>
+    </section>
+  `;
+}
+
+function renderSettingsHub() {
+  const modelConfig = normalizeModelConfigState(state.modelConfig);
+  const wecom = normalizeWecomConfigState(state.wecomConfig);
+  const realtime = state.wecomClientRealtime || {};
+  const archive = wecom.archive || {};
+  return `
+    <section class="grid four">
+      ${cardKpi("模型", modelConfig.global.model || "未配置", modelConfig.global.apiKeyConfigured ? "Key已配置" : "Key未配置")}
+      ${cardKpi("企微实时", realtime.worker?.canReceive || realtime.worker?.canSend ? "可用" : realtime.enabled ? "待启动" : "未启用", "VIP群维护")}
+      ${cardKpi("历史消息", archive.enabled ? archive.status || "已启用" : "未启用", "分析/审计来源")}
+      ${cardKpi("员工映射", "待接入", "企微应用H5")}
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">业务配置</h2>
+            <p class="panel-subtitle">这里只保留业务人员需要理解的配置入口。</p>
+          </div>
+        </div>
+        <div class="integration-grid">
+          ${renderIntegrationCard({
+            title: "模型配置",
+            subtitle: "电销、销售、VIP Agent 共用",
+            status: modelConfig.global.apiKeyConfigured ? "已配置" : "待配置",
+            body: `当前模型：${modelConfig.global.provider} / ${modelConfig.global.model}`,
+            tags: ["LLM", "ASR/TTS", "Agent覆盖"],
+            action: `<button class="small-button" type="button" data-view="modelConfig" data-nav-group="settings">进入模型配置</button>`
+          })}
+          ${renderIntegrationCard({
+            title: "企微连接状态",
+            subtitle: "VIP实时维护和历史补账",
+            status: realtime.enabled ? "已启用" : "未启用",
+            tone: realtime.enabled ? "" : "warning",
+            body: "实时收发用于VIP群；历史消息用于电销/销售分析和审计。",
+            tags: [realtime.worker?.canReceive ? "可读取" : "待读取", realtime.worker?.canSend ? "可发送" : "待发送", archive.enabled ? "历史已启用" : "历史未启用"],
+            action: `<button class="small-button" id="checkWecomClientRealtimeWorker" type="button" ${actionAttrs("wecom-client-worker-check")}>检查实时状态</button>`
+          })}
+          ${renderIntegrationCard({
+            title: "模板与风控",
+            subtitle: "触达文案和高风险边界",
+            status: `${state.templates.length} 条模板`,
+            body: "用于限制价格承诺、退款、合同、付款等高风险自动化动作。",
+            tags: ["人工确认", "批量限制", "审计"],
+            action: `<button class="small-button" type="button" data-view="templates" data-nav-group="settings">查看风控</button>`
+          })}
+          ${renderIntegrationCard({
+            title: "系统自检",
+            subtitle: "数据一致性和能力审计",
+            status: lastDiagnostics?.ok ? "通过" : "待检查",
+            tone: lastDiagnostics?.ok ? "success" : "",
+            body: "检查客户、任务、草稿、企微绑定和审计数据是否一致。",
+            tags: ["健康检查", "能力审计"],
+            action: `<button class="small-button" id="runDiagnosticsInView" type="button" ${actionAttrs("diagnostics")}>运行自检</button>`
+          })}
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">历史消息导入状态</h2>
+            <p class="panel-subtitle">服务商下载历史消息作为电销/销售分析和最终审计事实。</p>
+          </div>
+        </div>
+        <div class="flow-row" style="grid-template-columns:1fr">
+          <div class="flow-node"><strong>基础留档</strong><span>历史消息定时下载后进入统一消息归档。</span></div>
+          <div class="flow-node"><strong>分析输入</strong><span>电销和销售 Agent 读取历史消息摘要，不做实时回复。</span></div>
+          <div class="flow-node"><strong>补账确认</strong><span>VIP实时发送结果最终由历史记录确认。</span></div>
+        </div>
+        <details class="advanced-debug-panel">
+          <summary>开发诊断入口</summary>
+          <div class="button-row">
+            <button class="small-button" type="button" data-view="wecom" data-nav-group="settings">企微高级维护</button>
+            <button class="small-button" type="button" data-view="workflow" data-nav-group="settings">能力审计</button>
+            <button class="small-button" type="button" data-view="system" data-nav-group="settings">系统自检详情</button>
+            <button class="small-button" type="button" data-view="channels" data-nav-group="settings">内部调试</button>
+          </div>
+        </details>
+      </article>
+    </section>
+  `;
+}
+
 function renderOverview() {
   const highIntent = state.customers.filter((customer) => customer.intentScore >= 75).length;
   const vip = state.customers.filter((customer) => customer.stage === "VIP维护" || String(customer.memberStatus || "").includes("卡")).length;
@@ -1793,7 +2406,7 @@ function renderOverview() {
     ${renderLoadError()}
     ${renderTruthPanel()}
     <section class="grid four">
-      ${cardKpi("客户档案", state.customers.length, "统一CustomerProfile本地数据")}
+      ${cardKpi("客户档案", state.customers.length, "统一客户档案数据")}
       ${cardKpi("高意向客户", highIntent, "意向分不低于75")}
       ${cardKpi("待处理任务", pendingTasks, "销售线索、VIP分流、报价咨询")}
       ${cardKpi("报价订阅客户", subscribed, "客户关注型号已回流档案")}
@@ -1803,14 +2416,14 @@ function renderOverview() {
       <div class="panel-header">
         <div>
           <h2 class="panel-title">总体闭环链路</h2>
-          <p class="panel-subtitle">本地客户数据进入客户池，经电销、销售、VIP维护流转，结果真实回写客户档案、任务、报价和审计。</p>
+          <p class="panel-subtitle">客户档案进入客户池，经电销、销售、VIP维护流转，结果真实回写客户档案、任务、报价和审计。</p>
         </div>
       </div>
       <div class="flow-row">
-        ${["客户数据", "电销筛选", "本地消息沉淀", "销售承接", "VIP维护", "数据回流"].map((node, index) => `
+        ${["客户数据", "电销分层", "群发计划", "销售承接", "VIP维护", "数据回流"].map((node, index) => `
           <div class="flow-node">
             <strong>${node}</strong>
-            <span>${["客户基础池", "生成外呼任务", "标签培育", "会员卡转化", "问题分流/报价", "策略优化"][index]}</span>
+            <span>${["客户基础池", "历史消息分析", "人工确认后下发", "优先级任务", "实时群维护", "策略优化"][index]}</span>
           </div>
         `).join("")}
       </div>
@@ -1821,10 +2434,7 @@ function renderOverview() {
       ${renderRoleWorkbenchCard("sales")}
     </section>
 
-    <details class="panel advanced-debug-panel">
-      <summary>高级调试：模拟入站工具</summary>
-      <p class="panel-subtitle">这些工具只用于本地验证路由、去重和队列状态，不代表已经接入真实企微或个人微信。</p>
-      <section class="grid two">
+    <section class="grid two">
       <article class="panel subtle-panel">
         <div class="panel-header">
           <div>
@@ -2153,7 +2763,7 @@ function renderAgents() {
         <div class="field">
           <label for="scenarioText">客户最新消息/需求</label>
           <textarea id="scenarioText">${escapeHtml(selectedScenario)}</textarea>
-          <small class="field-help">这里用于模拟客户在电话、私聊或VIP群里的最新一句话；不同按钮会按不同业务场景解读。</small>
+          <small class="field-help">这里用于填写客户在电话、私聊或VIP群里的最新一句话；不同按钮会按不同业务场景解读。</small>
         </div>
         <div style="height:10px"></div>
         <div class="scenario-grid">
@@ -2366,35 +2976,47 @@ function wecomConfigPayload(form) {
   const data = formData(form);
   const currentConfig = normalizeWecomConfigState(state.wecomConfig);
   const currentRoute = wecomPrimaryRoute();
-  const route = {
-    id: data["route.id"] || currentRoute.id,
-    name: data["route.name"] || currentRoute.name,
-    channel: data["route.channel"] || currentRoute.channel,
-    msgtype: data["route.msgtype"] || currentRoute.msgtype,
-    enabled: Boolean(data["route.enabled"]),
-    webhookUrl: data["route.webhookUrl"] || ""
-  };
-  if (data["route.clearWebhook"]) route.clearWebhook = true;
-  const inbound = {
-    enabled: Boolean(data["inbound.enabled"]),
-    defaultChannel: data["inbound.defaultChannel"] || currentConfig.inbound.defaultChannel,
-    secret: data["inbound.secret"] || ""
-  };
-  if (data["inbound.clearSecret"]) inbound.clearSecret = true;
-  const aibot = {
-    enabled: Boolean(data["aibot.enabled"]),
-    botId: data["aibot.botId"] || "",
-    secret: data["aibot.secret"] || "",
-    wsUrl: data["aibot.wsUrl"] || currentConfig.aibot.wsUrl || "",
-    defaultCustomerId: data["aibot.defaultCustomerId"] || currentConfig.aibot.defaultCustomerId || "",
-    defaultChannel: data["aibot.defaultChannel"] || currentConfig.aibot.defaultChannel || "VIP群",
-    autoReply: Boolean(data["aibot.autoReply"]),
-    welcomeText: data["aibot.welcomeText"] || currentConfig.aibot.welcomeText,
-    heartbeatInterval: data["aibot.heartbeatInterval"] || currentConfig.aibot.heartbeatInterval,
-    maxReconnectAttempts: data["aibot.maxReconnectAttempts"] || currentConfig.aibot.maxReconnectAttempts
-  };
-  if (data["aibot.clearBotId"]) aibot.clearBotId = true;
-  if (data["aibot.clearSecret"]) aibot.clearSecret = true;
+  const hasRouteFields = Object.keys(data).some((key) => key.startsWith("route."));
+  const route = hasRouteFields
+    ? {
+        id: data["route.id"] || currentRoute.id,
+        name: data["route.name"] || currentRoute.name,
+        channel: data["route.channel"] || currentRoute.channel,
+        msgtype: data["route.msgtype"] || currentRoute.msgtype,
+        enabled: Boolean(data["route.enabled"]),
+        webhookUrl: data["route.webhookUrl"] || ""
+      }
+    : { ...currentRoute, webhookUrl: "" };
+  if (hasRouteFields && data["route.clearWebhook"]) route.clearWebhook = true;
+  const hasInboundFields = Object.prototype.hasOwnProperty.call(data, "inbound.enabled")
+    || Object.prototype.hasOwnProperty.call(data, "inbound.defaultChannel")
+    || Object.prototype.hasOwnProperty.call(data, "inbound.secret")
+    || Object.prototype.hasOwnProperty.call(data, "inbound.clearSecret");
+  const inbound = hasInboundFields
+    ? {
+        enabled: Boolean(data["inbound.enabled"]),
+        defaultChannel: data["inbound.defaultChannel"] || currentConfig.inbound.defaultChannel,
+        secret: data["inbound.secret"] || ""
+      }
+    : currentConfig.inbound;
+  if (hasInboundFields && data["inbound.clearSecret"]) inbound.clearSecret = true;
+  const hasAibotFields = Object.keys(data).some((key) => key.startsWith("aibot."));
+  const aibot = hasAibotFields
+    ? {
+        enabled: Boolean(data["aibot.enabled"]),
+        botId: data["aibot.botId"] || "",
+        secret: data["aibot.secret"] || "",
+        wsUrl: data["aibot.wsUrl"] || currentConfig.aibot.wsUrl || "",
+        defaultCustomerId: data["aibot.defaultCustomerId"] || currentConfig.aibot.defaultCustomerId || "",
+        defaultChannel: data["aibot.defaultChannel"] || currentConfig.aibot.defaultChannel || "VIP群",
+        autoReply: Boolean(data["aibot.autoReply"]),
+        welcomeText: data["aibot.welcomeText"] || currentConfig.aibot.welcomeText,
+        heartbeatInterval: data["aibot.heartbeatInterval"] || currentConfig.aibot.heartbeatInterval,
+        maxReconnectAttempts: data["aibot.maxReconnectAttempts"] || currentConfig.aibot.maxReconnectAttempts
+      }
+    : currentConfig.aibot;
+  if (hasAibotFields && data["aibot.clearBotId"]) aibot.clearBotId = true;
+  if (hasAibotFields && data["aibot.clearSecret"]) aibot.clearSecret = true;
   const archive = {
     enabled: Boolean(data["archive.enabled"]),
     provider: data["archive.provider"] || currentConfig.archive.provider,
@@ -2432,7 +3054,7 @@ function wecomWebhookPlaceholder(route = {}) {
 
 function wecomSecretPlaceholder(inbound = {}) {
   if (inbound.secretConfigured) return `已配置：${inbound.secretMasked || "********"}，留空保持不变`;
-  return "可选，用于模拟入站校验";
+  return "可选，用于来源校验";
 }
 
 function wecomAibotCredentialPlaceholder(config = {}, field = "botId") {
@@ -2447,34 +3069,6 @@ function wecomArchiveCredentialPlaceholder(config = {}, field = "archiveSecret")
   const masked = field === "privateKey" ? config.privateKeyMasked : config.archiveSecretMasked;
   if (configured) return `已配置：${masked || "********"}，留空保持不变`;
   return field === "privateKey" ? "会话存档RSA私钥" : "会话存档Secret";
-}
-
-function personalWechatConfigPayload(form) {
-  const data = formData(form);
-  return {
-    enabled: Boolean(data.enabled),
-    gateway: {
-      mode: data["gateway.mode"] || defaultPersonalWechatState.gateway.mode,
-      sidecarUrl: data["gateway.sidecarUrl"] || "",
-      sendEndpoint: data["gateway.sendEndpoint"] || defaultPersonalWechatState.gateway.sendEndpoint,
-      receiveEndpoint: data["gateway.receiveEndpoint"] || defaultPersonalWechatState.gateway.receiveEndpoint,
-      ackEndpoint: data["gateway.ackEndpoint"] || defaultPersonalWechatState.gateway.ackEndpoint
-    },
-    account: {
-      id: data["account.id"] || defaultPersonalWechatState.account.id,
-      name: data["account.name"] || defaultPersonalWechatState.account.name,
-      displayName: data["account.displayName"] || defaultPersonalWechatState.account.displayName,
-      defaultCustomerId: data["account.defaultCustomerId"] || state.selectedCustomerId || "",
-      autoReply: Boolean(data["account.autoReply"]),
-      requireApprovalForRisk: Boolean(data["account.requireApprovalForRisk"]),
-      minSendIntervalSeconds: Number(data["account.minSendIntervalSeconds"] || defaultPersonalWechatState.account.minSendIntervalSeconds),
-      concurrency: Number(data["account.concurrency"] || defaultPersonalWechatState.account.concurrency),
-      maxSendsPerMinute: Number(data["account.maxSendsPerMinute"] || defaultPersonalWechatState.account.maxSendsPerMinute),
-      maxQueueAgeSeconds: Number(data["account.maxQueueAgeSeconds"] || defaultPersonalWechatState.account.maxQueueAgeSeconds),
-      failureBackoffSeconds: Number(data["account.failureBackoffSeconds"] || defaultPersonalWechatState.account.failureBackoffSeconds),
-      mergeWindowSeconds: Number(data["account.mergeWindowSeconds"] || defaultPersonalWechatState.account.mergeWindowSeconds)
-    }
-  };
 }
 
 function personalWechatJobLabel(status = "") {
@@ -2507,7 +3101,7 @@ function renderPersonalWechatJob(job) {
       <div class="agent-customer-head">
         <div>
           <strong>${escapeHtml(job.roomName || job.roomId || "未命名外部群")}</strong>
-          <span>${escapeHtml(job.jobId)} · ${escapeHtml(job.reason || "AccountAgent发送队列")}</span>
+          <span>${escapeHtml(job.reason || "自动回复发送队列")}</span>
         </div>
         <span class="status-pill">${escapeHtml(personalWechatJobLabel(job.status))}</span>
       </div>
@@ -2515,15 +3109,10 @@ function renderPersonalWechatJob(job) {
       ${job.error ? `<p class="event-text">队列提示：${escapeHtml(job.error)}</p>` : ""}
       <div class="tag-list">
         <span class="tag">${job.riskLevel === "high" ? "高风险" : "低风险"}</span>
-        <span class="tag">账号 ${escapeHtml(job.accountId || "")}</span>
-        <span class="tag">来源 ${escapeHtml(job.source || "personal-wechat")}</span>
         ${(job.triggerMessageIds || []).length ? `<span class="tag">触发 ${(job.triggerMessageIds || []).length} 条</span>` : ""}
         ${job.attempts ? `<span class="tag">尝试 ${escapeHtml(job.attempts)}</span>` : ""}
         ${job.createdAt ? `<span class="tag">创建 ${escapeHtml(formatDateTime(job.createdAt))}</span>` : ""}
         ${job.approvedAt ? `<span class="tag">放行 ${escapeHtml(formatDateTime(job.approvedAt))}</span>` : ""}
-        ${job.gatewayMode ? `<span class="tag">网关 ${escapeHtml(job.gatewayMode)}</span>` : ""}
-        <span class="tag">${job.gatewayMode === "sidecar" ? "真实出站待回读" : "Mock/未真实外发"}</span>
-        ${job.gatewayRequestId ? `<span class="tag">请求 ${escapeHtml(job.gatewayRequestId)}</span>` : ""}
         ${job.sentAt ? `<span class="tag">已发 ${escapeHtml(formatDateTime(job.sentAt))}</span>` : ""}
         ${job.confirmedAt ? `<span class="tag">确认 ${escapeHtml(formatDateTime(job.confirmedAt))}</span>` : ""}
       </div>
@@ -2571,13 +3160,9 @@ function renderWecomLog(log) {
       ${log.contentPreview ? `<p class="event-text">${escapeHtml(log.contentPreview)}</p>` : ""}
       ${log.error ? `<p class="event-text">失败原因：${escapeHtml(log.error)}</p>` : ""}
       <div class="tag-list">
-        <span class="tag">${log.externalSideEffects ? "已触发企微外部发送" : "未触发外部发送"}</span>
-        ${log.source ? `<span class="tag">${escapeHtml(log.source)}</span>` : ""}
-        ${log.chatId ? `<span class="tag">chatid ${escapeHtml(log.chatId)}</span>` : ""}
-        ${log.externalMessageId ? `<span class="tag">msg ${escapeHtml(log.externalMessageId)}</span>` : ""}
+        <span class="tag">${log.externalSideEffects ? "已发送" : "未发送"}</span>
         ${log.deduped ? `<span class="tag">已去重</span>` : ""}
         ${log.latencyMs ? `<span class="tag">${escapeHtml(log.latencyMs)}ms</span>` : ""}
-        ${log.draftId ? `<span class="tag">草稿 ${escapeHtml(log.draftId)}</span>` : ""}
       </div>
     </div>
   `;
@@ -2607,646 +3192,317 @@ function renderIntegrationCard({ title, subtitle, status, tone = "", body = "", 
   `;
 }
 
-function personalWechatLoginGuide(gateway = {}, enabled = true) {
-  const mode = gateway.mode || "mock";
-  const hasSidecarUrl = Boolean(gateway.sidecarUrl);
-  const hasQr = Boolean(gateway.loginQrCodeUrl || gateway.loginQrCodeText);
-  const loggedIn = /已登录|online|logged/i.test(gateway.loginStatus || "");
-  const sidecarMode = mode === "sidecar";
-  const endpointReady = Boolean(gateway.sendEndpoint && gateway.receiveEndpoint && gateway.ackEndpoint);
-  const healthReady = sidecarMode && hasSidecarUrl && endpointReady;
-  const receiveReady = healthReady && gateway.canReceive === true;
-  const sendReady = healthReady && gateway.canSend === true;
-  const steps = [
-    {
-      title: "1. 启动个人微信连接器",
-      ok: enabled && sidecarMode && hasSidecarUrl && endpointReady,
-      detail: sidecarMode
-        ? hasSidecarUrl
-          ? "连接器地址和端点已填写，可以检查 /health。"
-          : "还没有填写个人微信连接器URL，当前无法进入扫码登录。"
-        : "当前是Mock本地演练模式，不能登录真实微信。"
+function wecomRealtimeConfigPayload(form) {
+  const formData = new FormData(form);
+  const data = Object.fromEntries(formData);
+  const current = state.wecomClientRealtime || {};
+  const currentWorker = current.worker || {};
+  const currentAccount = current.employeeAccount || {};
+  const currentMonitor = current.monitor || {};
+  const assignedRoomIds = formData.getAll("employeeAccount.assignedRoomIds").map((value) => String(value || "").trim()).filter(Boolean);
+  return {
+    enabled: Boolean(data.enabled),
+    monitor: {
+      ...currentMonitor,
+      mode: "local-script",
+      pollIntervalSeconds: Number(currentMonitor.pollIntervalSeconds || 2),
+      unreadDetection: "client-unread-list"
     },
-    {
-      title: "2. 扫码登录个人微信",
-      ok: loggedIn,
-      pending: healthReady && hasQr && !loggedIn,
-      detail: loggedIn
-        ? `登录态：${gateway.loginStatus}`
-        : hasQr
-          ? "连接器已返回二维码，请用测试微信扫码后重新检查。"
-          : healthReady
-            ? "连接器可检查，但暂未返回二维码；需要连接器 /health 提供 loginQrCodeUrl 或 loginQrCodeText。"
-            : "等待连接器配置完成后再获取二维码。"
+    worker: {
+      ...currentWorker,
+      mode: "local-script",
+      sidecarUrl: currentWorker.sidecarUrl || "http://127.0.0.1:8791",
+      sendEndpoint: currentWorker.sendEndpoint || "/send",
+      receiveEndpoint: currentWorker.receiveEndpoint || "/messages",
+      ackEndpoint: currentWorker.ackEndpoint || "/ack"
     },
-    {
-      title: "3. 开启收发能力",
-      ok: receiveReady && sendReady,
-      pending: receiveReady || sendReady,
-      detail: receiveReady && sendReady
-        ? "已声明 canReceive=true 和 canSend=true，可以做真实接收与出站联调。"
-        : receiveReady
-          ? "已可读取消息，但未声明 canSend=true，回复不会真实外发。"
-          : sendReady
-            ? "已可发送，但未声明 canReceive=true，无法验证真实入站和回读。"
-            : "连接器 /health 还未声明 canReceive=true 或 canSend=true。"
+    employeeAccount: {
+      ...currentAccount,
+      id: currentAccount.id || "wecom_employee_default",
+      name: currentAccount.name || "企微员工号",
+      displayName: currentAccount.displayName || "企微员工号",
+      defaultCustomerId: "",
+      assignedRoomIds,
+      assignedCustomerIds: [],
+      autoReply: Boolean(data["employeeAccount.autoReply"]),
+      requireApprovalForRisk: Boolean(data["employeeAccount.requireApprovalForRisk"]),
+      minSendIntervalSeconds: Number(data["employeeAccount.minSendIntervalSeconds"] || currentAccount.minSendIntervalSeconds || 3),
+      maxSendsPerMinute: Number(data["employeeAccount.maxSendsPerMinute"] || currentAccount.maxSendsPerMinute || 20),
+      maxQueueAgeSeconds: Number(data["employeeAccount.maxQueueAgeSeconds"] || currentAccount.maxQueueAgeSeconds || 60),
+      mergeWindowSeconds: Number(data["employeeAccount.mergeWindowSeconds"] || currentAccount.mergeWindowSeconds || 45),
+      quietWindowSeconds: Number(data["employeeAccount.quietWindowSeconds"] || currentAccount.quietWindowSeconds || 5)
     }
-  ];
+  };
+}
+
+function wecomJobLabel(status = "") {
+  const labels = {
+    queued: "待发送",
+    sending: "发送中",
+    sent: "待回读",
+    sent_pending_confirm: "待回读",
+    confirmed: "已确认",
+    failed: "失败",
+    cancelled: "已取消",
+    manual_required: "需人工确认"
+  };
+  return labels[status] || status || "未知";
+}
+
+function renderWecomSendJob(job) {
+  const canApprove = job.status === "manual_required";
+  const canConfirm = ["sent", "sent_pending_confirm", "sending"].includes(job.status);
+  const canFail = ["queued", "sent", "sent_pending_confirm", "sending"].includes(job.status);
   return `
-    <div class="login-guide">
-      ${steps.map((step) => `
-        <div class="login-step ${step.ok ? "step-ok" : step.pending ? "step-pending" : ""}">
-          <strong>${escapeHtml(step.title)}</strong>
-          <span>${escapeHtml(step.ok ? "完成" : step.pending ? "待处理" : "未就绪")}</span>
-          <p>${escapeHtml(step.detail)}</p>
+    <div class="business-card ${personalWechatJobClass(job.status)}">
+      <div class="agent-customer-head">
+        <div>
+          <strong>${escapeHtml(job.roomName || job.roomId || "未命名企微群")}</strong>
+          <span>${escapeHtml(job.reason || "企微自动回复队列")}</span>
         </div>
-      `).join("")}
+        <span class="status-pill">${escapeHtml(wecomJobLabel(job.status))}</span>
+      </div>
+      <p class="event-text">${escapeHtml(job.replyText || "无回复内容")}</p>
+      ${job.error ? `<p class="event-text">队列提示：${escapeHtml(job.error)}</p>` : ""}
+      <div class="tag-list">
+        <span class="tag">${job.riskLevel === "high" ? "高风险" : "低风险"}</span>
+        ${(job.triggerMessageIds || []).length ? `<span class="tag">触发 ${(job.triggerMessageIds || []).length} 条</span>` : ""}
+        ${job.accountId ? `<span class="tag">账号 ${escapeHtml(job.accountId)}</span>` : ""}
+        ${job.createdAt ? `<span class="tag">创建 ${escapeHtml(formatDateTime(job.createdAt))}</span>` : ""}
+        ${job.sentAt ? `<span class="tag">已发 ${escapeHtml(formatDateTime(job.sentAt))}</span>` : ""}
+        ${job.confirmedAt ? `<span class="tag">确认 ${escapeHtml(formatDateTime(job.confirmedAt))}</span>` : ""}
+      </div>
+      <div class="button-row">
+        ${canApprove ? `<button class="small-button" type="button" data-personal-wechat-approve-job="${escapeHtml(job.jobId)}" ${actionAttrs(`wecom-approve-${job.jobId}`)}>人工放行</button>` : ""}
+        ${canConfirm ? `<button class="small-button" type="button" data-personal-wechat-confirm-job="${escapeHtml(job.jobId)}" ${actionAttrs(`wecom-confirm-${job.jobId}`)}>回读确认</button>` : ""}
+        ${canFail ? `<button class="ghost-button" type="button" data-personal-wechat-fail-job="${escapeHtml(job.jobId)}" ${actionAttrs(`wecom-fail-${job.jobId}`)}>标记失败</button>` : ""}
+      </div>
     </div>
   `;
 }
 
-function personalWechatConnectionNotice(gateway = {}, enabled = true) {
-  const mode = gateway.mode || "mock";
-  const realMode = mode === "sidecar";
-  const hasUrl = Boolean(gateway.sidecarUrl);
-  const hasQr = Boolean(gateway.loginQrCodeUrl || gateway.loginQrCodeText);
-  const canReceive = realMode && gateway.canReceive === true;
-  const canSend = realMode && gateway.canSend === true;
-  const loggedIn = /已登录|online|logged/i.test(gateway.loginStatus || "");
-  const status = !enabled
-    ? "个人微信托管已停用"
-    : !realMode
-      ? "未接入真实个人微信"
-      : !hasUrl
-        ? "等待填写连接器地址"
-        : hasQr && !loggedIn
-          ? "等待扫码登录"
-          : loggedIn && (canReceive || canSend)
-            ? "真实连接器可用"
-            : "连接器未就绪";
-  const detail = !enabled
-    ? "先启用个人微信托管账号。"
-    : !realMode
-      ? "当前是Mock本地演练，只能测试队列和Agent，不能登录微信。要登录测试微信，请切换为“真实连接器接入”。"
-      : !hasUrl
-        ? "请填写个人微信连接器URL。连接器是一个单独运行的微信协议服务，负责扫码、收消息、发消息和自回显监听。"
-        : hasQr && !loggedIn
-          ? "二维码已经由连接器返回，请在下方二维码区域扫码。"
-          : loggedIn && (canReceive || canSend)
-            ? "可以运行个人微信Gateway脚本拉取消息或处理发送队列。"
-            : "连接器已配置但还没声明收发能力，检查 /health 返回值里的 canReceive/canSend。";
-  return { status, detail };
-}
-
 function renderWecom() {
   const config = normalizeWecomConfigState(state.wecomConfig);
-  const aibot = config.aibot;
-  const archive = config.archive;
+  const archive = config.archive || {};
+  const aibot = config.aibot || {};
   const route = wecomPrimaryRoute();
+  const routeOptions = wecomRouteOptions(route.id);
+  const readyRoutes = wecomRoutes().filter((item) => item.enabled && item.webhookConfigured);
+  const drafts = sendableWecomDrafts();
+  const realtime = state.wecomClientRealtime || {};
+  const realtimeWorker = realtime.worker || {};
+  const realtimeMonitor = realtime.monitor || {};
+  const realtimeAccount = realtime.employeeAccount || {};
+  const queue = normalizePersonalWechatState(state.personalWechat);
+  const jobs = queue.sendJobs || [];
+  const pendingJobs = jobs.filter((job) => ["queued", "sending", "sent", "sent_pending_confirm"].includes(job.status));
+  const manualJobs = jobs.filter((job) => job.status === "manual_required");
+  const failedJobs = jobs.filter((job) => job.status === "failed" || job.status === "cancelled");
+  const contexts = queue.groupContexts || [];
   const bindings = Array.isArray(state.wecomBindings?.groups) ? state.wecomBindings.groups : [];
   const logs = state.wecomLogs || [];
-  const readyRoutes = wecomRoutes().filter((item) => item.enabled && item.webhookConfigured);
-  const sentLogs = logs.filter((log) => log.status === "成功" && log.externalSideEffects);
-  const failedLogs = logs.filter((log) => log.status === "失败");
-  const drafts = sendableWecomDrafts();
-  const routeOptions = wecomRouteOptions(route.id);
-  const aibotReady = aibot.enabled && aibot.botIdConfigured && aibot.secretConfigured;
-  const archiveReady = archive.enabled;
-  const boundGroups = bindings.filter((binding) => binding.status === "已绑定");
-  const pendingGroups = bindings.filter((binding) => binding.status !== "已绑定");
-  const defaultAibotCustomer = state.customers.find((customer) => customer.id === aibot.defaultCustomerId) || selectedCustomer();
-  const defaultArchiveCustomer = state.customers.find((customer) => customer.id === archive.defaultCustomerId) || selectedCustomer();
-  const personalWechat = normalizePersonalWechatState(state.personalWechat);
-  const personalAccount = personalWechat.account;
-  const personalJobs = personalWechat.sendJobs || [];
-  const personalContexts = personalWechat.groupContexts || [];
-  const personalGateway = personalWechat.gateway || defaultPersonalWechatState.gateway;
-  const personalQueuedJobs = personalJobs.filter((job) => job.status === "queued");
-  const personalSendingJobs = personalJobs.filter((job) => job.status === "sending");
-  const personalSentJobs = personalJobs.filter((job) => ["sent", "sent_pending_confirm"].includes(job.status));
-  const personalManualJobs = personalJobs.filter((job) => job.status === "manual_required");
-  const personalConfirmedJobs = personalJobs.filter((job) => job.status === "confirmed");
-  const personalFailedJobs = personalJobs.filter((job) => job.status === "failed");
-  const personalDefaultCustomer = state.customers.find((customer) => customer.id === personalAccount.defaultCustomerId) || selectedCustomer();
   const archiveConfigured = archive.enabled && archive.gatewayMode === "sidecar" && archive.sidecarUrl && archive.corpId && archive.archiveSecretConfigured && archive.privateKeyConfigured;
-  const routeReady = config.enabled && readyRoutes.length > 0;
-  const personalGatewayConfigured = personalGateway.mode === "sidecar" && personalGateway.sidecarUrl && personalGateway.sendEndpoint;
-  const personalGatewayCanSend = personalGatewayConfigured && personalGateway.canSend === true;
-  const personalGatewayCanReceive = personalGatewayConfigured && personalGateway.canReceive === true;
-  const personalConnection = personalWechatConnectionNotice(personalGateway, personalWechat.enabled);
+  const realtimeReady = Boolean(realtime.enabled && (realtimeWorker.canReceive || realtimeWorker.canSend));
   const normalizedBindingSearch = wecomBindingSearchQuery.trim().toLowerCase();
   const filteredBindings = bindings.filter((binding) => {
     if (!normalizedBindingSearch) return true;
-    const haystack = [
-      binding.chatName,
-      binding.chatId,
-      binding.source,
-      binding.status,
-      binding.channel,
-      customerName(binding.customerId)
-    ].join(" ").toLowerCase();
-    return haystack.includes(normalizedBindingSearch);
+    return [binding.chatName, binding.chatId, binding.status, binding.channel, customerName(binding.customerId)]
+      .join(" ")
+      .toLowerCase()
+      .includes(normalizedBindingSearch);
   });
-  const wecomLogTypes = ["全部", ...new Set(logs.map((log) => log.type).filter(Boolean))];
-  const filteredWecomLogs = logs.filter((log) => wecomLogTypeFilter === "全部" || log.type === wecomLogTypeFilter);
+  const wecomLogs = [
+    ...(realtime.logs || []).map((log) => ({ ...log, sourceGroup: "实时收发" })),
+    ...logs.map((log) => ({ ...log, sourceGroup: "企微记录" }))
+  ];
+  const shownLogs = wecomLogs.slice(0, 8);
+  const scopeRooms = Array.from(new Map([
+    ...bindings.map((binding) => [binding.chatId, {
+      roomId: binding.chatId,
+      roomName: binding.chatName,
+      customerName: customerName(binding.customerId),
+      channel: binding.channel || "VIP群"
+    }]),
+    ...contexts.map((context) => [context.roomId, {
+      roomId: context.roomId,
+      roomName: context.roomName,
+      customerName: customerName(context.customerId),
+      channel: "企微实时"
+    }])
+  ].filter(([roomId]) => roomId)).values());
+  const assignedRoomIds = new Set(Array.isArray(realtimeAccount.assignedRoomIds) ? realtimeAccount.assignedRoomIds : []);
+  const assignedScopeLabel = assignedRoomIds.size ? `指定 ${assignedRoomIds.size} 个群` : "全部已绑定群";
   return `
     <section class="grid four">
-      ${cardKpi("会话存档", archive.status || (archiveReady ? "已启用" : "未启用"), archiveReady ? "外部群主读取入口" : "等待配置")}
-      ${cardKpi("群聊归档", boundGroups.length, `待绑定 ${pendingGroups.length} 个`)}
-      ${cardKpi("发送待确认", personalQueuedJobs.length + personalSendingJobs.length + personalSentJobs.length, `人工 ${personalManualJobs.length} 条`)}
-      ${cardKpi("失败记录", failedLogs.length + personalFailedJobs.length, "配置、Webhook或Gateway错误")}
-    </section>
-
-    <section class="panel warning-panel">
-      <div class="panel-header">
-        <div>
-          <h2 class="panel-title">企微接入方式</h2>
-          <p class="panel-subtitle">生产主读取入口是企微会话内容存档；智能机器人长连接保留为测试/辅助读取；测试群Webhook只用于发送测试消息和已确认草稿，不能读取群聊。</p>
-        </div>
-      </div>
+      ${cardKpi("实时读取", realtimeWorker.canReceive ? "可读取" : realtime.enabled ? "等待脚本" : "未启用", realtimeMonitor.lastSeenAt ? `最近 ${formatDateTime(realtimeMonitor.lastSeenAt)}` : "测试企微触发")}
+      ${cardKpi("自动回复", pendingJobs.length, `人工确认 ${manualJobs.length}`)}
+      ${cardKpi("历史留档", archiveConfigured ? "可补账" : archive.enabled ? "待补齐" : "未启用", archive.lastPulledAt ? `最近 ${formatDateTime(archive.lastPulledAt)}` : "服务商历史下载")}
+      ${cardKpi("异常", failedJobs.length, realtimeWorker.lastError || archive.lastError || "无最新异常")}
     </section>
 
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">接入总控</h2>
-          <p class="panel-subtitle">先看这里判断企微/个微当前能做什么：读取、归档、测试发送、个微出站是否具备运行条件。</p>
+          <h2 class="panel-title">企微收发状态</h2>
+          <p class="panel-subtitle">这个页面只管理当前方案：测试企微实时读取、企微员工客户端自动化发送、历史留档补账确认。</p>
         </div>
+        <button class="small-button" id="checkWecomClientRealtimeWorker" type="button" ${actionAttrs("wecom-client-worker-check")}>检查本地脚本</button>
       </div>
       <div class="integration-grid">
         ${renderIntegrationCard({
-          title: "企微会话存档",
-          subtitle: "生产外部群主读取入口",
-          status: archiveConfigured ? archive.trustedStatus || "配置可检查" : "配置未完成",
+          title: "本地企微客户端",
+          subtitle: "读取未读消息和执行发送动作",
+          status: realtimeReady ? realtimeWorker.status || "可用" : "待连接",
+          tone: realtimeReady ? "success" : "warning",
+          body: realtimeReady ? "系统可以从企微客户端读取未读消息，并按能力执行发送。" : "本机企微脚本未就绪，请先确认本地服务和企微登录状态。",
+          tags: [
+            realtime.enabled ? "已启用" : "未启用",
+            realtimeWorker.canReceive ? "可读取" : "待读取",
+            realtimeWorker.canSend ? "可发送" : "待发送",
+            realtimeWorker.supportsAck ? "支持ACK" : "ACK未声明"
+          ]
+        })}
+        ${renderIntegrationCard({
+          title: "回复策略",
+          subtitle: assignedScopeLabel,
+          status: realtimeAccount.autoReply ? "低风险自动" : "人工确认",
+          tone: realtimeAccount.autoReply ? "success" : "warning",
+          body: "客户连续消息会合并，高风险报价、退款、赔偿、合同等内容必须人工确认。",
+          tags: [
+            `静默 ${realtimeAccount.quietWindowSeconds || 5} 秒`,
+            `合并 ${realtimeAccount.mergeWindowSeconds || 45} 秒`,
+            `分钟上限 ${realtimeAccount.maxSendsPerMinute || 20}`,
+            realtimeAccount.requireApprovalForRisk ? "高风险拦截" : "高风险未强制"
+          ]
+        })}
+        ${renderIntegrationCard({
+          title: "历史留档",
+          subtitle: "审计和补账确认",
+          status: archiveConfigured ? archive.trustedStatus || "配置可检查" : "待配置",
           tone: archiveConfigured ? "success" : "warning",
-          body: archiveConfigured ? "配置已满足Sidecar拉取条件，可检查Sidecar /health；真实消息由Gateway写入标准入站。" : "需要启用存档入口，并补齐CorpID、Secret、RSA私钥和Sidecar URL。",
+          body: "实时响应不等待历史下载；历史记录用于确认系统自动回复是否真实进入群记录。",
           tags: [
             archive.enabled ? "已启用" : "未启用",
-            `模式 ${archive.gatewayMode || "sidecar"}`,
-            archive.sidecarUrl ? "Sidecar URL已填" : "缺Sidecar URL",
+            archive.sidecarUrl ? "服务地址已填" : "缺服务地址",
             archive.archiveSecretConfigured ? "Secret已保存" : "缺Secret",
-            archive.privateKeyConfigured ? "私钥已保存" : "缺私钥",
-            archive.cursor ? `游标 ${archive.cursor}` : "无游标"
+            archive.privateKeyConfigured ? "私钥已保存" : "缺私钥"
           ],
-          action: `<button class="small-button" id="checkWecomArchiveSidecar" type="button" ${actionAttrs("wecom-archive-check")} ${archive.enabled ? "" : "disabled"}>检查存档Sidecar</button>`
-        })}
-        ${renderIntegrationCard({
-          title: "企微智能机器人",
-          subtitle: "测试/辅助读取入口",
-          status: aibotReady ? aibot.bridgeStatus || "凭据已配置" : "凭据未完成",
-          tone: aibotReady ? "success" : "warning",
-          body: aibotReady ? "Bot ID 和 Secret 已保存，可运行长连接bridge读取机器人可见消息。" : "保存Bot ID和Secret后，再运行 npm run wecom:bridge。",
-          tags: [
-            aibot.enabled ? "已启用" : "未启用",
-            aibot.botIdConfigured ? "Bot ID已保存" : "缺Bot ID",
-            aibot.secretConfigured ? "Secret已保存" : "缺Secret",
-            aibot.autoReply ? "自动回复开启" : "只读分流"
-          ],
-          action: `<button class="small-button" id="checkWecomAibotTop" type="button" ${actionAttrs("wecom-aibot-check-top")}>检查机器人配置</button>`
-        })}
-        ${renderIntegrationCard({
-          title: "企微测试群发送",
-          subtitle: "Webhook只负责发送测试消息",
-          status: routeReady ? "可发送测试群" : "发送未配置",
-          tone: routeReady ? "success" : "warning",
-          body: routeReady ? "已确认草稿和测试消息可发送到测试群机器人；这不是群消息读取链路。" : "需要启用企微连接、启用路由并保存Webhook。",
-          tags: [
-            config.enabled ? "连接器已启用" : "连接器未启用",
-            `${readyRoutes.length} 个可用路由`,
-            `模式 ${config.sendMode}`,
-            drafts.length ? `${drafts.length} 条可发送草稿` : "无已确认草稿"
-          ],
-          action: `<button class="small-button" type="button" data-jump-wecom-section="wecom-send-test">查看发送测试</button>`
-        })}
-        ${renderIntegrationCard({
-          title: "个人微信连接器",
-          subtitle: "登录、接收、发送和回读确认出口",
-          status: personalConnection.status,
-          tone: personalGatewayCanSend || personalGatewayCanReceive ? "success" : "warning",
-          body: personalConnection.detail,
-          tags: [
-            personalWechat.enabled ? "已启用" : "已停用",
-            `模式 ${personalGateway.mode || "mock"}`,
-            personalGateway.sidecarUrl ? "连接器URL已填" : "无连接器URL",
-            personalGateway.canSend ? "canSend=true" : "canSend=false",
-            personalGateway.canReceive ? "canReceive=true" : "canReceive=false",
-            `登录 ${personalGateway.loginStatus || "未连接"}`,
-            `发送模式 ${personalGateway.sendMode || "proactive"}`,
-            personalGateway.supportsConfirm ? "支持回读确认" : "未声明回读",
-            `待发 ${personalQueuedJobs.length}`,
-            `发送中 ${personalSendingJobs.length}`,
-            `待回读 ${personalSentJobs.length}`,
-            `人工 ${personalManualJobs.length}`
-          ],
-          action: `<button class="small-button" id="checkPersonalWechatGateway" type="button" ${actionAttrs("personal-wechat-gateway-check")}>检查个人微信连接器</button>`
+          action: `<button class="small-button" id="checkWecomArchiveSidecar" type="button" ${actionAttrs("wecom-archive-check")} ${archive.enabled ? "" : "disabled"}>检查历史留档</button>`
         })}
       </div>
     </section>
 
-    <section class="panel ${personalGatewayCanSend || personalGatewayCanReceive ? "success-card" : "warning-panel"}" id="personal-wechat-connector">
-      <div class="panel-header">
-        <div>
-          <h2 class="panel-title">连接个人微信</h2>
-          <p class="panel-subtitle">这里才是真实个人微信接入入口。要登录测试微信，必须先启动一个“个人微信连接器”程序；系统会从连接器获取二维码并展示在下方。</p>
-        </div>
-        <button class="small-button" id="checkPersonalWechatGatewayInline" type="button" ${actionAttrs("personal-wechat-gateway-check-inline")}>检查连接器</button>
-      </div>
-      <div class="connector-status-grid">
-        <div><span>当前状态</span><strong>${escapeHtml(personalConnection.status)}</strong></div>
-        <div><span>登录位置</span><strong>${personalGateway.loginQrCodeUrl || personalGateway.loginQrCodeText ? "下方二维码区域" : "等待连接器返回二维码"}</strong></div>
-        <div><span>连接器地址</span><strong>${escapeHtml(personalGateway.sidecarUrl || "未填写")}</strong></div>
-        <div><span>真实收发</span><strong>${personalGatewayCanReceive || personalGatewayCanSend ? "部分就绪" : "未就绪"}</strong></div>
-      </div>
-      <p class="panel-subtitle">${escapeHtml(personalConnection.detail)}</p>
-    </section>
-
-    <section class="grid four">
-      ${cardKpi("个人微信账号", personalAccount.status || "未连接", personalWechat.enabled ? "单账号单Agent" : "已停用")}
-      ${cardKpi("外部群上下文", personalContexts.length, "按roomId隔离")}
-      ${cardKpi("待发送队列", personalQueuedJobs.length, `发送中 ${personalSendingJobs.length}，待回读 ${personalSentJobs.length}`)}
-      ${cardKpi("已确认回显", personalConfirmedJobs.length, "自回显/存档回读确认")}
-    </section>
-
-    <form id="personalWechatConfigForm">
     <section class="grid two">
       <article class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">个人微信连接器与AccountAgent</h2>
-            <p class="panel-subtitle">真实登录、读取、发送和回读确认都通过个人微信连接器接入；Mock只做本地演练，不代表真实发回群。</p>
+            <h2 class="panel-title">实时收发配置</h2>
+            <p class="panel-subtitle">只配置业务策略；底层脚本、接口端点和企微账号身份由系统维护。</p>
           </div>
         </div>
-        <div class="form-grid compact-form">
-          <label class="inline-check full-span">
-            <input name="enabled" type="checkbox" value="true" ${personalWechat.enabled ? "checked" : ""}>
-            <span>启用个人微信托管账号</span>
-          </label>
-          <div class="field"><label>账号ID</label><input name="account.id" value="${escapeHtml(personalAccount.id)}"></div>
-          <div class="field"><label>账号名称</label><input name="account.name" value="${escapeHtml(personalAccount.name)}"></div>
-          <div class="field"><label>群内显示名</label><input name="account.displayName" value="${escapeHtml(personalAccount.displayName)}"></div>
-          <div class="field"><label>默认客户</label><select name="account.defaultCustomerId">${customerOptions(personalDefaultCustomer)}</select></div>
-          <div class="field"><label>接入模式</label><select name="gateway.mode"><option value="mock" ${personalGateway.mode === "mock" ? "selected" : ""}>Mock本地演练</option><option value="sidecar" ${personalGateway.mode === "sidecar" ? "selected" : ""}>真实连接器接入</option><option value="disabled" ${personalGateway.mode === "disabled" ? "selected" : ""}>停用连接器</option></select></div>
-          <div class="field"><label>连接器URL</label><input name="gateway.sidecarUrl" value="${escapeHtml(personalGateway.sidecarUrl || "")}" placeholder="http://127.0.0.1:8788"></div>
-          <div class="field"><label>发送端点</label><input name="gateway.sendEndpoint" value="${escapeHtml(personalGateway.sendEndpoint || "/send")}"></div>
-          <div class="field"><label>拉取端点</label><input name="gateway.receiveEndpoint" value="${escapeHtml(personalGateway.receiveEndpoint || "/messages")}"></div>
-          <div class="field"><label>ACK端点</label><input name="gateway.ackEndpoint" value="${escapeHtml(personalGateway.ackEndpoint || "/ack")}"></div>
-          <div class="field"><label>连接器状态</label><input value="${escapeHtml(personalGateway.status || "未配置")}" disabled></div>
-          <div class="field"><label>发送能力</label><input value="${personalGateway.canSend ? "canSend=true，可交给真实连接器" : "canSend=false，不能真实发送"}" disabled></div>
-          <div class="field"><label>接收能力</label><input value="${personalGateway.canReceive ? "canReceive=true，可读取消息" : "canReceive=false，不能真实读取"}" disabled></div>
-          <div class="field"><label>登录状态</label><input value="${escapeHtml(personalGateway.loginStatus || "未连接")}" disabled></div>
-          <div class="field"><label>扫码登录</label><input value="${personalGateway.loginQrCodeUrl || personalGateway.loginQrCodeText ? "连接器已返回二维码，请扫码登录" : "暂无二维码"}" disabled></div>
-          <div class="field"><label>发送模式</label><input value="${escapeHtml(personalGateway.sendMode || "proactive")}" disabled></div>
-          <div class="field"><label>ACK/回读/撤回</label><input value="${personalGateway.supportsAck ? "支持ACK" : "未声明ACK"} / ${personalGateway.supportsConfirm ? "支持回读" : "未声明回读"} / ${personalGateway.supportsRecall ? "支持撤回" : "未声明撤回"}" disabled></div>
-          <label class="inline-check compact-check"><input name="account.autoReply" type="checkbox" value="true" ${personalAccount.autoReply ? "checked" : ""}><span>低风险自动排队</span></label>
-          <label class="inline-check compact-check"><input name="account.requireApprovalForRisk" type="checkbox" value="true" ${personalAccount.requireApprovalForRisk ? "checked" : ""}><span>高风险人工确认</span></label>
-          <div class="field"><label>最小发送间隔秒</label><input name="account.minSendIntervalSeconds" type="number" min="1" max="60" value="${escapeHtml(personalAccount.minSendIntervalSeconds)}"></div>
-          <div class="field"><label>账号并发</label><input name="account.concurrency" type="number" min="1" max="3" value="${escapeHtml(personalAccount.concurrency)}"></div>
-          <div class="field"><label>分钟发送上限</label><input name="account.maxSendsPerMinute" type="number" min="1" max="60" value="${escapeHtml(personalAccount.maxSendsPerMinute)}"></div>
-          <div class="field"><label>队列过期秒</label><input name="account.maxQueueAgeSeconds" type="number" min="15" max="600" value="${escapeHtml(personalAccount.maxQueueAgeSeconds)}"></div>
-          <div class="field"><label>失败退避秒</label><input name="account.failureBackoffSeconds" type="number" min="5" max="600" value="${escapeHtml(personalAccount.failureBackoffSeconds)}"></div>
-          <div class="field"><label>连续消息合并秒</label><input name="account.mergeWindowSeconds" type="number" min="5" max="300" value="${escapeHtml(personalAccount.mergeWindowSeconds)}"></div>
-          <button class="primary-button full-span" type="submit" ${actionAttrs("save-personal-wechat-config")}>保存个人微信连接配置</button>
-        </div>
-        <div class="info-box">
-          <strong>真实个人微信登录条件</strong>
-          <p>主系统不能直接登录微信；只有外部个人微信连接器运行并在 /health 返回登录二维码或已登录状态后，才能进入扫码测试。连接器就是单独负责微信扫码登录和收发消息的本地/服务器程序。</p>
-          ${personalWechatLoginGuide(personalGateway, personalWechat.enabled)}
-        </div>
-        ${personalGateway.loginQrCodeUrl || personalGateway.loginQrCodeText ? `<div class="info-box qr-login-box">
-          <strong>需要扫码登录个人微信</strong>
-          <p>${personalGateway.loginQrCodeUrl ? `二维码链接：${escapeHtml(personalGateway.loginQrCodeUrl)}` : "连接器已返回二维码文本，请在连接器控制台或二维码工具中扫码。"}</p>
-          ${personalGateway.loginQrCodeUrl ? `<img class="qr-preview" src="${escapeHtml(personalGateway.loginQrCodeUrl)}" alt="个人微信登录二维码">` : ""}
-          ${personalGateway.loginQrCodeText ? `<textarea readonly>${escapeHtml(personalGateway.loginQrCodeText)}</textarea>` : ""}
-          <p>扫码后点击“检查个人微信连接器”，确认登录态变成已登录，并且连接器声明 canReceive=true 或 canSend=true。</p>
-        </div>` : ""}
-      </article>
-
-      <article class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">运行边界</h2>
-            <p class="panel-subtitle">Mock模式只做本地验证；真实连接器模式会等待外部网关回调，回调前不会标记真实已发送。</p>
-          </div>
-        </div>
-        <div class="event-list">
-          <div class="business-card ${personalWechat.enabled ? "success-card" : "warning-card"}">
-            <div class="agent-customer-head">
-              <div>
-                <strong>${escapeHtml(personalAccount.name)}</strong>
-                <span>${escapeHtml(personalAccount.displayName)} · ${escapeHtml(personalAccount.id)}</span>
-              </div>
-              <span class="status-pill">${personalAccount.autoReply ? "低风险自动" : "全部人工确认"}</span>
-            </div>
-            <p class="event-text">发消息由SendScheduler受控调度：同群FIFO、账号限频、超过队列时效重判；只有个人微信连接器声明canSend=true时才会真实外发。</p>
-            <div class="tag-list">
-              <span class="tag">连接器 ${escapeHtml(personalGateway.mode)}</span>
-              ${personalGateway.sidecarUrl ? `<span class="tag">${escapeHtml(personalGateway.sidecarUrl)}${escapeHtml(personalGateway.sendEndpoint || "/send")}</span>` : ""}
-              <span class="tag">${escapeHtml(personalGateway.status || "未配置")}</span>
-              <span class="tag">${personalGateway.canSend ? "可真实发送" : "不可真实发送"}</span>
-              <span class="tag">${personalGateway.canReceive ? "可真实读取" : "不可真实读取"}</span>
-              <span class="tag">登录 ${escapeHtml(personalGateway.loginStatus || "未连接")}</span>
-              ${personalGateway.loginQrCodeUrl || personalGateway.loginQrCodeText ? `<span class="tag warning-tag">待扫码</span>` : ""}
-              <span class="tag">模式 ${escapeHtml(personalGateway.sendMode || "proactive")}</span>
-              <span class="tag">${personalGateway.supportsConfirm ? "支持回读" : "未声明回读"}</span>
-              <span class="tag">${personalGateway.supportsAck ? "支持ACK" : "未声明ACK"}</span>
-              ${personalGateway.cursor ? `<span class="tag">游标 ${escapeHtml(personalGateway.cursor)}</span>` : ""}
-              <span class="tag">限频 ${escapeHtml(personalAccount.minSendIntervalSeconds)} 秒</span>
-              <span class="tag">并发 ${escapeHtml(personalAccount.concurrency)}</span>
-              <span class="tag">分钟 ${escapeHtml(personalAccount.maxSendsPerMinute)} 条</span>
-              <span class="tag">过期 ${escapeHtml(personalAccount.maxQueueAgeSeconds)} 秒重判</span>
-              <span class="tag">退避 ${escapeHtml(personalAccount.failureBackoffSeconds)} 秒</span>
-              ${personalAccount.lastEventAt ? `<span class="tag">最近 ${escapeHtml(formatDateTime(personalAccount.lastEventAt))}</span>` : ""}
-            </div>
-          </div>
-          ${personalAccount.lastError ? `<div class="business-card warning-card"><p class="event-text">最近错误：${escapeHtml(personalAccount.lastError)}</p></div>` : ""}
-          ${personalGateway.lastError ? `<div class="business-card warning-card"><p class="event-text">Gateway错误：${escapeHtml(personalGateway.lastError)}</p></div>` : ""}
-        </div>
-      </article>
-    </section>
-    </form>
-
-    <details class="advanced-debug-panel">
-      <summary>高级调试：模拟入站工具</summary>
-      <section class="grid two">
-      <article class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">模拟个人微信外部群入站</h2>
-            <p class="panel-subtitle">仅用于研发验证消息格式、上下文和回复队列，不代表真实个人微信接入。</p>
-          </div>
-        </div>
-        <div class="form-grid compact-form">
-          <div class="field"><label>绑定客户</label><select id="personalWechatInboundCustomer">${customerOptions(personalDefaultCustomer)}</select></div>
-          <div class="field"><label>发送人类型</label><select id="personalWechatSenderType"><option value="customer">客户</option><option value="staff">员工</option><option value="bot">托管号</option><option value="unknown">未知</option></select></div>
-          <div class="field"><label>外部群roomId</label><input id="personalWechatRoomId" value="${escapeHtml(`pwx_room_${state.selectedCustomerId || "default"}`)}"></div>
-          <div class="field"><label>外部群名称</label><input id="personalWechatRoomName" value="${escapeHtml(`${selectedCustomer()?.name || "客户"}VIP外部群`)}"></div>
-          <div class="field"><label>发送人</label><input id="personalWechatSenderName" value="${escapeHtml(selectedCustomer()?.contact || selectedCustomer()?.name || "客户")}"></div>
-          <div class="field"><label>消息ID</label><input id="personalWechatMessageId" placeholder="留空自动生成"></div>
-          <div class="field full-span"><label>消息内容</label><textarea id="personalWechatInboundText">收到，我把资料补一下，流程怎么走？</textarea></div>
-          <button class="primary-button full-span" id="ingestPersonalWechatMessage" type="button" ${actionAttrs("personal-wechat-inbound")} ${state.customers.length ? "" : "disabled"}>写入个人微信入站</button>
-        </div>
-      </article>
-
-      <article class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">模拟企微会话存档入站</h2>
-            <p class="panel-subtitle">仅用于研发验证标准入站、去重和风控；真实读取请运行会话存档Sidecar。</p>
-          </div>
-        </div>
-        <div class="form-grid compact-form">
-          <div class="field"><label>绑定客户</label><select id="wecomArchiveInboundCustomer">${customerOptions(defaultArchiveCustomer)}</select></div>
-          <div class="field"><label>发送人类型</label><select id="wecomArchiveSenderType"><option value="customer">客户</option><option value="staff">员工</option><option value="managed_account">托管号</option><option value="unknown">未知</option></select></div>
-          <div class="field"><label>群roomId/chatId</label><input id="wecomArchiveRoomId" value="${escapeHtml(`archive_room_${state.selectedCustomerId || "default"}`)}"></div>
-          <div class="field"><label>群名称</label><input id="wecomArchiveRoomName" value="${escapeHtml(`${selectedCustomer()?.name || "客户"}企微外部群`)}"></div>
-          <div class="field"><label>发送人</label><input id="wecomArchiveSenderName" value="${escapeHtml(selectedCustomer()?.contact || selectedCustomer()?.name || "客户")}"></div>
-          <div class="field"><label>存档msgid</label><input id="wecomArchiveMessageId" placeholder="留空自动生成"></div>
-          <div class="field full-span"><label>消息内容</label><textarea id="wecomArchiveInboundText">今天售后进度和报价可以同步一下吗？</textarea></div>
-          <button class="primary-button full-span" id="ingestWecomArchiveMessage" type="button" ${actionAttrs("wecom-archive-inbound")} ${archive.enabled && state.customers.length ? "" : "disabled"}>写入会话存档入站</button>
-        </div>
-      </article>
-      </section>
-    </details>
-
-    <section class="grid two">
-      <article class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">单账号发送队列</h2>
-            <p class="panel-subtitle">低风险回复会自动排队，高风险回复停在人工确认；SendScheduler负责按账号并发和限流调度发送。</p>
-          </div>
-          <button class="small-button" id="runPersonalWechatScheduler" type="button" ${actionAttrs("personal-wechat-scheduler")} ${personalQueuedJobs.length ? "" : "disabled"}>运行发送调度</button>
-        </div>
-        ${personalWechat.schedulerResult ? `<div class="business-card success-card">
-          <p class="event-text">最近调度：发送 ${escapeHtml(personalWechat.schedulerResult.dispatched?.length || 0)} 条，跳过 ${escapeHtml(personalWechat.schedulerResult.skipped?.length || 0)} 条，过期 ${escapeHtml(personalWechat.schedulerResult.expired?.length || 0)} 条。</p>
-        </div>` : ""}
-        <div class="event-list">
-          ${personalJobs.slice(0, 8).map(renderPersonalWechatJob).join("") || renderEmptyState("暂无发送任务", "写入客户消息后，AccountAgent会按风险生成队列任务。")}
-        </div>
-      </article>
-    </section>
-
-    <section class="grid two">
-      <article class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">个人微信群上下文</h2>
-            <p class="panel-subtitle">每个外部群按roomId独立保存最近消息、客户绑定、最近回复和待发送任务。</p>
-          </div>
-        </div>
-        <div class="event-list">
-          ${personalContexts.slice(0, 6).map(renderPersonalWechatContext).join("") || renderEmptyState("暂无个人微信群上下文", "写入第一条个人微信外部群消息后会自动创建。")}
-        </div>
-      </article>
-
-      <article class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">个人微信运行日志</h2>
-            <p class="panel-subtitle">自动回复会记录触发消息、判断理由、回复内容、发送队列和确认结果。</p>
-          </div>
-        </div>
-        <div class="event-list">
-          ${(personalWechat.logs || []).slice(0, 6).map((log) => `
-            <div class="business-card ${log.status === "成功" ? "success-card" : "warning-card"}">
-              <div class="agent-customer-head">
-                <div>
-                  <strong>${escapeHtml(log.type || "个人微信记录")} · ${escapeHtml(log.status || "未知")}</strong>
-                  <span>${escapeHtml(log.roomName || log.roomId || "个人微信外部群")}</span>
-                </div>
-                <span class="status-pill">${escapeHtml(formatDateTime(log.createdAt))}</span>
-              </div>
-              ${log.contentPreview ? `<p class="event-text">${escapeHtml(log.contentPreview)}</p>` : ""}
-              <div class="tag-list">
-                <span class="tag">${log.externalSideEffects ? "已触发外部发送" : "Mock/未触发外部发送"}</span>
-                ${log.messageId ? `<span class="tag">msg ${escapeHtml(log.messageId)}</span>` : ""}
-                ${log.sendJobId ? `<span class="tag">job ${escapeHtml(log.sendJobId)}</span>` : ""}
-              </div>
-            </div>
-          `).join("") || renderEmptyState("暂无个人微信日志", "保存配置、写入消息或确认发送后会记录在这里。")}
-        </div>
-      </article>
-    </section>
-
-    <form id="wecomConfigForm">
-    <section class="grid two">
-      <article class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">企微会话内容存档</h2>
-            <p class="panel-subtitle">生产外部群主读取入口。主服务保存配置、游标和审计；真实拉取、解密和客户同意校验由Sidecar完成。</p>
-          </div>
-        </div>
-        <div class="form-grid compact-form">
-          <label class="inline-check full-span">
-            <input name="archive.enabled" type="checkbox" value="true" ${archive.enabled ? "checked" : ""}>
-            <span>启用会话存档入站</span>
-          </label>
-          <div class="field"><label>存档服务</label><input name="archive.provider" value="${escapeHtml(archive.provider || "企微会话内容存档")}"></div>
-          <div class="field"><label>企业ID CorpID</label><input name="archive.corpId" value="${escapeHtml(archive.corpId || "")}" placeholder="ww..."></div>
-          <div class="field"><label>Secret</label><input name="archive.archiveSecret" type="password" value="" placeholder="${escapeHtml(wecomArchiveCredentialPlaceholder(archive, "archiveSecret"))}"></div>
-          <div class="field"><label>私钥版本</label><input name="archive.privateKeyVersion" value="${escapeHtml(archive.privateKeyVersion || "")}" placeholder="公钥版本号"></div>
-          <div class="field"><label>Gateway模式</label><select name="archive.gatewayMode"><option value="sidecar" ${archive.gatewayMode === "sidecar" ? "selected" : ""}>Sidecar拉取</option><option value="manual" ${archive.gatewayMode === "manual" ? "selected" : ""}>手动标准入站</option><option value="disabled" ${archive.gatewayMode === "disabled" ? "selected" : ""}>停用</option></select></div>
-          <div class="field full-span"><label>Sidecar URL</label><input name="archive.sidecarUrl" value="${escapeHtml(archive.sidecarUrl || "")}" placeholder="http://127.0.0.1:8787"></div>
-          <div class="field full-span"><label>RSA私钥</label><textarea name="archive.privateKey" placeholder="${escapeHtml(wecomArchiveCredentialPlaceholder(archive, "privateKey"))}"></textarea></div>
-          ${(archive.archiveSecretConfigured || archive.privateKeyConfigured) ? `
-            <label class="inline-check compact-check"><input name="archive.clearArchiveSecret" type="checkbox" value="true"><span>清空已保存Secret</span></label>
-            <label class="inline-check compact-check"><input name="archive.clearPrivateKey" type="checkbox" value="true"><span>清空已保存私钥</span></label>
-          ` : ""}
-          <div class="field"><label>默认客户</label><select name="archive.defaultCustomerId">${customerOptions(defaultArchiveCustomer)}</select></div>
-          <div class="field"><label>默认渠道</label><select name="archive.defaultChannel"><option ${archive.defaultChannel === "VIP群" ? "selected" : ""}>VIP群</option><option ${archive.defaultChannel === "销售企微" ? "selected" : ""}>销售企微</option><option ${archive.defaultChannel === "电销企微" ? "selected" : ""}>电销企微</option></select></div>
-          <div class="field"><label>读取游标</label><input name="archive.cursor" value="${escapeHtml(archive.cursor || "")}" placeholder="由存档Gateway回写"></div>
-          <div class="field"><label>Seq</label><input name="archive.seq" type="number" min="0" value="${escapeHtml(archive.seq || 0)}"></div>
-          <div class="field"><label>轮询间隔秒</label><input name="archive.pollIntervalSeconds" type="number" min="3" max="300" value="${escapeHtml(archive.pollIntervalSeconds || 10)}"></div>
-          <div class="field"><label>单次上限</label><input name="archive.limit" type="number" min="1" max="1000" value="${escapeHtml(archive.limit || 100)}"></div>
-          <div class="business-card full-span ${archive.enabled ? "success-card" : "warning-card"}">
-            <div class="agent-customer-head">
-              <div>
-                <strong>${escapeHtml(archive.status || (archive.enabled ? "已启用" : "未启用"))}</strong>
-                <span>${archive.lastPulledAt ? `最近拉取 ${escapeHtml(formatDateTime(archive.lastPulledAt))}` : "等待会话存档Gateway接入"} · ${archive.lastAckAt ? `最近ACK ${escapeHtml(formatDateTime(archive.lastAckAt))} · ` : ""}${escapeHtml(archive.trustedStatus || "未验证")}</span>
-              </div>
-              <span class="status-pill">${archive.enabled ? "主读取入口" : "未启用"}</span>
-            </div>
-            ${archive.lastError ? `<p class="event-text">最近错误：${escapeHtml(archive.lastError)}</p>` : ""}
-          </div>
-        </div>
-      </article>
-
-      <article class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">智能机器人长连接</h2>
-            <p class="panel-subtitle">用于读取真实企微机器人消息。Bot ID和Secret只保存在本地状态，页面不回显明文。</p>
-          </div>
-        </div>
-        <div class="form-grid compact-form">
-          <label class="inline-check full-span">
-            <input name="aibot.enabled" type="checkbox" value="true" ${aibot.enabled ? "checked" : ""}>
-            <span>启用智能机器人长连接</span>
-          </label>
-          <div class="field"><label>Bot ID</label><input name="aibot.botId" type="password" value="" placeholder="${escapeHtml(wecomAibotCredentialPlaceholder(aibot, "botId"))}"></div>
-          <div class="field"><label>Secret</label><input name="aibot.secret" type="password" value="" placeholder="${escapeHtml(wecomAibotCredentialPlaceholder(aibot, "secret"))}"></div>
-          <div class="field"><label>长连接地址</label><input name="aibot.wsUrl" value="${escapeHtml(aibot.wsUrl || "")}" placeholder="默认 wss://openws.work.weixin.qq.com"></div>
-          <div class="field"><label>默认客户</label><select name="aibot.defaultCustomerId">${customerOptions(defaultAibotCustomer)}</select></div>
-          <div class="field"><label>默认入站渠道</label><select name="aibot.defaultChannel"><option ${aibot.defaultChannel === "VIP群" ? "selected" : ""}>VIP群</option><option ${aibot.defaultChannel === "销售企微" ? "selected" : ""}>销售企微</option><option ${aibot.defaultChannel === "电销企微" ? "selected" : ""}>电销企微</option></select></div>
-          <label class="inline-check compact-check"><input name="aibot.autoReply" type="checkbox" value="true" ${aibot.autoReply ? "checked" : ""}><span>允许自动回复</span></label>
-          <div class="field"><label>心跳间隔ms</label><input name="aibot.heartbeatInterval" type="number" min="5000" step="1000" value="${escapeHtml(aibot.heartbeatInterval)}"></div>
-          <div class="field"><label>重连次数</label><input name="aibot.maxReconnectAttempts" type="number" min="-1" max="100" value="${escapeHtml(aibot.maxReconnectAttempts)}"></div>
-          <div class="field full-span"><label>进入会话欢迎语</label><textarea name="aibot.welcomeText">${escapeHtml(aibot.welcomeText || "")}</textarea></div>
-          ${(aibot.botIdConfigured || aibot.secretConfigured) ? `
-            <label class="inline-check compact-check"><input name="aibot.clearBotId" type="checkbox" value="true"><span>清空已保存Bot ID</span></label>
-            <label class="inline-check compact-check"><input name="aibot.clearSecret" type="checkbox" value="true"><span>清空已保存Secret</span></label>
-          ` : ""}
-          <button class="small-button full-span" id="checkWecomAibot" type="button" ${actionAttrs("wecom-aibot-check")}>检查长连接配置</button>
-          <div class="business-card full-span ${aibotReady ? "success-card" : "warning-card"}">
-            <div class="agent-customer-head">
-              <div>
-                <strong>${aibotReady ? "凭据已保存" : "等待凭据"}</strong>
-                <span>桥接状态：${escapeHtml(aibot.bridgeStatus || "未启动")}${aibot.lastConnectedAt ? ` · 最近连接 ${escapeHtml(formatDateTime(aibot.lastConnectedAt))}` : ""}</span>
-              </div>
-              <span class="status-pill">${aibot.autoReply ? "自动回复开启" : "只读分流"}</span>
-            </div>
-            ${aibot.lastError ? `<p class="event-text">最近错误：${escapeHtml(aibot.lastError)}</p>` : ""}
-          </div>
-        </div>
-      </article>
-
-      <article class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">企微测试群路由</h2>
-            <p class="panel-subtitle">Webhook只能发送，不能读取群消息；适合测试通知和已确认草稿灰度推送。</p>
-          </div>
-        </div>
-        <div class="form-grid compact-form">
-          <label class="inline-check full-span">
-            <input name="enabled" type="checkbox" value="true" ${config.enabled ? "checked" : ""}>
-            <span>启用测试群发送连接器</span>
-          </label>
-          <input name="route.id" type="hidden" value="${escapeHtml(route.id)}">
-          <div class="field"><label>路由名称</label><input name="route.name" value="${escapeHtml(route.name)}" placeholder="企微测试群机器人"></div>
-          <div class="field"><label>业务渠道</label><select name="route.channel"><option ${route.channel === "VIP群" ? "selected" : ""}>VIP群</option><option ${route.channel === "企微私聊" ? "selected" : ""}>企微私聊</option><option ${route.channel === "电销企微培育" ? "selected" : ""}>电销企微培育</option></select></div>
-          <div class="field"><label>消息格式</label><select name="route.msgtype"><option value="markdown" ${route.msgtype === "markdown" ? "selected" : ""}>Markdown</option><option value="text" ${route.msgtype === "text" ? "selected" : ""}>文本</option></select></div>
-          <label class="inline-check compact-check"><input name="route.enabled" type="checkbox" value="true" ${route.enabled ? "checked" : ""}><span>启用这个路由</span></label>
-          <div class="field full-span">
-            <label>Webhook URL</label>
-            <input name="route.webhookUrl" type="password" value="" placeholder="${escapeHtml(wecomWebhookPlaceholder(route))}">
-            <small class="field-help">留空会保持已保存Webhook；测试群机器人Webhook通常以 qyapi.weixin.qq.com/cgi-bin/webhook/send?key= 开头。</small>
-          </div>
-          ${route.webhookConfigured ? `
-            <label class="inline-check compact-check full-span">
-              <input name="route.clearWebhook" type="checkbox" value="true">
-              <span>清空已保存Webhook</span>
+        <form id="wecomRealtimeConfigForm">
+          <div class="form-grid compact-form">
+            <label class="inline-check full-span">
+              <input name="enabled" type="checkbox" value="true" ${realtime.enabled ? "checked" : ""}>
+              <span>启用企微实时收发</span>
             </label>
-          ` : ""}
-          <div class="field"><label>发送模式</label><select name="sendMode"><option value="manualApproval" ${config.sendMode === "manualApproval" ? "selected" : ""}>人工确认后发送</option><option value="testOnly" ${config.sendMode === "testOnly" ? "selected" : ""}>仅测试发送</option></select></div>
-          <label class="inline-check compact-check"><input name="inbound.enabled" type="checkbox" value="true" ${config.inbound.enabled ? "checked" : ""}><span>启用本地入站适配器</span></label>
-          <div class="field"><label>默认入站渠道</label><select name="inbound.defaultChannel"><option ${config.inbound.defaultChannel === "VIP群" ? "selected" : ""}>VIP群</option><option ${config.inbound.defaultChannel === "销售企微" ? "selected" : ""}>销售企微</option><option ${config.inbound.defaultChannel === "电销企微" ? "selected" : ""}>电销企微</option></select></div>
-          <div class="field"><label>入站Secret</label><input name="inbound.secret" type="password" value="" placeholder="${escapeHtml(wecomSecretPlaceholder(config.inbound))}"></div>
-          ${config.inbound.secretConfigured ? `
-            <label class="inline-check compact-check full-span">
-              <input name="inbound.clearSecret" type="checkbox" value="true">
-              <span>清空入站Secret</span>
-            </label>
-          ` : ""}
-        </div>
-      </article>
-    </section>
-    <section class="panel">
-      <button class="primary-button full-span" type="submit" ${actionAttrs("save-wecom-config")}>保存企微配置</button>
-    </section>
-    </form>
-
-    <section class="grid two">
-      <article class="panel" id="wecom-send-test">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">发送测试</h2>
-            <p class="panel-subtitle">会真实调用已配置的企微群机器人Webhook；发送结果写入日志。</p>
+            <label class="inline-check compact-check"><input name="employeeAccount.autoReply" type="checkbox" value="true" ${realtimeAccount.autoReply ? "checked" : ""}><span>低风险自动回复</span></label>
+            <label class="inline-check compact-check"><input name="employeeAccount.requireApprovalForRisk" type="checkbox" value="true" ${realtimeAccount.requireApprovalForRisk ? "checked" : ""}><span>高风险人工确认</span></label>
+            <div class="field full-span">
+              <label>管理群聊范围</label>
+              <div class="scope-check-list">
+                ${scopeRooms.length ? scopeRooms.map((room) => `
+                  <label class="inline-check compact-check scope-check">
+                    <input name="employeeAccount.assignedRoomIds" type="checkbox" value="${escapeHtml(room.roomId)}" ${assignedRoomIds.has(room.roomId) ? "checked" : ""}>
+                    <span>${escapeHtml(room.roomName || room.roomId)}${room.customerName ? ` · ${escapeHtml(room.customerName)}` : ""}${room.channel ? ` · ${escapeHtml(room.channel)}` : ""}</span>
+                  </label>
+                `).join("") : `<span class="muted">暂无已识别群聊；测试企微实时读取到群消息后会出现在这里。</span>`}
+              </div>
+              <span class="muted">未勾选时默认接管全部已绑定/已识别群聊；勾选后只处理所选群聊。</span>
+            </div>
+            <div class="field"><label>静默时间秒</label><input name="employeeAccount.quietWindowSeconds" type="number" min="0" max="30" value="${escapeHtml(realtimeAccount.quietWindowSeconds || 5)}"></div>
+            <div class="field"><label>连续消息合并秒</label><input name="employeeAccount.mergeWindowSeconds" type="number" min="5" max="300" value="${escapeHtml(realtimeAccount.mergeWindowSeconds || 45)}"></div>
+            <div class="field"><label>最小发送间隔秒</label><input name="employeeAccount.minSendIntervalSeconds" type="number" min="1" max="60" value="${escapeHtml(realtimeAccount.minSendIntervalSeconds || 3)}"></div>
+            <div class="field"><label>分钟发送上限</label><input name="employeeAccount.maxSendsPerMinute" type="number" min="1" max="60" value="${escapeHtml(realtimeAccount.maxSendsPerMinute || 20)}"></div>
+            <div class="field"><label>队列过期秒</label><input name="employeeAccount.maxQueueAgeSeconds" type="number" min="15" max="600" value="${escapeHtml(realtimeAccount.maxQueueAgeSeconds || 60)}"></div>
+            <button class="primary-button full-span" type="submit" ${actionAttrs("save-wecom-realtime-config")}>保存实时收发配置</button>
           </div>
-        </div>
-        <div class="form-grid compact-form">
-          <div class="field full-span"><label>发送路由</label><select id="wecomTestRoute">${routeOptions}</select></div>
-          <div class="field full-span"><label>测试内容</label><textarea id="wecomTestContent">企微连接测试：客户运营中台已连接测试群机器人。</textarea></div>
-          <button class="primary-button full-span" id="sendWecomTest" type="button" ${actionAttrs("wecom-test-send")} ${config.enabled && readyRoutes.length ? "" : "disabled"}>发送测试消息</button>
-        </div>
-        <div class="divider"></div>
-        <div class="panel-header compact-header">
-          <div>
-            <h2 class="panel-title">发送已确认草稿</h2>
-            <p class="panel-subtitle">只允许发送已确认草稿；成功后草稿会标记为企微已发送。</p>
-          </div>
-        </div>
-        <div class="form-grid compact-form">
-          <div class="field full-span"><label>草稿</label><select id="wecomDraftId">${drafts.map((draft) => `<option value="${escapeHtml(draft.id)}">${escapeHtml(draft.customerName || customerName(draft.customerId))} · ${escapeHtml(draft.channel)} · ${escapeHtml(draft.draftType)}</option>`).join("") || `<option value="" disabled selected>暂无已确认草稿</option>`}</select></div>
-          <div class="field full-span"><label>发送路由</label><select id="wecomDraftRoute">${routeOptions}</select></div>
-          <button class="small-button full-span" id="sendDraftWecom" type="button" ${actionAttrs("wecom-draft-send")} ${config.enabled && readyRoutes.length && drafts.length ? "" : "disabled"}>发送草稿到企微测试群</button>
-        </div>
+        </form>
       </article>
 
       <article class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">群聊归档绑定</h2>
-            <p class="panel-subtitle">真实企微入站会按chatid生成或更新绑定；每个群只归档到一个客户档案。</p>
+            <h2 class="panel-title">自动回复队列</h2>
+            <p class="panel-subtitle">系统生成的企微回复任务；低风险排队，高风险等待人工放行，发送后等待历史回读确认。</p>
+          </div>
+          <button class="small-button" id="runPersonalWechatScheduler" type="button" ${actionAttrs("wecom-scheduler")} ${pendingJobs.length || manualJobs.length ? "" : "disabled"}>运行发送调度</button>
+        </div>
+        <div class="event-list">
+          ${jobs.slice(0, 8).map(renderWecomSendJob).join("") || renderEmptyState("暂无回复任务", "测试企微群出现新客户消息后，低风险回复会进入这里。")}
+        </div>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">历史留档配置</h2>
+            <p class="panel-subtitle">用于审计和补账确认，不作为实时消息源。</p>
+          </div>
+        </div>
+        <form id="wecomConfigForm">
+          <div class="form-grid compact-form">
+            <label class="inline-check full-span">
+              <input name="archive.enabled" type="checkbox" value="true" ${archive.enabled ? "checked" : ""}>
+              <span>启用历史留档补账</span>
+            </label>
+            <div class="field"><label>企业ID CorpID</label><input name="archive.corpId" value="${escapeHtml(archive.corpId || "")}" placeholder="ww..."></div>
+            <div class="field"><label>Secret</label><input name="archive.archiveSecret" type="password" value="" placeholder="${escapeHtml(wecomArchiveCredentialPlaceholder(archive, "archiveSecret"))}"></div>
+            <div class="field full-span"><label>历史服务地址</label><input name="archive.sidecarUrl" value="${escapeHtml(archive.sidecarUrl || "")}" placeholder="http://127.0.0.1:8787"></div>
+            <div class="field full-span"><label>私钥版本</label><input name="archive.privateKeyVersion" value="${escapeHtml(archive.privateKeyVersion || "")}" placeholder="公钥版本号"></div>
+            <div class="field full-span"><label>RSA私钥</label><textarea name="archive.privateKey" placeholder="${escapeHtml(wecomArchiveCredentialPlaceholder(archive, "privateKey"))}"></textarea></div>
+            ${(archive.archiveSecretConfigured || archive.privateKeyConfigured) ? `
+              <label class="inline-check compact-check"><input name="archive.clearArchiveSecret" type="checkbox" value="true"><span>清空已保存Secret</span></label>
+              <label class="inline-check compact-check"><input name="archive.clearPrivateKey" type="checkbox" value="true"><span>清空已保存私钥</span></label>
+            ` : ""}
+            <input name="enabled" type="hidden" value="${config.enabled ? "true" : ""}">
+            <input name="archive.gatewayMode" type="hidden" value="sidecar">
+            <input name="archive.defaultChannel" type="hidden" value="${escapeHtml(archive.defaultChannel || "VIP群")}">
+            <input name="archive.provider" type="hidden" value="${escapeHtml(archive.provider || "企微会话内容存档")}">
+            <input name="archive.cursor" type="hidden" value="${escapeHtml(archive.cursor || "")}">
+            <input name="archive.seq" type="hidden" value="${escapeHtml(archive.seq || 0)}">
+            <input name="archive.pollIntervalSeconds" type="hidden" value="${escapeHtml(archive.pollIntervalSeconds || 10)}">
+            <input name="archive.limit" type="hidden" value="${escapeHtml(archive.limit || 100)}">
+            <button class="primary-button full-span" type="submit" ${actionAttrs("save-wecom-config")}>保存历史留档配置</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">群聊绑定</h2>
+            <p class="panel-subtitle">把识别到的企微外部群绑定到客户，避免不同群消息串档。</p>
           </div>
         </div>
         <div class="filter-bar compact-filter">
           <div class="field">
-            <label>搜索群/客户/chatid</label>
-            <input id="wecomBindingSearch" value="${escapeHtml(wecomBindingSearchQuery)}" placeholder="输入群名、客户名、chatid、来源">
+            <label>搜索群/客户</label>
+            <input id="wecomBindingSearch" value="${escapeHtml(wecomBindingSearchQuery)}" placeholder="输入群名或客户名">
           </div>
-          <div class="filter-summary">显示 ${escapeHtml(filteredBindings.length)} / ${escapeHtml(bindings.length)} 个群</div>
+          <div class="filter-summary">${escapeHtml(filteredBindings.length)} / ${escapeHtml(bindings.length)}</div>
         </div>
         <div class="event-list">
-          ${filteredBindings.slice(0, 8).map((binding) => {
+          ${filteredBindings.slice(0, 6).map((binding) => {
             const currentCustomer = state.customers.find((customer) => customer.id === binding.customerId) || selectedCustomer();
             return `
               <div class="business-card ${binding.status === "已绑定" ? "success-card" : "warning-card"}" data-wecom-binding-card>
                 <div class="agent-customer-head">
                   <div>
                     <strong>${escapeHtml(binding.chatName || "未命名企微群")}</strong>
-                    <span>${escapeHtml(binding.chatId)} · ${escapeHtml(binding.source || "wecom-aibot")}</span>
+                    <span>${escapeHtml(customerName(binding.customerId))} · ${escapeHtml(binding.channel || "VIP群")}</span>
                   </div>
                   <span class="status-pill">${escapeHtml(binding.status || "待绑定")}</span>
                 </div>
@@ -3254,59 +3510,73 @@ function renderWecom() {
                   <input type="hidden" data-wecom-bind-chat value="${escapeHtml(binding.chatId)}">
                   <div class="field"><label>绑定客户</label><select data-wecom-bind-customer>${customerOptions(currentCustomer)}</select></div>
                   <div class="field"><label>业务渠道</label><select data-wecom-bind-channel><option ${binding.channel === "VIP群" ? "selected" : ""}>VIP群</option><option ${binding.channel === "销售企微" ? "selected" : ""}>销售企微</option><option ${binding.channel === "电销企微" ? "selected" : ""}>电销企微</option></select></div>
-                  <button class="small-button full-span" type="button" data-save-wecom-binding ${actionAttrs(`wecom-bind-${binding.chatId}`)}>保存群绑定</button>
-                </div>
-                <div class="tag-list">
-                  <span class="tag">消息 ${escapeHtml(binding.messageCount || 0)} 条</span>
-                  ${binding.lastMessageAt ? `<span class="tag">最近 ${escapeHtml(formatDateTime(binding.lastMessageAt))}</span>` : ""}
-                  ${binding.lastSenderId ? `<span class="tag">发送人 ${escapeHtml(binding.lastSenderId)}</span>` : ""}
+                  <button class="small-button full-span" type="button" data-save-wecom-binding ${actionAttrs(`wecom-bind-${binding.chatId}`)}>保存绑定</button>
                 </div>
               </div>
             `;
-          }).join("") || renderEmptyState("暂无匹配企微群", bindings.length ? "调整搜索条件后再查看。" : "启动长连接桥接并收到群消息后，这里会出现待绑定群。")}
+          }).join("") || renderEmptyState("暂无企微群", "测试企微实时入站后，这里会出现待绑定群。")}
         </div>
       </article>
     </section>
 
     <section class="grid two">
-      <details class="panel advanced-debug-panel">
-        <summary>高级调试：本地企微入站适配器</summary>
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">模拟企微入站</h2>
-            <p class="panel-subtitle">用于在未接官方回调前测试群消息分流、客户档案回写和任务生成。</p>
-          </div>
-        </div>
-        <div class="form-grid compact-form">
-          <div class="field"><label>客户</label><select id="wecomInboundCustomer">${customerOptions()}</select></div>
-          <div class="field"><label>入站渠道</label><select id="wecomInboundChannel"><option value="VIP群">VIP群</option><option value="销售企微">销售企微</option><option value="电销企微">电销企微</option></select></div>
-          <div class="field"><label>发送角色</label><select id="wecomInboundRole"><option>客户</option><option>销售</option><option>私域</option><option>客服</option><option>售后</option></select></div>
-          <div class="field"><label>发送人</label><input id="wecomInboundSender" value="${escapeHtml(selectedCustomer()?.contact || selectedCustomer()?.name || "客户")}"></div>
-          <div class="field"><label>模拟chatid</label><input id="wecomInboundChatId" placeholder="群聊测试可填 chat_xxx"></div>
-          <div class="field"><label>模拟msgid</label><input id="wecomInboundMessageId" placeholder="留空自动生成"></div>
-          <div class="field full-span"><label>消息内容</label><textarea id="wecomInboundMessage">${escapeHtml(scenarios.vip)}</textarea></div>
-          <button class="primary-button full-span" id="ingestWecomMessage" type="button" ${actionAttrs("wecom-inbound")} ${state.customers.length ? "" : "disabled"}>写入企微模拟入站</button>
-        </div>
-      </details>
-
       <article class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">最近企微记录</h2>
-            <p class="panel-subtitle">发送测试、草稿发送和模拟入站都会写入这里，方便排查配置与Webhook返回。</p>
+            <h2 class="panel-title">最近记录</h2>
+            <p class="panel-subtitle">只显示收发、调度、补账和配置结果，便于判断当前链路是否正常。</p>
           </div>
-        </div>
-        <div class="filter-bar compact-filter">
-          <div class="field">
-            <label>日志类型</label>
-            <select id="wecomLogTypeFilter">${wecomLogTypes.map((type) => `<option value="${escapeHtml(type)}" ${wecomLogTypeFilter === type ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}</select>
-          </div>
-          <div class="filter-summary">显示 ${escapeHtml(filteredWecomLogs.length)} / ${escapeHtml(logs.length)} 条记录</div>
         </div>
         <div class="event-list">
-          ${filteredWecomLogs.slice(0, 8).map(renderWecomLog).join("") || renderEmptyState("暂无匹配企微记录", logs.length ? "调整日志类型筛选后再查看。" : "保存Webhook后先发送一条测试消息，或使用模拟入站验证分流。")}
+          ${shownLogs.map((log) => `
+            <div class="business-card ${log.status === "成功" ? "success-card" : "warning-card"}">
+              <div class="agent-customer-head">
+                <div>
+                  <strong>${escapeHtml(log.type || log.sourceGroup || "企微记录")} · ${escapeHtml(log.status || "未知")}</strong>
+                  <span>${escapeHtml(log.roomName || log.roomId || log.routeName || log.channel || "企微")}</span>
+                </div>
+                <span class="status-pill">${escapeHtml(formatDateTime(log.createdAt))}</span>
+              </div>
+              ${log.contentPreview ? `<p class="event-text">${escapeHtml(log.contentPreview)}</p>` : ""}
+              ${log.error ? `<p class="event-text">失败原因：${escapeHtml(log.error)}</p>` : ""}
+              <div class="tag-list">
+                ${log.errorCode ? `<span class="tag">${escapeHtml(log.errorCode)}</span>` : ""}
+                ${log.messageId ? `<span class="tag">msg ${escapeHtml(log.messageId)}</span>` : ""}
+                ${log.sendJobId ? `<span class="tag">job ${escapeHtml(log.sendJobId)}</span>` : ""}
+              </div>
+            </div>
+          `).join("") || renderEmptyState("暂无企微记录", "保存配置或收到测试企微消息后会显示。")}
         </div>
       </article>
+
+      <details class="advanced-debug-panel">
+        <summary>高级维护：测试发送和机器人</summary>
+        <div class="event-list">
+          <div class="business-card">
+            <strong>测试群发送</strong>
+            <p class="event-text">仅用于灰度验证测试群机器人，不用于读取外部群消息。</p>
+            <div class="form-grid compact-form">
+              <div class="field full-span"><label>发送路由</label><select id="wecomTestRoute">${routeOptions}</select></div>
+              <div class="field full-span"><label>测试内容</label><textarea id="wecomTestContent">企微连接测试：客户运营中台已连接测试群机器人。</textarea></div>
+              <button class="small-button full-span" id="sendWecomTest" type="button" ${actionAttrs("wecom-test-send")} ${config.enabled && readyRoutes.length ? "" : "disabled"}>发送测试消息</button>
+              <div class="field full-span"><label>已确认草稿</label><select id="wecomDraftId">${drafts.map((draft) => `<option value="${escapeHtml(draft.id)}">${escapeHtml(draft.customerName || customerName(draft.customerId))} · ${escapeHtml(draft.channel)} · ${escapeHtml(draft.draftType)}</option>`).join("") || `<option value="" disabled selected>暂无已确认草稿</option>`}</select></div>
+              <div class="field full-span"><label>草稿路由</label><select id="wecomDraftRoute">${routeOptions}</select></div>
+              <button class="small-button full-span" id="sendDraftWecom" type="button" ${actionAttrs("wecom-draft-send")} ${config.enabled && readyRoutes.length && drafts.length ? "" : "disabled"}>发送草稿到测试群</button>
+            </div>
+          </div>
+          <div class="business-card">
+            <strong>智能机器人长连接</strong>
+            <p class="event-text">可选辅助测试入口，不用于当前外部群实时收发主链路。</p>
+            <div class="tag-list">
+              <span class="tag">${aibot.enabled ? "已启用" : "未启用"}</span>
+              <span class="tag">${aibot.botIdConfigured ? "Bot ID已保存" : "缺Bot ID"}</span>
+              <span class="tag">${aibot.secretConfigured ? "Secret已保存" : "缺Secret"}</span>
+              <span class="tag">${escapeHtml(aibot.bridgeStatus || "未启动")}</span>
+            </div>
+            <button class="small-button" id="checkWecomAibot" type="button" ${actionAttrs("wecom-aibot-check")}>检查机器人配置</button>
+          </div>
+        </div>
+      </details>
     </section>
   `;
 }
@@ -3423,118 +3693,21 @@ function renderConversationCard(conversation) {
   `;
 }
 
-function channelsPageMeta() {
-  if (activeNavGroup === "telemarketing") {
-    return {
-      title: "电销消息入口",
-      subtitle: "用于本地模拟电销私聊入站，验证电销培育Agent、客户阶段和任务流转。"
-    };
-  }
-  return {
-    title: "消息入站测试",
-    subtitle: "用于模拟电销、销售和VIP群消息入站，验证路由、会话上下文、Agent分流和任务闭环；真实企微读取请在企微接入中配置Gateway。"
-  };
-}
-
 function renderChannels() {
-  const meta = channelsPageMeta();
-  const customer = selectedCustomer();
-  if (!customer) {
-    return `
-      ${renderLoadError()}
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">${escapeHtml(meta.title)}</h2>
-            <p class="panel-subtitle">${escapeHtml(meta.subtitle)} 渠道消息需要绑定到一个客户档案。</p>
-          </div>
-        </div>
-        ${renderEmptyState("暂无客户可写入消息", "请先新增客户或重置本地样例数据，再验证电销、销售和VIP群消息入站。")}
-      </section>
-    `;
-  }
-  const conversations = conversationsFor(customer.id);
-  const latestVipRun = state.agentRuns.find((run) => run.agent === "VIP群分流Agent" && run.customerId === customer.id);
   return `
-    <section class="grid two">
-      <article class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">${escapeHtml(meta.title)}</h2>
-            <p class="panel-subtitle">${escapeHtml(meta.subtitle)} 这里会真实写入本地会话、事件、任务和Agent结果；不会读取或发送真实企微消息。</p>
-          </div>
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">内部调试</h2>
+          <p class="panel-subtitle">消息验证请用测试企微群触发真实读取、Agent处理和发送队列。</p>
         </div>
-        <div class="toolbar">
-          <div class="field">
-            <label for="channelCustomer">客户</label>
-            <select id="channelCustomer">
-              ${customerOptions(customer)}
-            </select>
-          </div>
-          <div class="field">
-            <label for="channelType">渠道</label>
-            <select id="channelType">
-              <option value="电销模拟私聊">电销私聊（本地）</option>
-              <option value="销售模拟私聊">销售私聊（本地）</option>
-              <option value="VIP模拟群">VIP群（本地）</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="senderRole">发送角色</label>
-            <select id="senderRole">
-              <option>客户</option>
-              <option>销售</option>
-              <option>私域</option>
-              <option>客服</option>
-              <option>售后</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="senderName">发送人</label>
-            <input id="senderName" value="${escapeHtml(customer.contact || customer.name)}">
-          </div>
-        </div>
-        <div style="height:14px"></div>
-        <div class="field">
-          <label for="channelMessage">入站消息</label>
-          <textarea id="channelMessage">${escapeHtml(selectedScenario)}</textarea>
-        </div>
-        <div style="height:10px"></div>
-        <div class="scenario-grid">
-          ${Object.entries(scenarios).map(([key, value]) => `
-            <button class="scenario-button" data-channel-scenario="${key}">${escapeHtml(value)}</button>
-          `).join("")}
-        </div>
-        <div style="height:14px"></div>
-        <button class="primary-button" id="ingestMessage" ${actionAttrs("ingest-message")}>写入本地消息并路由</button>
-      </article>
-      <article class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">本地路由规则</h2>
-            <p class="panel-subtitle">当前按本地消息渠道选择Agent，后续接企微时可替换为真实会话回调。</p>
-          </div>
-        </div>
-        <div class="flow-row" style="grid-template-columns:1fr">
-          <div class="flow-node"><strong>电销私聊（本地）</strong><span>进入电销培育Agent，识别是否升级销售。</span></div>
-          <div class="flow-node"><strong>销售私聊（本地）</strong><span>进入销售承接Agent，识别会员卡兴趣、异议点和人工跟进任务。</span></div>
-          <div class="flow-node"><strong>VIP群（本地）</strong><span>进入VIP群分流Agent，读取本地会话窗口，识别问题类型、@对象、重复问题和未结任务。</span></div>
-        </div>
-        <h3 style="margin-top:16px">会话上下文</h3>
-        <div class="conversation-list">
-          ${conversations.map(renderConversationCard).join("") || renderEmptyState("暂无会话上下文", "写入一条本地消息后，系统会自动创建本地会话窗口。")}
-        </div>
-        ${renderVipContextResult(latestVipRun)}
-        <h3 style="margin-top:16px">当前客户事件</h3>
-        <div class="event-list">
-          ${eventsFor(customer.id).map((event) => `
-            <div class="event-item">
-              <div class="event-meta">${escapeHtml(event.time)} · ${escapeHtml(event.channel)} · ${escapeHtml(event.type)}</div>
-              <div class="event-text">${escapeHtml(event.text)}</div>
-            </div>
-          `).join("") || `<div class="muted">暂无事件。</div>`}
-        </div>
-      </article>
+      </div>
+      <div class="flow-row" style="grid-template-columns:1fr 1fr 1fr">
+        <div class="flow-node"><strong>实时读取</strong><span>本地企微Worker识别未读外部群并批量回传新消息。</span></div>
+        <div class="flow-node"><strong>系统处理</strong><span>系统做去重、静默窗口、风险判断和发送前版本预检。</span></div>
+        <div class="flow-node"><strong>企微发送</strong><span>通过测试企微员工客户端执行发送，再等待历史记录补账确认。</span></div>
+      </div>
+      ${renderEmptyState("调试入口已收起", "客户样例档案仍保留；消息验证请走测试企微链路。")}
     </section>
   `;
 }
@@ -3549,10 +3722,19 @@ function chatSessionIdForConversation(conversationId = "") {
 
 function chatSourceMeta(messages = []) {
   const sources = new Set(messages.map((message) => message.source).filter(Boolean));
-  if (sources.has("wecom-archive")) return { source: "wecom-archive", label: "企微会话存档" };
-  if ([...sources].some((source) => source.includes("wecom-aibot") || source.includes("local-chatid"))) return { source: "wecom-aibot", label: "企微机器人" };
-  if (sources.has("personal-wechat")) return { source: "personal-wechat", label: "个人微信/Sidecar" };
+  if (sources.has("wecom-client-realtime")) return { source: "wecom-client-realtime", label: "企微外部群" };
+  if (sources.has("wecom-archive")) return { source: "wecom-archive", label: "企微外部群" };
+  if ([...sources].some((source) => source.includes("wecom-aibot") || source.includes("local-chatid"))) return { source: "wecom-aibot", label: "企微群" };
+  if (sources.has("personal-wechat")) return { source: "personal-wechat", label: "外部群" };
   return { source: "external", label: "外部会话" };
+}
+
+function bindingSourceLabel(source = "") {
+  const value = String(source || "");
+  if (value.includes("wecom-client") || value.includes("archive")) return "企微外部群";
+  if (value.includes("aibot") || value.includes("chatid")) return "企微群";
+  if (value.includes("personal")) return "外部群";
+  return "外部会话";
 }
 
 function chatMessageDirection(senderType = "", senderRole = "") {
@@ -3581,7 +3763,7 @@ function chatSessionsFromState() {
       id: message.messageId,
       messageId: message.messageId,
       senderName: message.senderName || "未知发送人",
-      senderRole: message.senderType === "customer" ? "客户" : message.senderType === "managed_account" || message.senderType === "bot" ? "托管号" : message.senderType === "staff" ? "员工" : "未知",
+      senderRole: message.senderType === "customer" ? "客户" : message.senderType === "managed_account" || message.senderType === "bot" ? "自动化号" : message.senderType === "staff" ? "员工" : "未知",
       senderType: message.senderType || "unknown",
       text: message.text || "",
       msgType: message.msgType || "text",
@@ -3632,7 +3814,7 @@ function chatSessionsFromState() {
       roomId: binding.chatId,
       title: binding.chatName || `外部群 ${String(binding.chatId).slice(-6)}`,
       source: binding.source || "wecom-archive",
-      sourceLabel: String(binding.source || "").includes("aibot") ? "企微机器人" : "企微会话存档",
+      sourceLabel: bindingSourceLabel(binding.source || "wecom-archive"),
       customerId: customer?.id || "",
       customerName: customer?.name || "待绑定客户",
       bound: Boolean(customer && binding.status === "已绑定" && !customer.tags?.includes("企微群待绑定")),
@@ -3671,7 +3853,7 @@ function chatSessionsFromState() {
       conversationId: conversation.id,
       title: conversation.title || conversation.channel,
       source: "local",
-      sourceLabel: "本地模拟",
+      sourceLabel: "本地调试",
       customerId: customer?.id || "",
       customerName: customer?.name || "未知客户",
       bound: Boolean(customer),
@@ -3697,7 +3879,7 @@ function filteredChatSessions() {
     const matchesScope = sessionMatchesChatScope(session);
     const matchesSearch = !query || [session.title, session.customerName, session.lastMessageText, session.roomId, session.channel]
       .some((value) => String(value || "").toLowerCase().includes(query));
-    const normalizedSourceFilter = chatSourceFilter === "全部" ? "全部真实" : chatSourceFilter;
+    const normalizedSourceFilter = ["全部", "全部真实", "本地调试"].includes(chatSourceFilter) ? (chatSourceFilter === "全部" ? "全部真实" : chatSourceFilter) : "全部真实";
     const matchesSource = normalizedSourceFilter === "全部真实"
       ? session.source !== "local"
       : normalizedSourceFilter === "本地调试"
@@ -3763,8 +3945,9 @@ function renderChatSidePanel(session) {
   const tasks = chatSessionTasks(session);
   const quotes = chatSessionQuotes(session);
   const latestRun = session?.customerId ? state.agentRuns.find((run) => run.customerId === session.customerId) : null;
-  const personal = normalizePersonalWechatState(state.personalWechat);
-  const gateway = personal.gateway || defaultPersonalWechatState.gateway;
+  const pendingJobs = session?.activeJobs || [];
+  const waitingConfirm = pendingJobs.filter((job) => job.status === "manual_required").length;
+  const waitingReadback = pendingJobs.filter((job) => ["sending", "sent", "sent_pending_confirm"].includes(job.status)).length;
   return `
     <aside class="chat-detail-panel">
       <section>
@@ -3788,12 +3971,12 @@ function renderChatSidePanel(session) {
         </section>
       ` : ""}
       <section>
-        <h3>连接状态</h3>
+        <h3>处理状态</h3>
         <div class="detail-list">
-          <div><span>最近来源</span><strong>${escapeHtml(session?.sourceLabel || "未知")}</strong></div>
-          <div><span>出站模式</span><strong>${escapeHtml(gateway.mode || "mock")}</strong></div>
-          <div><span>发送能力</span><strong>${gateway.mode === "sidecar" && gateway.canSend ? "可真实发送" : "不可真实发送"}</strong></div>
-          <div><span>回读确认</span><strong>${gateway.supportsConfirm ? "连接器声明支持" : "依赖自回显/存档回读"}</strong></div>
+          <div><span>客户绑定</span><strong>${escapeHtml(session?.bound ? "已绑定" : "待绑定")}</strong></div>
+          <div><span>待回复</span><strong>${escapeHtml(pendingJobs.length)}</strong></div>
+          <div><span>人工确认</span><strong>${escapeHtml(waitingConfirm)}</strong></div>
+          <div><span>回读确认</span><strong>${escapeHtml(waitingReadback)}</strong></div>
         </div>
       </section>
       <section>
@@ -3835,10 +4018,10 @@ function renderChatWorkbench() {
     activeChatSessionId = sessions[0]?.sessionId || "";
   }
   const activeSession = sessions.find((session) => session.sessionId === activeChatSessionId) || sessions[0];
-  const sources = ["全部真实", "企微会话存档", "企微机器人", "个人微信/Sidecar", "本地调试"];
+  const sources = ["全部真实", "本地调试"];
   const statuses = ["全部", "待绑定", "待回复", "高风险", "待回读", "发送失败"];
-  const gateway = normalizePersonalWechatState(state.personalWechat).gateway || defaultPersonalWechatState.gateway;
-  const canRealSend = gateway.mode === "sidecar" && gateway.canSend === true;
+  const realtimeWorker = state.wecomClientRealtime?.worker || {};
+  const canRealSend = realtimeWorker.canSend === true;
   return `
     <section class="panel chat-workbench-panel">
       <div class="panel-header">
@@ -3850,7 +4033,7 @@ function renderChatWorkbench() {
       <div class="chat-scope-strip">
         <span><strong>${escapeHtml(scope.label)}</strong></span>
         <span>当前范围 ${sessions.length}/${scopedSessions.length} 个会话</span>
-        <span>来源：企微会话存档 / 企微机器人 / 个人微信/Sidecar</span>
+        <span>自动回复先排队，高风险必须人工确认</span>
       </div>
       <div class="chat-workbench">
         <aside class="chat-list-panel">
@@ -3869,10 +4052,9 @@ function renderChatWorkbench() {
             <header class="chat-room-header">
               <div>
                 <h2>${escapeHtml(activeSession.title)}</h2>
-                <p>${escapeHtml(activeSession.sourceLabel)} · ${escapeHtml(activeSession.customerName)} · ${escapeHtml(activeSession.bound ? "已绑定" : "待绑定")}</p>
+                <p>${escapeHtml(activeSession.customerName)} · ${escapeHtml(activeSession.bound ? "已绑定" : "待绑定")}</p>
               </div>
               <div class="tag-list">
-                <span class="tag">${escapeHtml(activeSession.channel || "会话")}</span>
                 ${activeSession.needsReply ? `<span class="tag">待回复 ${escapeHtml(activeSession.activeJobs.length)}</span>` : ""}
                 ${activeSession.riskLevel === "high" ? `<span class="tag">高风险</span>` : ""}
                 ${(activeSession.activeJobs || []).some((job) => ["sending", "sent", "sent_pending_confirm"].includes(job.status)) ? `<span class="tag">待回读</span>` : ""}
@@ -3885,11 +4067,11 @@ function renderChatWorkbench() {
             <footer class="chat-composer">
               <textarea id="chatReplyText" placeholder="输入回复。低风险会进入发送队列，高风险会进入人工确认。"></textarea>
               <div class="chat-composer-actions">
-                <span>${activeSession.kind === "room" ? canRealSend ? "外部会话回复会进入SendScheduler，Sidecar发送后仍需回读确认。" : "真实出站未就绪，回复只会入队或进入人工确认，不会显示已发送。" : "本地调试会话回复会保存为触达草稿。"}</span>
-                <button class="primary-button" id="sendChatReply" data-chat-reply-session="${escapeHtml(activeSession.sessionId)}" type="button" ${actionAttrs(`chat-reply-${activeSession.sessionId}`)}>发送/入队</button>
+                <span>${activeSession.kind === "room" ? canRealSend ? "外部群回复会进入发送队列，完成后等待回读确认。" : "发送能力未就绪，回复只会排队或进入人工确认。" : "本地调试会话回复会保存为触达草稿。"}</span>
+                <button class="primary-button" id="sendChatReply" data-chat-reply-session="${escapeHtml(activeSession.sessionId)}" type="button" ${actionAttrs(`chat-reply-${activeSession.sessionId}`)}>发送回复</button>
               </div>
             </footer>
-          ` : renderEmptyState("暂无可处理会话", "先接入会话存档或写入本地消息。")}
+          ` : renderEmptyState("暂无可处理会话", "先接入测试企微实时消息。")}
         </main>
 
         ${activeSession ? renderChatSidePanel(activeSession) : `<aside class="chat-detail-panel">${renderEmptyState("暂无详情", "选择一个会话查看客户档案和队列。")}</aside>`}
@@ -3929,15 +4111,15 @@ function renderDraftCard(draft) {
       <div class="draft-content">${escapeHtml(draft.content)}</div>
       <div class="draft-meta">
         <span class="priority-pill ${priorityClass(draft.priority)}">${escapeHtml(draft.priority)}</span>
-        <span class="status-pill">${draft.externalSideEffects ? "已触发外部动作" : "未触发外部动作"}</span>
-        ${draft.wecomDelivery ? `<span class="status-pill">企微 ${escapeHtml(draft.wecomDelivery.routeName || "已发送")}</span>` : ""}
+        <span class="status-pill">${draft.externalSideEffects ? "已处理" : "待处理"}</span>
+        ${draft.wecomDelivery ? `<span class="status-pill">企微已发送</span>` : ""}
         <span class="muted">更新 ${escapeHtml(formatDateTime(draft.updatedAt || draft.createdAt))}</span>
       </div>
       ${draft.note ? `<div class="muted">${escapeHtml(draft.note)}</div>` : ""}
       <div class="split-actions">
         <button class="small-button" data-draft-copy="${escapeHtml(draft.id)}" ${actionAttrs(`draft-copy-${draft.id}`)} ${terminal ? "disabled" : ""}>复制文案</button>
         <button class="small-button" data-draft-status="${escapeHtml(draft.id)}" data-status="已确认" ${actionAttrs(`draft-confirm-${draft.id}`)} ${terminal || draft.status === "已确认" ? "disabled" : ""}>确认草稿</button>
-        <button class="small-button" data-draft-wecom-send="${escapeHtml(draft.id)}" ${actionAttrs(`draft-wecom-${draft.id}`)} ${draft.status === "已确认" && wecomReady ? "" : "disabled"}>发送企微测试群</button>
+        <button class="small-button" data-draft-wecom-send="${escapeHtml(draft.id)}" ${actionAttrs(`draft-wecom-${draft.id}`)} ${draft.status === "已确认" && wecomReady ? "" : "disabled"}>发送到企微</button>
         <button class="small-button" data-draft-status="${escapeHtml(draft.id)}" data-status="人工已处理" ${actionAttrs(`draft-complete-${draft.id}`)} ${terminal ? "disabled" : ""}>人工已处理</button>
         <button class="danger-button" data-draft-status="${escapeHtml(draft.id)}" data-status="已废弃" ${actionAttrs(`draft-discard-${draft.id}`)} ${terminal ? "disabled" : ""}>废弃</button>
       </div>
@@ -3954,7 +4136,7 @@ function renderDrafts() {
     <section class="grid four">
       ${cardKpi("全部草稿", drafts.length, "本地OutboundDraft")}
       ${cardKpi("待确认", drafts.filter((draft) => draft.status === "待确认").length, "需人工审核")}
-      ${cardKpi("企微已发送", drafts.filter((draft) => draft.status === "企微已发送").length, "测试群机器人真实发送")}
+      ${cardKpi("企微已发送", drafts.filter((draft) => draft.status === "企微已发送").length, "已确认发送记录")}
       ${cardKpi("待外部处理", drafts.filter((draft) => draft.externalSideEffects === false && !["人工已处理", "已废弃"].includes(draft.status)).length, "仍需确认或处理")}
     </section>
 
@@ -3962,7 +4144,7 @@ function renderDrafts() {
       <div class="panel-header">
         <div>
           <h2 class="panel-title">草稿执行边界</h2>
-          <p class="panel-subtitle">确认草稿后可以发送到已配置的企微测试群机器人；短信、电话外呼、企微私聊和CRM仍不会自动执行，需要人工或后续执行器处理。</p>
+          <p class="panel-subtitle">确认草稿后可以交给已配置的企微发送通道；短信、电话外呼和CRM仍不会自动执行，需要人工或后续执行器处理。</p>
         </div>
       </div>
     </section>
@@ -3991,13 +4173,13 @@ function renderDrafts() {
         <div class="panel-header">
           <div>
           <h2 class="panel-title">草稿使用方式</h2>
-          <p class="panel-subtitle">Agent生成草稿后，需要人工判断是否可用；企微测试群发送会真实调用Webhook并写入发送日志。</p>
+          <p class="panel-subtitle">Agent生成草稿后，需要人工判断是否可用；企微发送会写入发送记录。</p>
           </div>
         </div>
         <div class="flow-row" style="grid-template-columns:1fr">
           <div class="flow-node"><strong>生成</strong><span>运行本地Agent或手工新增，草稿写入客户事件和审计。</span></div>
           <div class="flow-node"><strong>确认</strong><span>确认只表示本地审核通过，不表示已触达客户。</span></div>
-          <div class="flow-node"><strong>发送/处理</strong><span>可发送企微测试群，其他渠道由人工去真实系统执行后标记处理。</span></div>
+          <div class="flow-node"><strong>发送/处理</strong><span>可交给企微发送通道，其他渠道由人工去真实系统执行后标记处理。</span></div>
         </div>
       </article>
     </section>
@@ -4434,6 +4616,10 @@ function render() {
   });
   const map = {
     overview: renderOverview,
+    telemarketingOps: renderTelemarketingOps,
+    salesOps: renderSalesOps,
+    vipOps: renderVipOps,
+    settingsHub: renderSettingsHub,
     journey: renderJourney,
     customers: renderCustomers,
     chat: renderChatWorkbench,
@@ -4542,7 +4728,7 @@ async function runWorkflow() {
 function showWecomMutationResult(nextState, successMessage) {
   const log = (nextState.wecomLogs || [])[0];
   if (log?.status === "失败") {
-    showToast(`企微操作失败：${log.error || "请检查配置和Webhook"}`);
+    showToast(`企微操作失败：${log.error || "请检查配置和发送地址"}`);
     return;
   }
   showToast(successMessage);
@@ -4711,33 +4897,6 @@ document.addEventListener("click", (event) => {
     selectedScenario = scenarios[scenarioButton.dataset.scenario];
     const textarea = document.querySelector("#scenarioText");
     if (textarea) textarea.value = selectedScenario;
-    return;
-  }
-  const channelScenarioButton = event.target.closest("[data-channel-scenario]");
-  if (channelScenarioButton) {
-    selectedScenario = scenarios[channelScenarioButton.dataset.channelScenario];
-    const textarea = document.querySelector("#channelMessage");
-    if (textarea) textarea.value = selectedScenario;
-    return;
-  }
-  if (event.target.closest("#ingestMessage")) {
-    const customer = selectedCustomer();
-    if (!customer) {
-      showToast("请先新增客户或重置本地样例数据");
-      return;
-    }
-    const channel = document.querySelector("#channelType")?.value || "电销模拟私聊";
-    const message = document.querySelector("#channelMessage")?.value || selectedScenario;
-    const senderRole = document.querySelector("#senderRole")?.value || "客户";
-    const senderName = document.querySelector("#senderName")?.value || customer.contact || customer.name;
-    void withBusy("ingest-message", async () => {
-      try {
-        const nextState = await api.ingestMessage(customer.id, channel, message, { senderRole, senderName });
-        setState(nextState, "渠道消息已入站");
-      } catch (error) {
-        showToast(`消息入站失败：${error.message}`);
-      }
-    });
     return;
   }
   const agentButton = event.target.closest("[data-agent]");
@@ -4931,31 +5090,31 @@ document.addEventListener("click", (event) => {
     jumpToSection(jumpTarget.dataset.jumpWecomSection);
     return;
   }
+  const genericJumpTarget = event.target.closest("[data-jump-section]");
+  if (genericJumpTarget) {
+    jumpToSection(genericJumpTarget.dataset.jumpSection);
+    return;
+  }
   if (event.target.closest("#checkWecomArchiveSidecar")) {
     void withBusy("wecom-archive-check", async () => {
       try {
         const result = await api.checkWecomArchiveSidecar();
         if (result.state) setState(result.state);
-        showToast(result.ok ? "会话存档Sidecar检查通过" : `会话存档Sidecar检查未通过：${(result.missing || []).join("、") || result.error || "请查看状态"}`);
+        showToast(result.ok ? "历史留档检查通过" : `历史留档检查未通过：${(result.missing || []).join("、") || result.error || "请查看状态"}`);
       } catch (error) {
-        showToast(`会话存档Sidecar检查失败：${error.message}`);
+        showToast(`历史留档检查失败：${error.message}`);
       }
     });
     return;
   }
-  if (event.target.closest("#checkPersonalWechatGateway") || event.target.closest("#checkPersonalWechatGatewayInline")) {
-    void withBusy("personal-wechat-gateway-check", async () => {
+  if (event.target.closest("#checkWecomClientRealtimeWorker")) {
+    void withBusy("wecom-client-worker-check", async () => {
       try {
-        const result = await api.checkPersonalWechatGateway();
+        const result = await api.checkWecomClientRealtimeWorker();
         if (result.state) setState(result.state);
-        const message = result.ok
-          ? "个人微信连接器已就绪"
-          : result.mode === "mock"
-            ? "当前是Mock本地演练，未接入真实个人微信；请切换为真实连接器接入并填写连接器URL。"
-            : `个人微信连接器未就绪：${(result.missing || []).join("、") || result.error || result.nextStep || "请查看状态"}`;
-        showToast(message);
+        showToast(result.ok ? "本地企微脚本已就绪" : `本地企微脚本未就绪：${(result.missing || []).join("、") || result.error || result.nextStep || "请查看状态"}`);
       } catch (error) {
-        showToast(`个人微信连接器检查失败：${error.message}`);
+        showToast(`检查本地企微脚本失败：${error.message}`);
       }
     });
     return;
@@ -5029,7 +5188,7 @@ document.addEventListener("click", (event) => {
     void withBusy(`pwx-approve-${jobId}`, async () => {
       try {
         const nextState = await api.approvePersonalWechatSendJob(jobId);
-        setState(nextState, "高风险回复已人工放行，等待发送调度");
+        setState(nextState, "企微高风险回复已人工放行，等待发送调度");
       } catch (error) {
         showToast(`人工放行失败：${error.message}`);
       }
@@ -5045,16 +5204,16 @@ document.addEventListener("click", (event) => {
         const nextJob = nextState.personalWechat?.sendJobs?.find((item) => item.jobId === jobId);
         setState(nextState);
         if (nextJob?.status === "confirmed") {
-          showToast("个人微信发送已确认回显");
+          showToast("企微发送已回读确认");
         } else if (nextJob?.status === "cancelled") {
-          showToast(nextJob.error || "个人微信发送任务已取消");
+          showToast(nextJob.error || "企微发送任务已取消");
         } else if (nextJob?.error) {
           showToast(nextJob.error);
         } else {
-          showToast("个人微信发送任务已更新");
+          showToast("企微发送任务已更新");
         }
       } catch (error) {
-        showToast(`个人微信发送确认失败：${error.message}`);
+        showToast(`企微发送确认失败：${error.message}`);
       }
     });
     return;
@@ -5064,8 +5223,8 @@ document.addEventListener("click", (event) => {
     const jobId = personalWechatFailButton.dataset.personalWechatFailJob;
     void withBusy(`pwx-fail-${jobId}`, async () => {
       try {
-        const nextState = await api.failPersonalWechatSendJob(jobId, { error: "模拟Gateway发送失败，等待退避或人工接管。" });
-        setState(nextState, "个人微信发送任务已标记失败");
+        const nextState = await api.failPersonalWechatSendJob(jobId, { error: "本地Gateway发送失败，等待退避或人工接管。" });
+        setState(nextState, "企微发送任务已标记失败");
       } catch (error) {
         showToast(`标记发送失败失败：${error.message}`);
       }
@@ -5083,77 +5242,6 @@ document.addEventListener("click", (event) => {
       }
     });
     return;
-  }
-  if (event.target.closest("#ingestPersonalWechatMessage")) {
-    const customerId = document.querySelector("#personalWechatInboundCustomer")?.value || state.selectedCustomerId;
-    const roomId = document.querySelector("#personalWechatRoomId")?.value || `pwx_room_${customerId || "default"}`;
-    const roomName = document.querySelector("#personalWechatRoomName")?.value || "个人微信外部群";
-    const senderType = document.querySelector("#personalWechatSenderType")?.value || "customer";
-    const senderName = document.querySelector("#personalWechatSenderName")?.value || "";
-    const text = document.querySelector("#personalWechatInboundText")?.value || "";
-    const messageId = document.querySelector("#personalWechatMessageId")?.value || `pwx_${roomId}_${Date.now()}`;
-    void withBusy("personal-wechat-inbound", async () => {
-      try {
-        const nextState = await api.ingestPersonalWechatMessage({
-          customerId,
-          roomId,
-          roomName,
-          senderType,
-          senderName,
-          msgType: "text",
-          text,
-          messageId
-        });
-        setState(nextState, "个人微信外部群消息已写入");
-      } catch (error) {
-        showToast(`个人微信入站失败：${error.message}`);
-      }
-    });
-    return;
-  }
-  if (event.target.closest("#ingestWecomArchiveMessage")) {
-    const customerId = document.querySelector("#wecomArchiveInboundCustomer")?.value || state.selectedCustomerId;
-    const roomId = document.querySelector("#wecomArchiveRoomId")?.value || `archive_room_${customerId || "default"}`;
-    const roomName = document.querySelector("#wecomArchiveRoomName")?.value || "企微外部群";
-    const senderType = document.querySelector("#wecomArchiveSenderType")?.value || "customer";
-    const senderName = document.querySelector("#wecomArchiveSenderName")?.value || "";
-    const text = document.querySelector("#wecomArchiveInboundText")?.value || "";
-    const messageId = document.querySelector("#wecomArchiveMessageId")?.value || `archive_${roomId}_${Date.now()}`;
-    void withBusy("wecom-archive-inbound", async () => {
-      try {
-        const nextState = await api.ingestWecomArchiveMessage({
-          customerId,
-          roomId,
-          roomName,
-          senderType,
-          senderName,
-          msgType: "text",
-          text,
-          messageId
-        });
-        setState(nextState, "企微会话存档消息已写入");
-      } catch (error) {
-        showToast(`会话存档入站失败：${error.message}`);
-      }
-    });
-    return;
-  }
-  if (event.target.closest("#ingestWecomMessage")) {
-    const customerId = document.querySelector("#wecomInboundCustomer")?.value || state.selectedCustomerId;
-    const channel = document.querySelector("#wecomInboundChannel")?.value || "VIP群";
-    const senderRole = document.querySelector("#wecomInboundRole")?.value || "客户";
-    const senderName = document.querySelector("#wecomInboundSender")?.value || "";
-    const message = document.querySelector("#wecomInboundMessage")?.value || "";
-    const chatId = document.querySelector("#wecomInboundChatId")?.value || "";
-    const externalMessageId = document.querySelector("#wecomInboundMessageId")?.value || (chatId ? `mock_${chatId}_${Date.now()}` : "");
-    void withBusy("wecom-inbound", async () => {
-      try {
-        const nextState = await api.ingestWecomMessage({ customerId, channel, senderRole, senderName, message, chatId, externalMessageId, source: chatId ? "local-chatid-simulator" : "local-simulator" });
-        setState(nextState, "企微模拟入站已写入");
-      } catch (error) {
-        showToast(`企微入站失败：${error.message}`);
-      }
-    });
   }
 });
 
@@ -5390,14 +5478,14 @@ document.addEventListener("submit", (event) => {
     });
     return;
   }
-  if (event.target.id === "personalWechatConfigForm") {
+  if (event.target.id === "wecomRealtimeConfigForm") {
     event.preventDefault();
-    void withBusy("save-personal-wechat-config", async () => {
+    void withBusy("save-wecom-realtime-config", async () => {
       try {
-        const nextState = await api.updatePersonalWechatConfig(personalWechatConfigPayload(event.target));
-        setState(nextState, "个人微信配置已保存");
+        const nextState = await api.updateWecomClientRealtimeConfig(wecomRealtimeConfigPayload(event.target));
+        setState(nextState, "企微实时收发配置已保存");
       } catch (error) {
-        showToast(`保存个人微信配置失败：${error.message}`);
+        showToast(`保存企微实时收发配置失败：${error.message}`);
       }
     });
     return;

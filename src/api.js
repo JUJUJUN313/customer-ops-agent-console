@@ -64,6 +64,9 @@ export const api = {
   personalWechatConfig() {
     return request("/api/personal-wechat/config");
   },
+  wecomClientRealtimeConfig() {
+    return request("/api/wecom-client/realtime/config");
+  },
   outboundDrafts() {
     return request("/api/outbound-drafts");
   },
@@ -99,6 +102,9 @@ export const api = {
   },
   checkPersonalWechatGateway() {
     return request("/api/personal-wechat/gateway/check", { method: "POST" });
+  },
+  checkWecomClientRealtimeWorker() {
+    return request("/api/wecom-client/realtime/worker/check", { method: "POST" });
   },
   updateWecomGroupBinding(payload) {
     return request("/api/wecom/group-bindings", {
@@ -142,6 +148,18 @@ export const api = {
       body: JSON.stringify(payload)
     });
   },
+  updateWecomClientRealtimeConfig(payload) {
+    return request("/api/wecom-client/realtime/config", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  updateWecomClientRealtimeStatus(payload) {
+    return request("/api/wecom-client/realtime/status", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
   updatePersonalWechatGatewayStatus(payload) {
     return request("/api/personal-wechat/gateway/status", {
       method: "POST",
@@ -150,6 +168,18 @@ export const api = {
   },
   ingestPersonalWechatMessage(payload) {
     return request("/api/personal-wechat/inbound", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  ingestWecomClientRealtimeMessage(payload) {
+    return request("/api/wecom-client/realtime/inbound", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  ingestWecomClientRealtimeMessages(payload) {
+    return request("/api/wecom-client/realtime/inbound-batch", {
       method: "POST",
       body: JSON.stringify(payload)
     });
@@ -174,6 +204,18 @@ export const api = {
   },
   runPersonalWechatScheduler(payload = {}) {
     return request("/api/personal-wechat/send-scheduler/run", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  runWecomClientRealtimeScheduler(payload = {}) {
+    return request("/api/wecom-client/realtime/send-scheduler/run", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  reconcileWecomClientArchive(payload = {}) {
+    return request("/api/wecom-client/realtime/reconcile", {
       method: "POST",
       body: JSON.stringify(payload)
     });

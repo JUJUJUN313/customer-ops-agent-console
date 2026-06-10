@@ -23,69 +23,52 @@
           </button>
           <div class="nav-subitems expanded" data-nav-panel="overview">
             <button class="nav-item active" data-view="overview" data-nav-group="overview"><span class="nav-dot"></span>运营总览</button>
-            <button class="nav-item" data-view="workflow" data-nav-group="overview"><span class="nav-dot"></span>闭环编排</button>
-          </div>
-
-          <button class="nav-group" data-nav-group="customer">
-            <span>客户管理</span>
-            <span class="nav-chevron">›</span>
-          </button>
-          <div class="nav-subitems" data-nav-panel="customer">
-            <button class="nav-item" data-view="journey" data-nav-group="customer"><span class="nav-dot"></span>客户旅程</button>
-            <button class="nav-item" data-view="customers" data-nav-group="customer" data-nav-preset="allCustomers"><span class="nav-dot"></span>客户档案</button>
           </div>
 
           <button class="nav-group" data-nav-group="telemarketing">
-            <span>电销管理</span>
+            <span>电销运营</span>
             <span class="nav-chevron">›</span>
           </button>
           <div class="nav-subitems" data-nav-panel="telemarketing">
-            <button class="nav-item" data-view="customers" data-nav-group="telemarketing" data-nav-preset="telemarketingCustomers"><span class="nav-dot"></span>电销客户池</button>
-            <button class="nav-item" data-view="chat" data-nav-group="telemarketing" data-nav-preset="telemarketingChat"><span class="nav-dot"></span>电销会话</button>
-            <button class="nav-item" data-view="channels" data-nav-group="telemarketing"><span class="nav-dot"></span>电销消息</button>
-            <button class="nav-item" data-view="tasks" data-nav-group="telemarketing" data-nav-preset="telemarketingTasks"><span class="nav-dot"></span>电销任务</button>
+            <button class="nav-item" data-view="telemarketingOps" data-nav-group="telemarketing" data-nav-preset="telemarketingCustomers"><span class="nav-dot"></span>分析与群发</button>
           </div>
 
           <button class="nav-group" data-nav-group="sales">
-            <span>销售管理</span>
+            <span>销售运营</span>
             <span class="nav-chevron">›</span>
           </button>
           <div class="nav-subitems" data-nav-panel="sales">
-            <button class="nav-item" data-view="customers" data-nav-group="sales" data-nav-preset="salesCustomers"><span class="nav-dot"></span>销售客户</button>
-            <button class="nav-item" data-view="agents" data-nav-group="sales"><span class="nav-dot"></span>销售Agent</button>
-            <button class="nav-item" data-view="chat" data-nav-group="sales" data-nav-preset="salesChat"><span class="nav-dot"></span>销售会话</button>
-            <button class="nav-item" data-view="learning" data-nav-group="sales"><span class="nav-dot"></span>销售学习</button>
-            <button class="nav-item" data-view="tasks" data-nav-group="sales" data-nav-preset="salesTasks"><span class="nav-dot"></span>销售任务</button>
+            <button class="nav-item" data-view="salesOps" data-nav-group="sales" data-nav-preset="salesTasks"><span class="nav-dot"></span>任务与推荐</button>
           </div>
 
           <button class="nav-group" data-nav-group="groupchat">
-            <span>VIP群管理</span>
+            <span>VIP群维护</span>
             <span class="nav-chevron">›</span>
           </button>
           <div class="nav-subitems" data-nav-panel="groupchat">
-            <button class="nav-item" data-view="customers" data-nav-group="groupchat" data-nav-preset="vipCustomers"><span class="nav-dot"></span>VIP客户</button>
-            <button class="nav-item" data-view="chat" data-nav-group="groupchat" data-nav-preset="vipChat"><span class="nav-dot"></span>VIP会话</button>
-            <button class="nav-item" data-view="quotes" data-nav-group="groupchat" data-nav-preset="vipQuotes"><span class="nav-dot"></span>报价订阅</button>
-            <button class="nav-item" data-view="drafts" data-nav-group="groupchat" data-nav-preset="vipDrafts"><span class="nav-dot"></span>群触达草稿</button>
-            <button class="nav-item" data-view="tasks" data-nav-group="groupchat" data-nav-preset="vipTasks"><span class="nav-dot"></span>群聊任务</button>
+            <button class="nav-item" data-view="vipOps" data-nav-group="groupchat" data-nav-preset="vipTasks"><span class="nav-dot"></span>实时维护</button>
+          </div>
+
+          <button class="nav-group" data-nav-group="customer">
+            <span>客户档案</span>
+            <span class="nav-chevron">›</span>
+          </button>
+          <div class="nav-subitems" data-nav-panel="customer">
+            <button class="nav-item" data-view="customers" data-nav-group="customer" data-nav-preset="allCustomers"><span class="nav-dot"></span>全量客户</button>
           </div>
 
           <button class="nav-group" data-nav-group="settings">
-            <span>设置</span>
+            <span>系统设置</span>
             <span class="nav-chevron">›</span>
           </button>
           <div class="nav-subitems" data-nav-panel="settings">
-            <button class="nav-item" data-view="modelConfig" data-nav-group="settings"><span class="nav-dot"></span>模型配置</button>
-            <button class="nav-item" data-view="wecom" data-nav-group="settings"><span class="nav-dot"></span>企微接入</button>
-            <button class="nav-item" data-view="channels" data-nav-group="settings" data-nav-preset="settingsChannels"><span class="nav-dot"></span>消息入站</button>
-            <button class="nav-item" data-view="templates" data-nav-group="settings"><span class="nav-dot"></span>模板与风控</button>
-            <button class="nav-item" data-view="system" data-nav-group="settings"><span class="nav-dot"></span>系统自检</button>
+            <button class="nav-item" data-view="settingsHub" data-nav-group="settings"><span class="nav-dot"></span>业务配置</button>
           </div>
         </nav>
         <div class="sidebar-note">
-          <span class="note-label">运行模式</span>
-          <strong>本地运行 + 企微真实接入准备</strong>
-          <span>客户、任务、报价和审计真实写入本地；企微读取走会话存档/机器人，出站只认Sidecar能力。</span>
+          <span class="note-label">当前版本</span>
+          <strong>三线运营工作台</strong>
+          <span>电销做分层群发，销售做优先级任务，VIP群做实时维护。</span>
         </div>
       </aside>
 

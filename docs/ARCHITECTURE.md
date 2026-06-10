@@ -12,6 +12,8 @@ flowchart TB
   WeComClient["企微群机器人客户端<br/>src/wecomClient.js"]
   WeComArchive["企微会话内容存档Gateway<br/>scripts/wecom-archive-gateway.mjs"]
   Sidecar["SDK/协议Sidecar<br/>拉取/解密/登录态/CDN"]
+  WeComRealtime["企微客户端实时未读Worker<br/>scripts/wecom-client-realtime-worker.mjs"]
+  LocalWeCom["本地企微客户端脚本<br/>未读识别/标题校验/粘贴发送"]
   WeComBridge["企微智能机器人长连接<br/>scripts/wecom-aibot-bridge.mjs"]
   PersonalWechat["个人微信AccountAgent<br/>/api/personal-wechat/*"]
   PersonalGateway["个人微信Sidecar Gateway<br/>scripts/personal-wechat-send-gateway.mjs"]
@@ -28,6 +30,9 @@ flowchart TB
   WeComArchive --> Sidecar
   Sidecar --> WeComArchive
   WeComArchive --> API
+  WeComRealtime --> LocalWeCom
+  LocalWeCom --> WeComRealtime
+  WeComRealtime --> API
   Actions --> Chat
   Actions --> PersonalWechat
   Actions --> Scheduler
@@ -50,8 +55,9 @@ flowchart TB
 - `SalesSample`：销售话术样本，记录场景、阶段、卡种、异议、结果、质检分和可复用话术。
 - `OutboundDraft`：本地触达草稿，保存客户、渠道、来源Agent、文案、优先级、状态和外部副作用边界。
 - `ModelConfig`：模型连接配置对象，包含全局LLM API URL/API Key/模型名、ASR/TTS语音模型和各Agent独立LLM覆盖；Agent覆盖为空时继承全局配置。
-- `WeComConfig`：企微连接配置，保存会话内容存档企业ID、Secret、私钥、私钥版本、Sidecar地址、测试群机器人Webhook发送路由、智能机器人 Bot ID/Secret、长连接状态、默认入站渠道和本地入站设置。前端公开状态只返回是否配置和掩码。
+- `WeComConfig`：企微连接配置，保存会话内容存档企业ID、Secret、私钥、私钥版本、Sidecar地址、测试群机器人Webhook发送路由、智能机器人 Bot ID/Secret和长连接状态；本地入站设置仅保留内部兼容。前端公开状态只返回是否配置和掩码。
 - `WeComArchive`：会话内容存档Gateway入口，保存启用状态、读取游标、seq、轮询间隔、单次上限、Sidecar状态、最近拉取时间、最近消息时间和错误；真实SDK/协议拉取和解密在Sidecar完成，本系统只接收标准化消息。
+- `WeComClientRealtime`：企微客户端实时未读连接器配置，保存Monitor轮询状态、Worker URL/端点/能力声明、企微员工账号、服务商历史下载补账状态和结构化日志；不保存截图、录屏或大体积证据文件。
 - `WeComBinding`：企微群绑定表，按 `chatid` 记录群名、客户档案、业务渠道、消息数、最近消息和绑定状态；未知群首次入站会生成待绑定客户群档案，避免不同客户群消息混档。
 - `WeComLog`：企微测试发送、草稿发送、智能机器人入站、桥接状态和去重记录，包含成功/失败、路由、客户、草稿、`chatid`、`msgid`、耗时、错误和是否触发外部发送。
 - `PersonalWechat`：个人微信单账号 AccountAgent 配置，保存账号、Gateway模式、群上下文、回复决策、发送队列和运行日志；当前支持本地 Mock 和 Sidecar 出站骨架。
@@ -65,7 +71,7 @@ flowchart TB
 
 ## 前端展示原则
 
-前端控制台面向销售、运营和本地测试人员，不要求业务用户理解代码或 JSON。`AgentRun` 原始结果只作为内部状态保存；总览、Agent控制台、销售学习和本地消息页会把结果转换为客户判断、建议动作、话术草稿、推荐报价、触达草稿、任务和执行边界等业务化卡片。
+前端控制台面向销售、运营和本地测试人员，不要求业务用户理解代码或 JSON。`AgentRun` 原始结果只作为内部状态保存；总览、Agent控制台和销售学习页会把结果转换为客户判断、建议动作、话术草稿、推荐报价、触达草稿、任务和执行边界等业务化卡片。
 
 总览系统蓝图由页面内结构化流程图渲染，明确展示客户池、电销筛选、培育沉淀、销售承接、VIP维护、数据回流，以及客户档案、任务中心、触达草稿、报价库和模型配置等共享底座。
 
@@ -103,23 +109,64 @@ flowchart TB
 - 触达草稿生成：面向明确客户的Agent运行会把可执行文案写入 `OutboundDraft`；人工也可新增草稿。草稿确认、复制、处理和废弃只更新本地状态，不触发外部发送。
 - 企微草稿发送：只有 `已确认` 草稿可以调用 `/api/outbound-drafts/:draftId/send-wecom`。成功后草稿状态更新为 `企微已发送`，`externalSideEffects=true`，写入 `wecomDelivery`、客户事件、`WeComLog` 和审计。普通草稿状态接口不能伪造 `企微已发送`。
 - 企微长连接入站：`scripts/wecom-aibot-bridge.mjs` 使用 `@wecom/aibot-node-sdk` 连接 `wss://openws.work.weixin.qq.com`，认证成功后监听企微智能机器人消息，把 `chatid`、`msgid`、`req_id`、发送人和文本内容写入 `/api/wecom/inbound`。
-- 企微入站适配：`/api/wecom/inbound` 同时支持本地模拟和长连接真实入站。系统先按 `externalMessageId/msgid` 去重，再按 `chatid` 查找群绑定；未知群自动生成待绑定档案，之后写入本地 `Conversation` 并路由到电销、销售或VIP Agent。
+- 企微入站适配：`/api/wecom/inbound` 保留研发/旧长连接兼容能力，业务界面不再提供模拟写入入口。系统先按 `externalMessageId/msgid` 去重，再按 `chatid` 查找群绑定；未知群自动生成待绑定档案，之后写入会话并路由到电销、销售或VIP Agent。日常验证优先走测试企微实时Worker。
 - 企微会话存档入站：`/api/wecom/archive/inbound` 是生产主读取入口，接收Sidecar拉取、解密后的标准化消息。系统按 `messageId` 去重，回写存档游标，再复用AccountAgent的群上下文、风控和发送调度链路；非文本消息以占位内容入站并生成客服任务。
 - 企微会话存档Gateway：`scripts/wecom-archive-gateway.mjs` 读取本地真实密钥，调用 `archive.sidecarUrl/pull` 获取已解密消息，再逐条写入 `/api/wecom/archive/inbound`。写入成功后调用 `archive.sidecarUrl/ack` 回写已处理 `cursor/seq/messageIds`；Gateway通过 `/api/wecom/archive/status` 回写连接、游标、seq、ACK、错误和可信状态。
 - 会话存档健康检查：`/api/wecom/archive/check-sidecar` 只检查本地配置完整度并访问 `archive.sidecarUrl/health`，不会把会话存档Secret或RSA私钥发送给检查接口；Sidecar不可达或未声明可拉取/可解密能力时写入检查失败。
-- 业务会话工作台：`GET /api/chat/sessions` 和 `GET /api/chat/sessions/:sessionId` 从现有状态投影会话；默认只展示企微会话存档、企微智能机器人和个人微信/Sidecar真实来源，本地模拟只在调试筛选中查看。`POST /api/chat/sessions/:sessionId/reply` 在外部群中生成发送任务，本地会话只生成草稿；`POST /api/chat/sessions/:sessionId/bind-customer` 把未绑定外部群绑定到客户档案。API保持统一，前端入口负责电销、销售、VIP业务范围隔离。
+- 企微客户端实时未读：`/api/wecom-client/realtime/inbound` 和 `/api/wecom-client/realtime/inbound-batch` 接收本地企微客户端脚本识别到的未读外部群消息，来源固定为 `wecom-client-realtime`。Worker 优先使用批量接口一次写入当前会话的新消息；单条失败不会阻断其他消息，只有成功项会 ACK。本地脚本只负责读取并回传，会按 `cursor/knownMessageIds/ACK` 批量返回当前会话里系统未处理的新消息，响应包含 `readBatchId/visibleMessageIds/returnedMessageCount`；语音、图片、文件等非文本可见项先以占位消息入站。系统按 `roomId` 维护 `roomVersion/quietUntilAt/latestReadBatchId`，连续客户消息先在系统态合并，静默窗口到期前不会下发企微发送动作。
+- 企微客户端Worker：`scripts/wecom-client-realtime-worker.mjs` 读取 `/api/wecom-client/realtime/config`，访问本地脚本 `/health` 获取 `canReceive/canSend/supportsAck/loginStatus`。`canReceive=true` 时调用 `/messages` 拉取未读消息并批量写入实时入站，调用前带上系统已记录的 `knownMessageIds`，成功后按本地脚本声明调用 `/ack` 回写 `messages[{messageId,roomId}]/messageIds/cursor`；本地脚本按群持久化 ACK 游标，脚本重启后仍能过滤已处理消息，避免跨群 cursor 干扰。`canSend=true` 时只处理 SendScheduler 已判定为 `sending` 的任务并调用 `/send`。发送任务会携带触发时的会话版本、最新消息和 `triggerReadBatchId`；调度前若发现任务版本落后、静默未结束或员工已接管，系统侧直接取消/跳过，不占用企微窗口。Worker 在调用本地 `/send` 前还会重新拉取队列状态做最终预检，确认任务仍为 `sending`、`roomVersion` 未变化、静默窗口已过且没有员工新回复；本地 `/send` 进入目标会话后会再次快读尾部消息，若发现最新消息不再匹配 `triggerLatestMessageId`，会返回 `aborted_new_messages`，Worker 先入站并 ACK，再取消旧任务等待系统重新判断。发送命令带 `noScreenshot=true`，结果只通过结构化状态和错误码回写。
+- 历史下载补账：服务商后台下载历史消息继续作为基础留档和最终审计事实；补账脚本调用 `/api/wecom-client/realtime/reconcile` 确认已发送任务。实时响应链路不依赖历史下载完成。
+- 业务会话工作台：`GET /api/chat/sessions` 和 `GET /api/chat/sessions/:sessionId` 从现有状态投影会话；默认面向企微实时、企微会话存档和企微智能机器人来源。`POST /api/chat/sessions/:sessionId/reply` 在外部群中生成发送任务，内部调试会话只生成草稿；`POST /api/chat/sessions/:sessionId/bind-customer` 把未绑定外部群绑定到客户档案。API保持统一，前端入口负责电销、销售、VIP业务范围隔离。
 - 个人微信单账号入站：`/api/personal-wechat/inbound` 接收 PersonalWechatGateway 标准化后的外部群消息。系统按 `messageId` 去重，按 `roomId` 更新 `PersonalWechatGroupContext`，连续客户消息会合并到同一个活跃发送任务；低风险内容进入 `queued`，高风险内容进入 `manual_required`，员工或托管号消息会取消同群待发。
-- SendScheduler：`/api/personal-wechat/send-scheduler/run` 扫描 `queued` 任务，执行同群FIFO、账号并发 `concurrency`、最小发送间隔、分钟发送上限、队列过期重判、Gateway能力声明和失败退避。Mock模式通过后任务变为 `sent_pending_confirm`，只用于本地演练；Sidecar模式必须 `canSend=true` 才会变为 `sending`，等待外部Gateway提交发送。
+- SendScheduler：`/api/personal-wechat/send-scheduler/run` 扫描 `queued` 任务，执行同群FIFO、账号并发 `concurrency`、静默窗口、任务版本、最小发送间隔、分钟发送上限、队列过期重判、Gateway能力声明和失败退避。Mock模式通过后任务变为 `sent_pending_confirm`，只用于本地演练；Sidecar模式必须 `canSend=true` 且系统态预检通过，才会变为 `sending`，等待外部Gateway提交发送。
 - 高风险人工放行：`/api/personal-wechat/send-jobs/:jobId/approve` 只允许把 `manual_required` 任务放回 `queued`，放行动作本身不触发发送。
 - 个人微信Sidecar Gateway：`scripts/personal-wechat-send-gateway.mjs` 读取 `/api/personal-wechat/config`，先检查 `gateway.sidecarUrl/health`。`canReceive=true` 时调用 `receiveEndpoint` 拉取标准消息，写入 `/api/personal-wechat/inbound`，成功后调用 `ackEndpoint` 回写游标；`canSend=true` 时处理 `sending` 任务并调用 `sendEndpoint`。外部发送成功后调用 `/api/personal-wechat/send-jobs/:jobId/dispatched`，失败后调用 `fail`，下一轮拉到自回显或 `confirmations` 后调用 `confirm`。
 - 个人微信Gateway健康检查：`/api/personal-wechat/gateway/check` 区分 `mock`、`sidecar` 和 `disabled` 模式；Mock模式记录本地演练且 `canSend=false/canReceive=false`，Sidecar模式访问 `gateway.sidecarUrl/health` 并读取 `canReceive/canSend/sendMode/supportsAck/supportsConfirm/supportsRecall/loginStatus`，停用模式写入明确不可用状态。该检查不拉取消息、不触发外部发送，也不携带客户消息正文。
-- 个人微信发送确认：`/api/personal-wechat/send-jobs/:jobId/confirm` 当前模拟发送成功后的自回显或企微存档回读确认。该接口不能确认 `queued/manual_required` 任务；通过后把 `PersonalWechatSendJob` 标记为 `confirmed`，并写入本地 `VIP模拟群` 会话、客户事件和运行日志。生产接入真实 Gateway 后，仍复用这条确认闭环。
+- 个人微信发送确认：`/api/personal-wechat/send-jobs/:jobId/confirm` 用于发送成功后的自回显或企微存档回读确认。该接口不能确认 `queued/manual_required` 任务；通过后把 `PersonalWechatSendJob` 标记为 `confirmed`，并写入VIP群会话、客户事件和运行日志。生产接入真实 Gateway 后，仍复用这条确认闭环。
 - 个人微信发送失败：`/api/personal-wechat/send-jobs/:jobId/fail` 记录真实Gateway失败回调或本地模拟失败，写入 `failed/retryAfterAt`、账号错误、日志和审计。
+
+## 企微实时收发流程
+
+```mermaid
+flowchart TD
+  Start["常驻 Worker 单轮开始"] --> Health["检查本地 /health<br/>canReceive/canSend/锁屏状态"]
+  Health --> Unread["/messages unreadOnly=true<br/>选择下一个未读会话"]
+  Unread --> HasUnread{"读到业务会话新消息?"}
+  HasUnread -- 是 --> Inbound["/api/wecom-client/realtime/inbound-batch<br/>批量入站"]
+  Inbound --> Ack["/ack<br/>写回 messageIds/cursor"]
+  HasUnread -- 否 --> Peek
+  Ack --> Watch{"当前仍停留业务会话<br/>且无下一任务?"}
+  Watch -- 是 --> CurrentRead["/messages currentOnly=true<br/>每1秒快读当前会话新增消息"]
+  CurrentRead --> MoreNew{"有新增消息?"}
+  MoreNew -- 是 --> Inbound
+  MoreNew -- 否 --> Peek["/send-scheduler/peek<br/>非变更式任务预览"]
+  Watch -- 否 --> Peek
+  Peek --> HasTask{"有可执行发送任务?"}
+  HasTask -- 否 --> IdleMaybe["无动作则不复位<br/>有读/发动作后 /idle"]
+  HasTask -- 是 --> Scheduler["/send-scheduler/run<br/>静默/版本/员工/FIFO/限频"]
+  Scheduler --> SendJob["sending SendJob<br/>携带 triggerLatestMessageId/Text"]
+  SendJob --> LocalSend["/send 搜索目标会话<br/>标题校验"]
+  LocalSend --> PreGuard["发送前快读尾部3条<br/>校验最新消息"]
+  PreGuard --> GuardOk{"最新消息仍匹配触发消息?"}
+  GuardOk -- 是 --> PasteSend["fast_path输入框<br/>粘贴并 Enter 发送"]
+  PasteSend --> Dispatch["/dispatched<br/>sent_pending_confirm"]
+  GuardOk -- 否: 发现新消息 --> GuardInbound["返回 aborted_new_messages<br/>Worker先入站并ACK"]
+  GuardInbound --> CancelOld["旧任务 cancelled<br/>preflight_room_version_stale"]
+  CancelOld --> Inbound
+  GuardOk -- 否: 无法确认 --> CancelUnverified["target_latest_unverified<br/>取消旧任务/不发送"]
+  Dispatch --> Idle["/idle 复位到文件传输助手"]
+  CancelUnverified --> Idle
+  IdleMaybe --> End["等待下一轮轮询"]
+  Idle --> End
+  Archive["服务商历史下载<br/>基础留档/最终事实"] --> Reconcile["/reconcile<br/>补账确认"]
+  Dispatch --> Reconcile
+  Reconcile --> Confirm["confirmed<br/>闭环完成"]
+```
 - 批量任务处理：任务中心的批量跟进中/完成调用 `/api/tasks/batch-status`，逐条复用任务状态更新逻辑，写入客户事件、完成时间和汇总审计。
 - 批量草稿处理：触达草稿队列的批量确认/处理/废弃调用 `/api/outbound-drafts/batch-status`，逐条写入状态时间、客户事件和汇总审计，并保持 `externalSideEffects=false`。
 - 草稿风险边界：前端按草稿内容识别投诉、赔偿、退款、锁价、付款等高风险文案，高风险草稿需要单条复核，不能批量确认。
 - 审计摘要：Agent运行审计记录保存业务摘要，前端对旧版 JSON 详情会尽量转换为人可读摘要，避免业务页面出现内部数据结构。
-- 展示隔离：Agent控制台和本地消息页会按当前客户过滤Agent结果，避免销售建议或VIP分流上下文串到其他客户。
+- 展示隔离：Agent控制台按当前客户过滤Agent结果，避免销售建议或VIP分流上下文串到其他客户。
 - 任务SLA巡检：扫描未完成任务，计算正常、临期、超时和已完成状态，将超时未升级任务转给主管队列并写入审计日志。
 
 ## 能力审计

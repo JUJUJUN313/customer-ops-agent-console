@@ -154,6 +154,7 @@ const DEFAULT_PERSONAL_WECHAT = {
     maxQueueAgeSeconds: 60,
     failureBackoffSeconds: 30,
     mergeWindowSeconds: 45,
+    quietWindowSeconds: 0,
     status: "未连接",
     lastEventAt: "",
     lastError: ""
@@ -163,14 +164,82 @@ const DEFAULT_PERSONAL_WECHAT = {
   decisions: [],
   logs: []
 };
+const DEFAULT_WECOM_CLIENT_REALTIME = {
+  enabled: true,
+  monitor: {
+    mode: "local-script",
+    pollIntervalSeconds: 2,
+    unreadDetection: "client-unread-list",
+    status: "未启动",
+    lastSeenAt: "",
+    lastError: ""
+  },
+  worker: {
+    mode: "local-script",
+    sidecarUrl: "",
+    sendEndpoint: "/send",
+    receiveEndpoint: "/messages",
+    ackEndpoint: "/ack",
+    canSend: false,
+    canReceive: false,
+    supportsAck: false,
+    supportsConfirm: true,
+    loginStatus: "未连接",
+    cursor: "",
+    status: "Mock待接",
+    lastConnectedAt: "",
+    lastEventAt: "",
+    lastPulledAt: "",
+    lastAckAt: "",
+    lastError: ""
+  },
+  employeeAccount: {
+    id: "wecom_employee_default",
+    name: "企微员工自动化号",
+    displayName: "企微员工助手",
+    defaultCustomerId: "",
+    assignedRoomIds: [],
+    assignedCustomerIds: [],
+    autoReply: true,
+    requireApprovalForRisk: true,
+    minSendIntervalSeconds: 3,
+    concurrency: 1,
+    maxSendsPerMinute: 20,
+    maxQueueAgeSeconds: 60,
+    failureBackoffSeconds: 30,
+    mergeWindowSeconds: 45,
+    quietWindowSeconds: 5,
+    status: "未连接",
+    lastEventAt: "",
+    lastError: ""
+  },
+  archiveReconciler: {
+    provider: "企微服务商历史下载",
+    mode: "download-reconcile",
+    status: "待补账",
+    lastDownloadedAt: "",
+    lastConfirmedAt: "",
+    lastError: ""
+  },
+  logs: []
+};
 const ACTIVE_PERSONAL_WECHAT_JOB_STATUSES = new Set(["queued", "sending", "sent", "sent_pending_confirm", "manual_required"]);
 const DISPATCHABLE_PERSONAL_WECHAT_JOB_STATUSES = new Set(["queued"]);
+const TRANSIENT_PERSONAL_WECHAT_SEND_ERRORS = new Set(["client_locked", "worker_unavailable", "worker_offline", "rate_limited"]);
 const HIGH_RISK_REPLY_PATTERNS = [
   /报价|价格|多少钱|锁价|保价|今日价|底价|优惠/,
   /退款|退货|赔偿|补偿|投诉|维权/,
   /合同|协议|付款|打款|定金|发票/,
   /承诺|保证|责任|维修责任|交付时间/
 ];
+const NON_BUSINESS_WECOM_ROOM_NAMES = new Set([
+  "文件传输助手",
+  "邮件提醒",
+  "企业微信团队",
+  "客户联系",
+  "行业资讯",
+  "微信客服"
+]);
 
 function id(prefix) {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
@@ -348,6 +417,11 @@ function boundedScore(value, fallback = 30) {
 
 function cleanLimitedText(value, fallback = "", maxLength = 120) {
   return cleanText(value, fallback).slice(0, maxLength);
+}
+
+function cleanLimitedTextList(values = [], maxLength = 180, limit = 200) {
+  const source = Array.isArray(values) ? values : values === undefined || values === null || values === "" ? [] : [values];
+  return Array.from(new Set(source.map((value) => cleanLimitedText(value, "", maxLength)).filter(Boolean))).slice(0, limit);
 }
 
 function normalizeTemperature(value, fallback = 0.2, allowEmpty = false) {
@@ -619,8 +693,12 @@ function ensureWecomConfig(state) {
 function normalizeWecomGroupBinding(binding = {}) {
   const chatId = cleanLimitedText(binding.chatId, "", 180);
   if (!chatId) return null;
+  const aliasChatIds = Array.isArray(binding.aliasChatIds)
+    ? binding.aliasChatIds.map((item) => cleanLimitedText(item, "", 180)).filter(Boolean).filter((item) => item !== chatId)
+    : [];
   return {
     chatId,
+    aliasChatIds: [...new Set(aliasChatIds)].slice(0, 20),
     chatName: cleanLimitedText(binding.chatName, binding.groupName || `企微群 ${chatId.slice(-6)}`, 160),
     customerId: cleanLimitedText(binding.customerId, "", 80),
     channel: cleanLimitedText(binding.channel, "VIP群", 40),
@@ -634,6 +712,35 @@ function normalizeWecomGroupBinding(binding = {}) {
   };
 }
 
+function shouldMergeWecomBindingsByName(left = {}, right = {}) {
+  const leftKey = normalizeWecomRoomNameKey(left.chatName);
+  const rightKey = normalizeWecomRoomNameKey(right.chatName);
+  if (!leftKey || leftKey !== rightKey) return false;
+  if (isNonBusinessWecomRoomName(left.chatName) || isNonBusinessWecomRoomName(right.chatName)) return false;
+  return isLocalRealtimeWecomSource(left.source) || isLocalRealtimeWecomSource(right.source);
+}
+
+function mergeWecomBindingRecord(target, incoming) {
+  const aliasChatIds = [
+    ...(target.aliasChatIds || []),
+    ...(incoming.aliasChatIds || []),
+    incoming.chatId
+  ].filter((item) => item && item !== target.chatId);
+  target.aliasChatIds = [...new Set(aliasChatIds)].slice(0, 20);
+  if ((!target.customerId || target.status !== "已绑定") && incoming.customerId) target.customerId = incoming.customerId;
+  if (incoming.status === "已绑定") target.status = "已绑定";
+  target.chatName = cleanLimitedText(target.chatName || incoming.chatName, incoming.chatName, 160);
+  target.channel = cleanLimitedText(target.channel || incoming.channel, incoming.channel || "VIP群", 40);
+  target.source = cleanLimitedText(target.source || incoming.source, incoming.source || "wecom-aibot", 60);
+  target.messageCount = Math.max(Number(target.messageCount || 0), Number(incoming.messageCount || 0));
+  if (personalWechatJobTimeMs(incoming.lastMessageAt, 0) > personalWechatJobTimeMs(target.lastMessageAt, 0)) {
+    target.lastMessageAt = incoming.lastMessageAt;
+    target.lastSenderId = incoming.lastSenderId || target.lastSenderId;
+  }
+  if (personalWechatJobTimeMs(incoming.updatedAt, 0) > personalWechatJobTimeMs(target.updatedAt, 0)) target.updatedAt = incoming.updatedAt;
+  return target;
+}
+
 function ensureWecomBindings(state) {
   const source = state.wecomBindings || DEFAULT_WECOM_BINDINGS;
   const rawGroups = Array.isArray(source.groups) ? source.groups : [];
@@ -644,6 +751,16 @@ function ensureWecomBindings(state) {
     if (!binding || seen.has(binding.chatId)) continue;
     const customer = Array.isArray(state.customers) ? state.customers.find((item) => item.id === binding.customerId) : null;
     if (customer?.tags?.includes("企微群待绑定")) binding.status = "待绑定";
+    const existing = groups.find((item) =>
+      item.chatId === binding.chatId
+      || (Array.isArray(item.aliasChatIds) && item.aliasChatIds.includes(binding.chatId))
+      || shouldMergeWecomBindingsByName(item, binding)
+    );
+    if (existing) {
+      mergeWecomBindingRecord(existing, binding);
+      seen.add(binding.chatId);
+      continue;
+    }
     seen.add(binding.chatId);
     groups.push(binding);
   }
@@ -655,11 +772,53 @@ function findWecomGroupBinding(state, chatId = "") {
   const normalizedChatId = cleanLimitedText(chatId, "", 180);
   if (!normalizedChatId) return null;
   const bindings = ensureWecomBindings(state);
-  return bindings.groups.find((binding) => binding.chatId === normalizedChatId) || null;
+  return bindings.groups.find((binding) =>
+    binding.chatId === normalizedChatId
+    || (Array.isArray(binding.aliasChatIds) && binding.aliasChatIds.includes(normalizedChatId))
+  ) || null;
+}
+
+function normalizeWecomRoomNameKey(name = "") {
+  return cleanLimitedText(name, "", 160)
+    .replace(/\s+/g, "")
+    .replace(/[（(]\d+[）)]$/u, "")
+    .toLowerCase();
+}
+
+function isNonBusinessWecomRoomName(name = "") {
+  const normalized = cleanLimitedText(name, "", 160).trim();
+  return Boolean(normalized) && NON_BUSINESS_WECOM_ROOM_NAMES.has(normalized);
+}
+
+function isLocalRealtimeWecomSource(source = "") {
+  const normalized = cleanLimitedText(source, "", 80).toLowerCase();
+  return normalized.includes("wecom-client-realtime") || normalized.includes("wecom-local");
+}
+
+function findWecomGroupBindingByRoomName(state, chatName = "", source = "") {
+  const roomKey = normalizeWecomRoomNameKey(chatName);
+  if (!roomKey || !isLocalRealtimeWecomSource(source)) return null;
+  const bindings = ensureWecomBindings(state);
+  return bindings.groups.find((binding) =>
+    normalizeWecomRoomNameKey(binding.chatName) === roomKey
+    && !isNonBusinessWecomRoomName(binding.chatName)
+  ) || null;
+}
+
+function findReusablePlaceholderWecomCustomer(state, chatName = "") {
+  const roomKey = normalizeWecomRoomNameKey(chatName);
+  if (!roomKey || !Array.isArray(state.customers)) return null;
+  return state.customers.find((customer) =>
+    Array.isArray(customer.tags) &&
+    customer.tags.includes("企微群待绑定") &&
+    normalizeWecomRoomNameKey(customer.name) === roomKey
+  ) || null;
 }
 
 function createPlaceholderWecomCustomer(state, { chatId = "", chatName = "" } = {}) {
   state.customers = Array.isArray(state.customers) ? state.customers : [];
+  const reusableCustomer = findReusablePlaceholderWecomCustomer(state, chatName);
+  if (reusableCustomer) return reusableCustomer;
   const suffix = cleanLimitedText(chatId, "", 180).slice(-6) || id("grp").slice(-6);
   const customerId = id("c");
   const customer = {
@@ -695,7 +854,18 @@ function upsertWecomGroupBinding(state, payload = {}) {
   const chatId = cleanLimitedText(payload.chatId, "", 180);
   if (!chatId) throw new Error("WeCom chatId is required for group binding");
   const now = new Date().toISOString();
-  let binding = bindings.groups.find((item) => item.chatId === chatId);
+  const chatName = cleanLimitedText(payload.chatName || payload.groupName, "", 160);
+  let binding = bindings.groups.find((item) =>
+    item.chatId === chatId
+    || (Array.isArray(item.aliasChatIds) && item.aliasChatIds.includes(chatId))
+  ) || null;
+  if (!binding && chatName && isLocalRealtimeWecomSource(payload.source || "")) {
+    const roomKey = normalizeWecomRoomNameKey(chatName);
+    binding = bindings.groups.find((item) =>
+      normalizeWecomRoomNameKey(item.chatName) === roomKey
+      && !isNonBusinessWecomRoomName(item.chatName)
+    ) || null;
+  }
   const nextStatus = payload.status === "待绑定"
     ? "待绑定"
     : payload.status === "已绑定"
@@ -706,7 +876,7 @@ function upsertWecomGroupBinding(state, payload = {}) {
   if (!binding) {
     binding = normalizeWecomGroupBinding({
       chatId,
-      chatName: payload.chatName || payload.groupName || `企微群 ${chatId.slice(-6)}`,
+      chatName: chatName || `企微群 ${chatId.slice(-6)}`,
       customerId: payload.customerId || "",
       channel: payload.channel || "VIP群",
       source: payload.source || "wecom-aibot",
@@ -716,7 +886,10 @@ function upsertWecomGroupBinding(state, payload = {}) {
     });
     bindings.groups.unshift(binding);
   } else {
-    binding.chatName = cleanLimitedText(payload.chatName || payload.groupName, binding.chatName, 160);
+    if (binding.chatId !== chatId) {
+      binding.aliasChatIds = [...new Set([...(binding.aliasChatIds || []), chatId])].filter((item) => item !== binding.chatId).slice(0, 20);
+    }
+    binding.chatName = cleanLimitedText(chatName, binding.chatName, 160);
     binding.customerId = payload.customerId === undefined ? binding.customerId : cleanLimitedText(payload.customerId, "", 80);
     binding.channel = cleanLimitedText(payload.channel, binding.channel || "VIP群", 40);
     binding.source = cleanLimitedText(payload.source, binding.source || "wecom-aibot", 60);
@@ -818,10 +991,10 @@ function resolveWecomRoute(state, routeId = "") {
 }
 
 function defaultWecomInboundChannel(channel = "VIP群") {
-  if (String(channel).includes("销售")) return "销售模拟私聊";
-  if (String(channel).includes("电销")) return "电销模拟私聊";
-  if (String(channel).includes("VIP") || String(channel).includes("群")) return "VIP模拟群";
-  return cleanLimitedText(channel, "VIP模拟群", 40);
+  if (String(channel).includes("销售")) return "销售企微";
+  if (String(channel).includes("电销")) return "电销企微";
+  if (String(channel).includes("VIP") || String(channel).includes("群")) return "VIP群";
+  return cleanLimitedText(channel, "VIP群", 40);
 }
 
 function resolveWecomInboundTarget(state, payload = {}, config = DEFAULT_WECOM_CONFIG) {
@@ -845,7 +1018,7 @@ function resolveWecomInboundTarget(state, payload = {}, config = DEFAULT_WECOM_C
   }
 
   if (chatId) {
-    let binding = findWecomGroupBinding(state, chatId);
+    let binding = findWecomGroupBinding(state, chatId) || findWecomGroupBindingByRoomName(state, chatName, payload.source || "");
     let customer = binding?.customerId ? getCustomer(state, binding.customerId) : null;
     let createdCustomer = false;
     if (!customer) {
@@ -898,11 +1071,14 @@ function normalizePersonalWechatAccount(account = {}, current = DEFAULT_PERSONAL
   const maxQueueAgeSeconds = Math.round(finiteNumber(account.maxQueueAgeSeconds, current.maxQueueAgeSeconds || 60));
   const failureBackoffSeconds = Math.round(finiteNumber(account.failureBackoffSeconds, current.failureBackoffSeconds || 30));
   const mergeWindowSeconds = Math.round(finiteNumber(account.mergeWindowSeconds, current.mergeWindowSeconds || 45));
+  const quietWindowSeconds = Math.round(finiteNumber(account.quietWindowSeconds, current.quietWindowSeconds || 0));
   return {
     id: cleanLimitedText(account.id, current.id || DEFAULT_PERSONAL_WECHAT.account.id, 80),
     name: cleanLimitedText(account.name, current.name || DEFAULT_PERSONAL_WECHAT.account.name, 120),
     displayName: cleanLimitedText(account.displayName, current.displayName || DEFAULT_PERSONAL_WECHAT.account.displayName, 120),
     defaultCustomerId: cleanLimitedText(account.defaultCustomerId, current.defaultCustomerId || "", 80),
+    assignedRoomIds: cleanLimitedTextList(account.assignedRoomIds === undefined ? current.assignedRoomIds : account.assignedRoomIds, 180, 500),
+    assignedCustomerIds: cleanLimitedTextList(account.assignedCustomerIds === undefined ? current.assignedCustomerIds : account.assignedCustomerIds, 80, 500),
     autoReply: account.autoReply === undefined ? Boolean(current.autoReply) : account.autoReply === true || account.autoReply === "true",
     requireApprovalForRisk: account.requireApprovalForRisk === undefined ? Boolean(current.requireApprovalForRisk ?? true) : account.requireApprovalForRisk === true || account.requireApprovalForRisk === "true",
     minSendIntervalSeconds: Math.max(1, Math.min(60, minSendIntervalSeconds)),
@@ -911,6 +1087,7 @@ function normalizePersonalWechatAccount(account = {}, current = DEFAULT_PERSONAL
     maxQueueAgeSeconds: Math.max(15, Math.min(600, maxQueueAgeSeconds)),
     failureBackoffSeconds: Math.max(5, Math.min(600, failureBackoffSeconds)),
     mergeWindowSeconds: Math.max(5, Math.min(300, mergeWindowSeconds)),
+    quietWindowSeconds: Math.max(0, Math.min(30, quietWindowSeconds)),
     status: cleanLimitedText(account.status, current.status || "未连接", 40),
     lastEventAt: cleanLimitedText(account.lastEventAt, current.lastEventAt || "", 80),
     lastError: cleanLimitedText(account.lastError, current.lastError || "", 400)
@@ -963,8 +1140,12 @@ function normalizePersonalWechatContext(context = {}) {
   const roomId = cleanLimitedText(context.roomId, "", 180);
   if (!roomId) return null;
   const messages = Array.isArray(context.messages) ? context.messages : [];
+  const aliasRoomIds = Array.isArray(context.aliasRoomIds)
+    ? context.aliasRoomIds.map((item) => cleanLimitedText(item, "", 180)).filter(Boolean).filter((item) => item !== roomId)
+    : [];
   return {
     roomId,
+    aliasRoomIds: [...new Set(aliasRoomIds)].slice(0, 20),
     roomName: cleanLimitedText(context.roomName, `外部群 ${roomId.slice(-6)}`, 160),
     customerId: cleanLimitedText(context.customerId, "", 80),
     accountId: cleanLimitedText(context.accountId, DEFAULT_PERSONAL_WECHAT.account.id, 80),
@@ -972,6 +1153,14 @@ function normalizePersonalWechatContext(context = {}) {
     lastReplyAt: cleanLimitedText(context.lastReplyAt, "", 80),
     lastStaffReplyAt: cleanLimitedText(context.lastStaffReplyAt, "", 80),
     pendingSendJobId: cleanLimitedText(context.pendingSendJobId, "", 80),
+    roomVersion: Math.max(0, Math.round(finiteNumber(context.roomVersion, 0))),
+    quietUntilAt: cleanLimitedText(context.quietUntilAt, "", 80),
+    latestCustomerMessageId: cleanLimitedText(context.latestCustomerMessageId, "", 180),
+    latestCustomerMessageText: cleanLimitedText(context.latestCustomerMessageText, "", 500),
+    latestCustomerMessageAt: cleanLimitedText(context.latestCustomerMessageAt, "", 80),
+    latestCustomerSenderName: cleanLimitedText(context.latestCustomerSenderName, "", 120),
+    latestReadBatchId: cleanLimitedText(context.latestReadBatchId, "", 120),
+    lastDecisionRoomVersion: Math.max(0, Math.round(finiteNumber(context.lastDecisionRoomVersion, 0))),
     messageCount: Math.max(0, Math.round(finiteNumber(context.messageCount, 0))),
     messages: messages.slice(-20).map((message) => ({
       messageId: cleanLimitedText(message.messageId, id("pwx_msg"), 180),
@@ -980,9 +1169,52 @@ function normalizePersonalWechatContext(context = {}) {
       text: cleanLimitedText(message.text, "", 500),
       msgType: cleanLimitedText(message.msgType, "text", 40),
       sendAt: cleanLimitedText(message.sendAt, new Date().toISOString(), 80),
-      source: cleanLimitedText(message.source, "personal-wechat", 60)
+      source: cleanLimitedText(message.source, "personal-wechat", 60),
+      observedAt: cleanLimitedText(message.observedAt, "", 80),
+      readBatchId: cleanLimitedText(message.readBatchId, "", 120),
+      visibleOrder: Math.max(0, Math.round(finiteNumber(message.visibleOrder, 0))),
+      senderConfidence: cleanLimitedText(message.senderConfidence, "", 40),
+      readSource: cleanLimitedText(message.readSource, "", 80)
     }))
   };
+}
+
+function mergePersonalWechatContextRecord(target, incoming) {
+  const aliasRoomIds = [
+    ...(target.aliasRoomIds || []),
+    ...(incoming.aliasRoomIds || []),
+    incoming.roomId
+  ].filter((item) => item && item !== target.roomId);
+  target.aliasRoomIds = [...new Set(aliasRoomIds)].slice(0, 20);
+  if (!target.customerId && incoming.customerId) target.customerId = incoming.customerId;
+  if (!target.accountId && incoming.accountId) target.accountId = incoming.accountId;
+  target.messageCount = Math.max(Number(target.messageCount || 0), Number(incoming.messageCount || 0));
+  target.roomVersion = Math.max(Number(target.roomVersion || 0), Number(incoming.roomVersion || 0));
+  if (personalWechatJobTimeMs(incoming.lastMessageAt, 0) > personalWechatJobTimeMs(target.lastMessageAt, 0)) target.lastMessageAt = incoming.lastMessageAt;
+  if (personalWechatJobTimeMs(incoming.lastStaffReplyAt, 0) > personalWechatJobTimeMs(target.lastStaffReplyAt, 0)) target.lastStaffReplyAt = incoming.lastStaffReplyAt;
+  if (personalWechatJobTimeMs(incoming.latestCustomerMessageAt, 0) > personalWechatJobTimeMs(target.latestCustomerMessageAt, 0)) {
+    target.latestCustomerMessageId = incoming.latestCustomerMessageId;
+    target.latestCustomerMessageText = incoming.latestCustomerMessageText;
+    target.latestCustomerMessageAt = incoming.latestCustomerMessageAt;
+    target.latestCustomerSenderName = incoming.latestCustomerSenderName;
+    target.latestReadBatchId = incoming.latestReadBatchId;
+  }
+  const messages = [...(target.messages || []), ...(incoming.messages || [])];
+  const seenMessageIds = new Set();
+  target.messages = messages
+    .filter((message) => {
+      if (!message.messageId || seenMessageIds.has(message.messageId)) return false;
+      seenMessageIds.add(message.messageId);
+      return true;
+    })
+    .sort((a, b) => personalWechatJobTimeMs(a.sendAt, 0) - personalWechatJobTimeMs(b.sendAt, 0))
+    .slice(-20);
+  return target;
+}
+
+function isLocalRealtimeContextSource(context = {}) {
+  return (context.messages || []).some((message) => isLocalRealtimeWecomSource(message.source))
+    || isLocalRealtimeWecomSource(context.source || "");
 }
 
 function normalizePersonalWechatSendJob(job = {}) {
@@ -996,6 +1228,12 @@ function normalizePersonalWechatSendJob(job = {}) {
     accountId: cleanLimitedText(job.accountId, DEFAULT_PERSONAL_WECHAT.account.id, 80),
     replyText: cleanLimitedText(job.replyText, "", 1800),
     triggerMessageIds: Array.isArray(job.triggerMessageIds) ? job.triggerMessageIds.map((item) => cleanLimitedText(item, "", 180)).filter(Boolean) : [],
+    triggerRoomVersion: Math.max(0, Math.round(finiteNumber(job.triggerRoomVersion, 0))),
+    triggerLatestMessageId: cleanLimitedText(job.triggerLatestMessageId, "", 180),
+    triggerLatestText: cleanLimitedText(job.triggerLatestText, "", 500),
+    triggerObservedAt: cleanLimitedText(job.triggerObservedAt, "", 80),
+    triggerReadBatchId: cleanLimitedText(job.triggerReadBatchId, "", 120),
+    validAfterAt: cleanLimitedText(job.validAfterAt, "", 80),
     status,
     riskLevel: ["low", "medium", "high"].includes(job.riskLevel) ? job.riskLevel : "low",
     reason: cleanLimitedText(job.reason, "", 400),
@@ -1023,6 +1261,12 @@ function normalizePersonalWechatDecision(decision = {}) {
     roomId: cleanLimitedText(decision.roomId, "", 180),
     roomName: cleanLimitedText(decision.roomName, "", 160),
     triggerMessageIds: Array.isArray(decision.triggerMessageIds) ? decision.triggerMessageIds.map((item) => cleanLimitedText(item, "", 180)).filter(Boolean) : [],
+    triggerRoomVersion: Math.max(0, Math.round(finiteNumber(decision.triggerRoomVersion, 0))),
+    triggerLatestMessageId: cleanLimitedText(decision.triggerLatestMessageId, "", 180),
+    triggerLatestText: cleanLimitedText(decision.triggerLatestText, "", 500),
+    triggerObservedAt: cleanLimitedText(decision.triggerObservedAt, "", 80),
+    triggerReadBatchId: cleanLimitedText(decision.triggerReadBatchId, "", 120),
+    validAfterAt: cleanLimitedText(decision.validAfterAt, "", 80),
     action,
     replyText: cleanLimitedText(decision.replyText, "", 1800),
     riskLevel: ["low", "medium", "high"].includes(decision.riskLevel) ? decision.riskLevel : "low",
@@ -1035,9 +1279,25 @@ function normalizePersonalWechatDecision(decision = {}) {
 function normalizePersonalWechatConfig(config = {}, current = DEFAULT_PERSONAL_WECHAT) {
   const account = normalizePersonalWechatAccount(config.account || {}, current.account || DEFAULT_PERSONAL_WECHAT.account);
   const gateway = normalizePersonalWechatGateway(config.gateway || {}, current.gateway || DEFAULT_PERSONAL_WECHAT.gateway);
-  const contexts = (Array.isArray(config.groupContexts) ? config.groupContexts : current.groupContexts || [])
+  const rawContexts = (Array.isArray(config.groupContexts) ? config.groupContexts : current.groupContexts || [])
     .map(normalizePersonalWechatContext)
     .filter(Boolean);
+  const contexts = [];
+  for (const context of rawContexts) {
+    const roomKey = normalizeWecomRoomNameKey(context.roomName);
+    const existing = contexts.find((item) =>
+      item.roomId === context.roomId
+      || (Array.isArray(item.aliasRoomIds) && item.aliasRoomIds.includes(context.roomId))
+      || (
+        roomKey
+        && normalizeWecomRoomNameKey(item.roomName) === roomKey
+        && !isNonBusinessWecomRoomName(item.roomName)
+        && (isLocalRealtimeContextSource(item) || isLocalRealtimeContextSource(context))
+      )
+    );
+    if (existing) mergePersonalWechatContextRecord(existing, context);
+    else contexts.push(context);
+  }
   return {
     enabled: config.enabled === undefined ? Boolean(current.enabled ?? true) : config.enabled === true || config.enabled === "true",
     gateway,
@@ -1072,6 +1332,152 @@ function publicPersonalWechat(config = DEFAULT_PERSONAL_WECHAT) {
   };
 }
 
+function normalizeWecomClientMonitor(monitor = {}, current = DEFAULT_WECOM_CLIENT_REALTIME.monitor) {
+  return {
+    mode: cleanLimitedText(monitor.mode, current.mode || "local-script", 40),
+    pollIntervalSeconds: Math.max(1, Math.min(30, Math.round(finiteNumber(monitor.pollIntervalSeconds, current.pollIntervalSeconds || 2)))),
+    unreadDetection: cleanLimitedText(monitor.unreadDetection, current.unreadDetection || "client-unread-list", 80),
+    status: cleanLimitedText(monitor.status, current.status || "未启动", 60),
+    lastSeenAt: cleanLimitedText(monitor.lastSeenAt, current.lastSeenAt || "", 80),
+    lastError: cleanLimitedText(monitor.lastError, current.lastError || "", 400)
+  };
+}
+
+function normalizeWecomClientWorker(worker = {}, current = DEFAULT_WECOM_CLIENT_REALTIME.worker) {
+  const mode = cleanLimitedText(worker.mode, current.mode || "local-script", 40);
+  const rawSendEndpoint = cleanLimitedText(worker.sendEndpoint, current.sendEndpoint || "/send", 120);
+  const rawReceiveEndpoint = cleanLimitedText(worker.receiveEndpoint, current.receiveEndpoint || "/messages", 120);
+  const rawAckEndpoint = cleanLimitedText(worker.ackEndpoint, current.ackEndpoint || "/ack", 120);
+  return {
+    mode: ["local-script", "mock", "disabled"].includes(mode) ? mode : "local-script",
+    sidecarUrl: worker.sidecarUrl
+      ? normalizeApiUrl(worker.sidecarUrl, "", false)
+      : cleanLimitedText(current.sidecarUrl || "", "", 300),
+    sendEndpoint: rawSendEndpoint.startsWith("/") ? rawSendEndpoint : `/${rawSendEndpoint}`,
+    receiveEndpoint: rawReceiveEndpoint.startsWith("/") ? rawReceiveEndpoint : `/${rawReceiveEndpoint}`,
+    ackEndpoint: rawAckEndpoint.startsWith("/") ? rawAckEndpoint : `/${rawAckEndpoint}`,
+    canSend: worker.canSend === undefined ? Boolean(current.canSend) : worker.canSend === true || worker.canSend === "true",
+    canReceive: worker.canReceive === undefined ? Boolean(current.canReceive) : worker.canReceive === true || worker.canReceive === "true",
+    supportsAck: worker.supportsAck === undefined ? Boolean(current.supportsAck) : worker.supportsAck === true || worker.supportsAck === "true",
+    supportsConfirm: worker.supportsConfirm === undefined ? Boolean(current.supportsConfirm ?? true) : worker.supportsConfirm === true || worker.supportsConfirm === "true",
+    loginStatus: cleanLimitedText(worker.loginStatus, current.loginStatus || "未连接", 80),
+    cursor: cleanLimitedText(worker.cursor, current.cursor || "", 220),
+    status: cleanLimitedText(worker.status, current.status || "Mock待接", 60),
+    lastConnectedAt: cleanLimitedText(worker.lastConnectedAt, current.lastConnectedAt || "", 80),
+    lastEventAt: cleanLimitedText(worker.lastEventAt, current.lastEventAt || "", 80),
+    lastPulledAt: cleanLimitedText(worker.lastPulledAt, current.lastPulledAt || "", 80),
+    lastAckAt: cleanLimitedText(worker.lastAckAt, current.lastAckAt || "", 80),
+    lastError: cleanLimitedText(worker.lastError, current.lastError || "", 400)
+  };
+}
+
+function normalizeWecomClientRealtimeConfig(config = {}, current = DEFAULT_WECOM_CLIENT_REALTIME) {
+  return {
+    enabled: config.enabled === undefined ? Boolean(current.enabled ?? true) : config.enabled === true || config.enabled === "true",
+    monitor: normalizeWecomClientMonitor(config.monitor || {}, current.monitor || DEFAULT_WECOM_CLIENT_REALTIME.monitor),
+    worker: normalizeWecomClientWorker(config.worker || {}, current.worker || DEFAULT_WECOM_CLIENT_REALTIME.worker),
+    employeeAccount: normalizePersonalWechatAccount(config.employeeAccount || {}, current.employeeAccount || DEFAULT_WECOM_CLIENT_REALTIME.employeeAccount),
+    archiveReconciler: {
+      provider: cleanLimitedText(config.archiveReconciler?.provider, current.archiveReconciler?.provider || "企微服务商历史下载", 120),
+      mode: cleanLimitedText(config.archiveReconciler?.mode, current.archiveReconciler?.mode || "download-reconcile", 60),
+      status: cleanLimitedText(config.archiveReconciler?.status, current.archiveReconciler?.status || "待补账", 60),
+      lastDownloadedAt: cleanLimitedText(config.archiveReconciler?.lastDownloadedAt, current.archiveReconciler?.lastDownloadedAt || "", 80),
+      lastConfirmedAt: cleanLimitedText(config.archiveReconciler?.lastConfirmedAt, current.archiveReconciler?.lastConfirmedAt || "", 80),
+      lastError: cleanLimitedText(config.archiveReconciler?.lastError, current.archiveReconciler?.lastError || "", 400)
+    },
+    logs: (Array.isArray(config.logs) ? config.logs : current.logs || []).slice(0, 200)
+  };
+}
+
+function ensureWecomClientRealtime(state) {
+  state.wecomClientRealtime = normalizeWecomClientRealtimeConfig(
+    state.wecomClientRealtime || {},
+    state.wecomClientRealtime || DEFAULT_WECOM_CLIENT_REALTIME
+  );
+  return state.wecomClientRealtime;
+}
+
+function syncPersonalWechatFromWecomClientRealtime(state) {
+  const realtime = ensureWecomClientRealtime(state);
+  const personal = ensurePersonalWechat(state);
+  personal.enabled = realtime.enabled;
+  personal.gateway = normalizePersonalWechatGateway({
+    mode: realtime.worker.mode === "disabled" ? "disabled" : realtime.worker.mode === "mock" ? "mock" : "sidecar",
+    sidecarUrl: realtime.worker.sidecarUrl,
+    sendEndpoint: realtime.worker.sendEndpoint,
+    receiveEndpoint: realtime.worker.receiveEndpoint,
+    ackEndpoint: realtime.worker.ackEndpoint,
+    canSend: realtime.worker.canSend,
+    canReceive: realtime.worker.canReceive,
+    sendMode: "proactive",
+    supportsConfirm: realtime.worker.supportsConfirm,
+    supportsRecall: false,
+    supportsAck: realtime.worker.supportsAck,
+    loginStatus: realtime.worker.loginStatus,
+    cursor: realtime.worker.cursor,
+    status: realtime.worker.status,
+    lastConnectedAt: realtime.worker.lastConnectedAt,
+    lastEventAt: realtime.worker.lastEventAt,
+    lastPulledAt: realtime.worker.lastPulledAt,
+    lastAckAt: realtime.worker.lastAckAt,
+    lastError: realtime.worker.lastError
+  }, personal.gateway || DEFAULT_PERSONAL_WECHAT.gateway);
+  personal.account = normalizePersonalWechatAccount({
+    ...realtime.employeeAccount,
+    name: realtime.employeeAccount.name || "企微员工自动化号",
+    displayName: realtime.employeeAccount.displayName || "企微员工助手"
+  }, personal.account || DEFAULT_PERSONAL_WECHAT.account);
+  return personal;
+}
+
+function appendWecomClientRealtimeLog(state, log = {}) {
+  const realtime = ensureWecomClientRealtime(state);
+  const nextLog = {
+    id: id("wcrt_log"),
+    type: cleanLimitedText(log.type, "记录", 40),
+    status: cleanLimitedText(log.status, "成功", 40),
+    accountId: cleanLimitedText(log.accountId, realtime.employeeAccount.id, 80),
+    roomId: cleanLimitedText(log.roomId, "", 180),
+    roomName: cleanLimitedText(log.roomName, "", 160),
+    messageId: cleanLimitedText(log.messageId, "", 180),
+    sendJobId: cleanLimitedText(log.sendJobId, "", 80),
+    contentPreview: cleanLimitedText(log.contentPreview, "", 180),
+    errorCode: cleanLimitedText(log.errorCode, "", 80),
+    error: cleanLimitedText(log.error, "", 400),
+    createdAt: new Date().toISOString()
+  };
+  realtime.logs.unshift(nextLog);
+  realtime.logs = realtime.logs.slice(0, 200);
+  return nextLog;
+}
+
+export function buildWecomClientRealtimeReport(state) {
+  const cloned = cloneState(state);
+  const realtime = ensureWecomClientRealtime(cloned);
+  const personalReport = buildPersonalWechatReport(cloned);
+  return {
+    config: {
+      ...realtime,
+      logs: (realtime.logs || []).slice(0, 100)
+    },
+    summary: {
+      enabled: realtime.enabled,
+      monitorStatus: realtime.monitor.status,
+      workerStatus: realtime.worker.status,
+      canReceive: Boolean(realtime.worker.canReceive),
+      canSend: Boolean(realtime.worker.canSend),
+      accountName: realtime.employeeAccount.name,
+      archiveReconcileStatus: realtime.archiveReconciler.status,
+      queuedJobs: personalReport.summary.queuedJobs,
+      sendingJobs: personalReport.summary.sendingJobs,
+      sentJobs: personalReport.summary.sentJobs,
+      manualJobs: personalReport.summary.manualJobs,
+      groups: personalReport.summary.groups
+    },
+    queue: personalReport.config
+  };
+}
+
 function normalizePersonalWechatSenderType(value = "customer") {
   const senderType = cleanLimitedText(value, "customer", 40);
   return ["customer", "staff", "managed_account", "bot", "unknown"].includes(senderType) ? senderType : "unknown";
@@ -1094,6 +1500,7 @@ function appendPersonalWechatLog(state, log = {}) {
     gatewayRequestId: cleanLimitedText(log.gatewayRequestId, "", 180),
     externalMessageId: cleanLimitedText(log.externalMessageId, "", 180),
     contentPreview: cleanLimitedText(log.contentPreview, "", 180),
+    errorCode: cleanLimitedText(log.errorCode, "", 80),
     error: cleanLimitedText(log.error, "", 400),
     externalSideEffects: Boolean(log.externalSideEffects),
     createdAt: new Date().toISOString()
@@ -1116,34 +1523,68 @@ function upsertPersonalWechatContext(state, payload = {}) {
   const config = ensurePersonalWechat(state);
   const roomId = cleanLimitedText(payload.roomId, "", 180);
   if (!roomId) throw new Error("Personal WeChat roomId is required");
-  let context = config.groupContexts.find((item) => item.roomId === roomId);
+  const roomName = cleanLimitedText(payload.roomName, "", 160);
+  const roomKey = normalizeWecomRoomNameKey(roomName);
+  let context = config.groupContexts.find((item) =>
+    item.roomId === roomId
+    || (Array.isArray(item.aliasRoomIds) && item.aliasRoomIds.includes(roomId))
+  );
+  if (!context && roomKey && isLocalRealtimeWecomSource(payload.source || payload.message?.source || "")) {
+    context = config.groupContexts.find((item) =>
+      normalizeWecomRoomNameKey(item.roomName) === roomKey
+      && !isNonBusinessWecomRoomName(item.roomName)
+      && isLocalRealtimeContextSource(item)
+    ) || null;
+  }
   if (!context) {
     context = normalizePersonalWechatContext({
       roomId,
-      roomName: payload.roomName || `外部群 ${roomId.slice(-6)}`,
+      roomName: roomName || `外部群 ${roomId.slice(-6)}`,
       customerId: payload.customerId || "",
       accountId: payload.accountId || config.account.id,
       messages: []
     });
     config.groupContexts.unshift(context);
+  } else if (context.roomId !== roomId) {
+    context.aliasRoomIds = [...new Set([...(context.aliasRoomIds || []), roomId])].filter((item) => item !== context.roomId).slice(0, 20);
   }
-  context.roomName = cleanLimitedText(payload.roomName, context.roomName, 160);
+  context.roomName = cleanLimitedText(roomName, context.roomName, 160);
   context.customerId = cleanLimitedText(payload.customerId, context.customerId, 80);
   context.accountId = cleanLimitedText(payload.accountId, context.accountId || config.account.id, 80);
   if (payload.message) {
+    const normalizedSenderType = normalizePersonalWechatSenderType(payload.message.senderType);
+    const normalizedSendAt = cleanLimitedText(payload.message.sendAt, new Date().toISOString(), 80);
+    const normalizedText = cleanLimitedText(payload.message.text, "", 500);
+    const normalizedMessageId = cleanLimitedText(payload.message.messageId, id("pwx_msg"), 180);
     context.messages.push({
-      messageId: cleanLimitedText(payload.message.messageId, id("pwx_msg"), 180),
+      messageId: normalizedMessageId,
       senderName: cleanLimitedText(payload.message.senderName, "未知发送人", 120),
-      senderType: normalizePersonalWechatSenderType(payload.message.senderType),
-      text: cleanLimitedText(payload.message.text, "", 500),
+      senderType: normalizedSenderType,
+      text: normalizedText,
       msgType: cleanLimitedText(payload.message.msgType, "text", 40),
-      sendAt: cleanLimitedText(payload.message.sendAt, new Date().toISOString(), 80),
-      source: cleanLimitedText(payload.message.source, "personal-wechat", 60)
+      sendAt: normalizedSendAt,
+      source: cleanLimitedText(payload.message.source, "personal-wechat", 60),
+      observedAt: cleanLimitedText(payload.message.observedAt, "", 80),
+      readBatchId: cleanLimitedText(payload.message.readBatchId, "", 120),
+      visibleOrder: Math.max(0, Math.round(finiteNumber(payload.message.visibleOrder, 0))),
+      senderConfidence: cleanLimitedText(payload.message.senderConfidence, "", 40),
+      readSource: cleanLimitedText(payload.message.readSource, "", 80)
     });
     context.messages = context.messages.slice(-20);
     context.messageCount = Math.max(0, Number(context.messageCount || 0) + 1);
-    context.lastMessageAt = payload.message.sendAt || new Date().toISOString();
-    if (["staff", "bot", "managed_account"].includes(payload.message.senderType)) context.lastStaffReplyAt = context.lastMessageAt;
+    context.roomVersion = Math.max(0, Number(context.roomVersion || 0)) + 1;
+    context.lastMessageAt = normalizedSendAt;
+    if (normalizedSenderType === "customer") {
+      const quietWindowSeconds = Math.max(0, Number(config.account?.quietWindowSeconds || 0));
+      const sentMs = personalWechatJobTimeMs(normalizedSendAt, Date.now());
+      context.latestCustomerMessageId = normalizedMessageId;
+      context.latestCustomerMessageText = normalizedText;
+      context.latestCustomerMessageAt = normalizedSendAt;
+      context.latestCustomerSenderName = cleanLimitedText(payload.message.senderName, "客户", 120);
+      context.latestReadBatchId = cleanLimitedText(payload.message.readBatchId, context.latestReadBatchId || "", 120);
+      context.quietUntilAt = quietWindowSeconds > 0 ? new Date(sentMs + quietWindowSeconds * 1000).toISOString() : "";
+    }
+    if (["staff", "bot", "managed_account"].includes(normalizedSenderType)) context.lastStaffReplyAt = context.lastMessageAt;
   }
   return context;
 }
@@ -1177,7 +1618,13 @@ function normalizeInboundGroupMessage(payload = {}, sourceFallback = "personal-w
     msgType,
     text,
     sendAt: cleanLimitedText(payload.sendAt, new Date().toISOString(), 80),
-    source
+    source,
+    observedAt: cleanLimitedText(payload.observedAt, "", 80),
+    readBatchId: cleanLimitedText(payload.readBatchId, "", 120),
+    visibleOrder: Math.max(0, Math.round(finiteNumber(payload.visibleOrder, 0))),
+    senderConfidence: cleanLimitedText(payload.senderConfidence, "", 40),
+    readSource: cleanLimitedText(payload.readSource, "", 80),
+    confirmSource: cleanLimitedText(payload.confirmSource, "", 80)
   };
 }
 
@@ -1220,6 +1667,12 @@ function createPersonalWechatDecision(state, payload = {}, context = {}) {
       roomId: context.roomId,
       roomName: context.roomName,
       triggerMessageIds,
+      triggerRoomVersion: context.roomVersion,
+      triggerLatestMessageId: context.latestCustomerMessageId || latestMessageId,
+      triggerLatestText: context.latestCustomerMessageText || text,
+      triggerObservedAt: context.latestCustomerMessageAt || payload.sendAt || new Date().toISOString(),
+      triggerReadBatchId: context.latestReadBatchId || payload.readBatchId || "",
+      validAfterAt: context.quietUntilAt || "",
       action: "ignore",
       riskLevel: "low",
       source: payload.source,
@@ -1235,6 +1688,12 @@ function createPersonalWechatDecision(state, payload = {}, context = {}) {
     roomId: context.roomId,
     roomName: context.roomName,
     triggerMessageIds,
+    triggerRoomVersion: context.roomVersion,
+    triggerLatestMessageId: context.latestCustomerMessageId || latestMessageId,
+    triggerLatestText: context.latestCustomerMessageText || mergedText,
+    triggerObservedAt: context.latestCustomerMessageAt || payload.sendAt || new Date().toISOString(),
+    triggerReadBatchId: context.latestReadBatchId || payload.readBatchId || "",
+    validAfterAt: context.quietUntilAt || "",
     action,
     replyText,
     riskLevel: highRisk ? "high" : "low",
@@ -1246,11 +1705,17 @@ function createPersonalWechatDecision(state, payload = {}, context = {}) {
 }
 
 function cancelActivePersonalWechatJobsForRoom(config, roomId = "", reason = "") {
+  let cancelled = false;
   for (const job of config.sendJobs || []) {
     if (job.roomId === roomId && ACTIVE_PERSONAL_WECHAT_JOB_STATUSES.has(job.status)) {
       job.status = "cancelled";
       job.error = cleanLimitedText(reason, "同群新消息触发，取消旧发送任务。", 400);
+      cancelled = true;
     }
+  }
+  if (cancelled) {
+    const context = (config.groupContexts || []).find((item) => item.roomId === roomId);
+    if (context) context.pendingSendJobId = "";
   }
 }
 
@@ -1260,6 +1725,12 @@ function mergeIntoActivePersonalWechatJob(config, decision = {}) {
   );
   if (!activeJob) return null;
   activeJob.triggerMessageIds = [...new Set([...(activeJob.triggerMessageIds || []), ...(decision.triggerMessageIds || [])])];
+  activeJob.triggerRoomVersion = Math.max(Number(activeJob.triggerRoomVersion || 0), Number(decision.triggerRoomVersion || 0));
+  activeJob.triggerLatestMessageId = decision.triggerLatestMessageId || activeJob.triggerLatestMessageId || "";
+  activeJob.triggerLatestText = decision.triggerLatestText || activeJob.triggerLatestText || "";
+  activeJob.triggerObservedAt = decision.triggerObservedAt || activeJob.triggerObservedAt || "";
+  activeJob.triggerReadBatchId = decision.triggerReadBatchId || activeJob.triggerReadBatchId || "";
+  activeJob.validAfterAt = decision.validAfterAt || activeJob.validAfterAt || "";
   activeJob.replyText = decision.replyText || activeJob.replyText;
   activeJob.riskLevel = activeJob.riskLevel === "high" || decision.riskLevel === "high" ? "high" : decision.riskLevel || activeJob.riskLevel;
   activeJob.status = activeJob.riskLevel === "high" || decision.action === "require_approval" ? "manual_required" : "queued";
@@ -1293,10 +1764,12 @@ function expirePersonalWechatSendJobs(config, nowMs = Date.now()) {
   for (const job of config.sendJobs || []) {
     if (!["queued", "manual_required"].includes(job.status)) continue;
     const createdMs = personalWechatJobTimeMs(job.createdAt, nowMs);
-    if (nowMs - createdMs <= maxAgeMs) continue;
+    const context = (config.groupContexts || []).find((item) => item.roomId === job.roomId);
+    const validAfterMs = personalWechatJobTimeMs(job.validAfterAt || context?.quietUntilAt, 0);
+    const expiryBaseMs = Math.max(createdMs, validAfterMs || 0);
+    if (nowMs - expiryBaseMs <= maxAgeMs) continue;
     job.status = "cancelled";
     job.error = `发送任务已超过${Math.round(maxAgeMs / 1000)}秒，需要重新判断后再发送。`;
-    const context = (config.groupContexts || []).find((item) => item.roomId === job.roomId);
     if (context?.pendingSendJobId === job.jobId) context.pendingSendJobId = "";
     expiredJobs.push(job);
   }
@@ -1335,11 +1808,33 @@ function personalWechatRoomHasEarlierActiveJob(config, job) {
   });
 }
 
+function cancelPersonalWechatJobBeforeDispatch(state, config, job, error = "", type = "发送任务过期") {
+  job.status = "cancelled";
+  job.error = cleanLimitedText(error, "发送任务已失效，需要重新判断。", 400);
+  const context = (config.groupContexts || []).find((item) => item.roomId === job.roomId);
+  if (context?.pendingSendJobId === job.jobId) context.pendingSendJobId = "";
+  appendPersonalWechatLog(state, {
+    type,
+    status: "失败",
+    accountId: job.accountId,
+    roomId: job.roomId,
+    roomName: job.roomName,
+    sendJobId: job.jobId,
+    contentPreview: job.replyText,
+    error: job.error,
+    externalSideEffects: false
+  });
+}
+
 function dispatchPersonalWechatJobs(state, payload = {}) {
   const config = ensurePersonalWechat(state);
   const nowMs = personalWechatNowMs(payload.now);
   const now = new Date(nowMs).toISOString();
   const gateway = config.gateway || DEFAULT_PERSONAL_WECHAT.gateway;
+  const skipRoomIds = new Set((Array.isArray(payload.skipRoomIds) ? payload.skipRoomIds : [])
+    .map((item) => cleanLimitedText(item, "", 180))
+    .filter(Boolean));
+  const skipReason = cleanLimitedText(payload.skipReason, "本轮刚读取到该会话新消息，等待下一轮判断后再发送。", 300);
   const expiredJobs = expirePersonalWechatSendJobs(config, nowMs);
   for (const job of expiredJobs) {
     appendPersonalWechatLog(state, {
@@ -1366,6 +1861,67 @@ function dispatchPersonalWechatJobs(state, payload = {}) {
   for (const job of candidates) {
     if (availableSlots <= 0) break;
     if (job.accountId !== config.account.id) continue;
+    if (skipRoomIds.has(job.roomId)) {
+      job.error = skipReason;
+      skipped.push(job.jobId);
+      appendPersonalWechatLog(state, {
+        type: "读取后等待",
+        status: "失败",
+        accountId: job.accountId,
+        roomId: job.roomId,
+        roomName: job.roomName,
+        sendJobId: job.jobId,
+        contentPreview: job.replyText,
+        error: job.error,
+        externalSideEffects: false
+      });
+      continue;
+    }
+    const context = (config.groupContexts || []).find((item) => item.roomId === job.roomId);
+    const validAfterMs = personalWechatJobTimeMs(job.validAfterAt || context?.quietUntilAt, 0);
+    if (validAfterMs > nowMs) {
+      const waitSeconds = Math.max(1, Math.ceil((validAfterMs - nowMs) / 1000));
+      job.error = `会话静默窗口未结束，请${waitSeconds}秒后再发送。`;
+      skipped.push(job.jobId);
+      appendPersonalWechatLog(state, {
+        type: "静默等待",
+        status: "失败",
+        accountId: job.accountId,
+        roomId: job.roomId,
+        roomName: job.roomName,
+        sendJobId: job.jobId,
+        contentPreview: job.replyText,
+        error: job.error,
+        externalSideEffects: false
+      });
+      continue;
+    }
+    const contextRoomVersion = Math.max(0, Number(context?.roomVersion || 0));
+    const triggerRoomVersion = Math.max(0, Number(job.triggerRoomVersion || 0));
+    if (contextRoomVersion > 0 && triggerRoomVersion > 0 && contextRoomVersion !== triggerRoomVersion) {
+      cancelPersonalWechatJobBeforeDispatch(
+        state,
+        config,
+        job,
+        `会话已有新消息，任务版本${triggerRoomVersion}已落后当前版本${contextRoomVersion}，取消旧回复。`,
+        "发送前版本过期"
+      );
+      skipped.push(job.jobId);
+      continue;
+    }
+    const staffReplyMs = personalWechatJobTimeMs(context?.lastStaffReplyAt, 0);
+    const generatedMs = personalWechatJobTimeMs(job.createdAt, 0);
+    if (staffReplyMs > 0 && generatedMs > 0 && staffReplyMs > generatedMs) {
+      cancelPersonalWechatJobBeforeDispatch(
+        state,
+        config,
+        job,
+        "群内已有员工或托管号在任务生成后回复，取消自动发送。",
+        "员工已接管"
+      );
+      skipped.push(job.jobId);
+      continue;
+    }
     if (job.retryAfterAt && personalWechatJobTimeMs(job.retryAfterAt, 0) > nowMs) {
       skipped.push(job.jobId);
       continue;
@@ -1493,7 +2049,7 @@ function dispatchPersonalWechatJobs(state, payload = {}) {
 function enqueuePersonalWechatSendJob(state, decision = {}) {
   const config = ensurePersonalWechat(state);
   if (!decision.replyText || !["auto_reply", "require_approval"].includes(decision.action)) return null;
-  expirePersonalWechatSendJobs(config);
+  expirePersonalWechatSendJobs(config, personalWechatJobTimeMs(decision.triggerObservedAt, Date.now()));
   const mergedJob = mergeIntoActivePersonalWechatJob(config, decision);
   if (mergedJob) return mergedJob;
   cancelActivePersonalWechatJobsForRoom(config, decision.roomId, "同一群只保留一个待发送任务。");
@@ -1504,6 +2060,12 @@ function enqueuePersonalWechatSendJob(state, decision = {}) {
     accountId: config.account.id,
     replyText: decision.replyText,
     triggerMessageIds: decision.triggerMessageIds,
+    triggerRoomVersion: decision.triggerRoomVersion,
+    triggerLatestMessageId: decision.triggerLatestMessageId,
+    triggerLatestText: decision.triggerLatestText,
+    triggerObservedAt: decision.triggerObservedAt,
+    triggerReadBatchId: decision.triggerReadBatchId,
+    validAfterAt: decision.validAfterAt,
     status: decision.action === "auto_reply" ? "queued" : "manual_required",
     riskLevel: decision.riskLevel,
     reason: decision.reason,
@@ -2667,7 +3229,7 @@ function buildConversationChatSession(state, conversation = {}) {
     conversationId: conversation.id,
     title: conversation.title || conversation.channel || "本地会话",
     source: "local",
-    sourceLabel: "本地模拟",
+    sourceLabel: "本地调试",
     customerId: customer?.id || "",
     customerName: customer?.name || "未知客户",
     bound: Boolean(customer),
@@ -2775,10 +3337,18 @@ export function replyChatSessionAction(inputState, sessionId = "", payload = {})
   if (session.kind === "room") {
     const config = ensurePersonalWechat(state);
     const riskLevel = isHighRiskPersonalWechatMessage(text) ? "high" : "low";
+    const context = (config.groupContexts || []).find((item) => item.roomId === session.roomId);
+    const latestTriggerMessage = (session.messages || []).filter((message) => message?.messageId).at(-1) || null;
     const decision = normalizePersonalWechatDecision({
       roomId: session.roomId,
       roomName: session.roomName || session.title,
       triggerMessageIds: (session.messages || []).slice(-3).map((message) => message.messageId).filter(Boolean),
+      triggerRoomVersion: Math.max(0, Number(context?.roomVersion || 0)),
+      triggerLatestMessageId: latestTriggerMessage?.messageId || context?.latestCustomerMessageId || "",
+      triggerLatestText: latestTriggerMessage?.text || context?.latestCustomerMessageText || "",
+      triggerObservedAt: latestTriggerMessage?.time || latestTriggerMessage?.createdAt || context?.lastMessageAt || new Date().toISOString(),
+      triggerReadBatchId: context?.latestReadBatchId || "",
+      validAfterAt: context?.quietUntilAt || "",
       action: riskLevel === "high" ? "require_approval" : "auto_reply",
       replyText: text,
       riskLevel,
@@ -2894,6 +3464,196 @@ export function updatePersonalWechatConfigAction(inputState, payload = {}) {
   return state;
 }
 
+export function updateWecomClientRealtimeConfigAction(inputState, payload = {}) {
+  const state = cloneState(inputState);
+  const current = ensureWecomClientRealtime(state);
+  state.wecomClientRealtime = normalizeWecomClientRealtimeConfig({
+    ...current,
+    enabled: payload.enabled,
+    monitor: {
+      ...(current.monitor || DEFAULT_WECOM_CLIENT_REALTIME.monitor),
+      ...(payload.monitor || {})
+    },
+    worker: {
+      ...(current.worker || DEFAULT_WECOM_CLIENT_REALTIME.worker),
+      ...(payload.worker || {})
+    },
+    employeeAccount: {
+      ...(current.employeeAccount || DEFAULT_WECOM_CLIENT_REALTIME.employeeAccount),
+      ...(payload.employeeAccount || {})
+    },
+    archiveReconciler: {
+      ...(current.archiveReconciler || DEFAULT_WECOM_CLIENT_REALTIME.archiveReconciler),
+      ...(payload.archiveReconciler || {})
+    }
+  }, current);
+  syncPersonalWechatFromWecomClientRealtime(state);
+  appendWecomClientRealtimeLog(state, {
+    type: "配置更新",
+    status: "成功",
+    accountId: state.wecomClientRealtime.employeeAccount.id,
+    contentPreview: `${state.wecomClientRealtime.enabled ? "启用" : "停用"}，员工号 ${state.wecomClientRealtime.employeeAccount.name}`
+  });
+  audit(
+    state,
+    "更新企微客户端实时连接器配置",
+    "wecomClientRealtime",
+    `${state.wecomClientRealtime.enabled ? "启用" : "停用"}，员工号 ${state.wecomClientRealtime.employeeAccount.name}，自动回复${state.wecomClientRealtime.employeeAccount.autoReply ? "开启" : "关闭"}`
+  );
+  return state;
+}
+
+export function updateWecomClientRealtimeStatusAction(inputState, payload = {}) {
+  const state = cloneState(inputState);
+  const realtime = ensureWecomClientRealtime(state);
+  const now = new Date().toISOString();
+  if (payload.monitor || payload.status || payload.lastSeenAt || payload.error) {
+    realtime.monitor = normalizeWecomClientMonitor({
+      ...realtime.monitor,
+      ...(payload.monitor || {}),
+      status: payload.monitor?.status || payload.status || realtime.monitor.status,
+      lastSeenAt: payload.monitor?.lastSeenAt || payload.lastSeenAt || (payload.status ? now : realtime.monitor.lastSeenAt),
+      lastError: payload.monitor?.lastError || payload.error || realtime.monitor.lastError
+    }, realtime.monitor);
+  }
+  if (payload.worker) {
+    realtime.worker = normalizeWecomClientWorker({
+      ...realtime.worker,
+      ...payload.worker,
+      lastEventAt: payload.worker.lastEventAt || now
+    }, realtime.worker);
+  }
+  if (payload.archiveReconciler) {
+    realtime.archiveReconciler = normalizeWecomClientRealtimeConfig({
+      ...realtime,
+      archiveReconciler: {
+        ...realtime.archiveReconciler,
+        ...payload.archiveReconciler
+      }
+    }, realtime).archiveReconciler;
+  }
+  syncPersonalWechatFromWecomClientRealtime(state);
+  appendWecomClientRealtimeLog(state, {
+    type: payload.type || "实时状态",
+    status: payload.error ? "失败" : "成功",
+    accountId: realtime.employeeAccount.id,
+    roomId: payload.roomId,
+    roomName: payload.roomName,
+    contentPreview: payload.detail || payload.status || realtime.monitor.status,
+    errorCode: payload.errorCode,
+    error: payload.error
+  });
+  audit(state, "企微客户端实时状态", "wecomClientRealtime", payload.detail || payload.status || realtime.monitor.status);
+  return state;
+}
+
+export function ingestWecomClientRealtimeMessageAction(inputState, payload = {}) {
+  let state = cloneState(inputState);
+  const realtime = ensureWecomClientRealtime(state);
+  if (!realtime.enabled) throw new Error("WeCom client realtime connector is disabled");
+  syncPersonalWechatFromWecomClientRealtime(state);
+  state = ingestPersonalWechatMessageAction(state, {
+    ...payload,
+    source: "wecom-client-realtime",
+    confirmSource: payload.confirmSource || "vendor-archive-download"
+  });
+  const nextRealtime = ensureWecomClientRealtime(state);
+  nextRealtime.monitor.status = "实时消息已入站";
+  nextRealtime.monitor.lastSeenAt = new Date().toISOString();
+  nextRealtime.monitor.lastError = "";
+  appendWecomClientRealtimeLog(state, {
+    type: "实时未读入站",
+    status: "成功",
+    accountId: nextRealtime.employeeAccount.id,
+    roomId: payload.roomId || payload.chatId || payload.chatid,
+    roomName: payload.roomName || payload.chatName || payload.groupName,
+    messageId: payload.messageId || payload.externalMessageId || payload.msgid,
+    contentPreview: payload.text || payload.message
+  });
+  audit(state, "企微客户端实时未读入站", payload.roomId || payload.chatId || payload.chatid, payload.messageId || payload.text || "");
+  return state;
+}
+
+export function ingestWecomClientRealtimeMessagesAction(inputState, payload = {}) {
+  const rawMessages = Array.isArray(payload.messages)
+    ? payload.messages
+    : Array.isArray(payload.data)
+      ? payload.data
+      : Array.isArray(payload.items)
+        ? payload.items
+        : [];
+  let state = cloneState(inputState);
+  const result = {
+    total: Math.min(100, rawMessages.length),
+    accepted: [],
+    failed: []
+  };
+  for (const rawMessage of rawMessages.slice(0, 100)) {
+    const messageId = cleanLimitedText(rawMessage?.messageId || rawMessage?.msgid || rawMessage?.id, "", 180);
+    const roomId = cleanLimitedText(rawMessage?.roomId || rawMessage?.chatId || rawMessage?.chatid, "", 180);
+    try {
+      state = ingestWecomClientRealtimeMessageAction(state, rawMessage);
+      result.accepted.push({
+        messageId: messageId || cleanLimitedText(rawMessage?.externalMessageId, "", 180),
+        roomId,
+        roomName: cleanLimitedText(rawMessage?.roomName || rawMessage?.chatName || rawMessage?.groupName, "", 160)
+      });
+    } catch (error) {
+      result.failed.push({
+        messageId,
+        roomId,
+        roomName: cleanLimitedText(rawMessage?.roomName || rawMessage?.chatName || rawMessage?.groupName, "", 160),
+        errorCode: "inbound_write_failed",
+        error: cleanLimitedText(error.message, "企微实时入站失败", 400)
+      });
+    }
+  }
+  const realtime = ensureWecomClientRealtime(state);
+  realtime.monitor.status = result.failed.length ? "实时批量入站部分失败" : "实时批量入站完成";
+  realtime.monitor.lastSeenAt = new Date().toISOString();
+  realtime.monitor.lastError = result.failed.at(-1)?.error || "";
+  appendWecomClientRealtimeLog(state, {
+    type: "实时批量入站",
+    status: result.failed.length ? "部分失败" : "成功",
+    accountId: realtime.employeeAccount.id,
+    contentPreview: `入站${result.accepted.length}/${result.total}条，失败${result.failed.length}条`,
+    errorCode: result.failed.length ? "inbound_batch_partial_failed" : "",
+    error: result.failed.at(-1)?.error || ""
+  });
+  audit(state, "企微客户端实时批量入站", "wecomClientRealtime", `入站${result.accepted.length}/${result.total}条`);
+  return { state, result };
+}
+
+export function reconcileWecomClientArchiveAction(inputState, payload = {}) {
+  const state = cloneState(inputState);
+  const realtime = ensureWecomClientRealtime(state);
+  syncPersonalWechatFromWecomClientRealtime(state);
+  const jobIds = Array.isArray(payload.jobIds) ? payload.jobIds : payload.jobId ? [payload.jobId] : [];
+  let nextState = state;
+  const confirmed = [];
+  for (const jobId of jobIds) {
+    nextState = confirmPersonalWechatSendJobAction(nextState, jobId, {
+      confirmedMessageId: payload.confirmedMessageId || `archive_confirm_${jobId}`,
+      now: payload.now
+    });
+    confirmed.push(jobId);
+  }
+  const nextRealtime = ensureWecomClientRealtime(nextState);
+  nextRealtime.archiveReconciler.status = confirmed.length ? "补账已确认" : "无可确认任务";
+  nextRealtime.archiveReconciler.lastDownloadedAt = cleanLimitedText(payload.downloadedAt, new Date().toISOString(), 80);
+  nextRealtime.archiveReconciler.lastConfirmedAt = confirmed.length ? new Date().toISOString() : nextRealtime.archiveReconciler.lastConfirmedAt;
+  nextRealtime.archiveReconciler.lastError = "";
+  appendWecomClientRealtimeLog(nextState, {
+    type: "历史下载补账",
+    status: "成功",
+    accountId: realtime.employeeAccount.id,
+    sendJobId: confirmed.join(","),
+    contentPreview: confirmed.length ? `确认${confirmed.length}条发送任务` : "本次无任务确认"
+  });
+  audit(nextState, "企微服务商历史下载补账", "wecomClientRealtime", confirmed.length ? confirmed.join("、") : "无确认任务");
+  return nextState;
+}
+
 export function ingestPersonalWechatMessageAction(inputState, payload = {}) {
   const state = cloneState(inputState);
   const config = ensurePersonalWechat(state);
@@ -2901,6 +3661,19 @@ export function ingestPersonalWechatMessageAction(inputState, payload = {}) {
   ensureWecomBindings(state);
   if (!config.enabled) throw new Error("Personal WeChat AccountAgent is disabled");
   const inbound = normalizeInboundGroupMessage(payload, payload.source || "personal-wechat");
+  if (isNonBusinessWecomRoomName(inbound.roomName)) {
+    appendPersonalWechatLog(state, {
+      type: "非业务会话忽略",
+      status: "成功",
+      accountId: config.account.id,
+      roomId: inbound.roomId,
+      roomName: inbound.roomName,
+      messageId: inbound.messageId,
+      contentPreview: inbound.text
+    });
+    audit(state, "企微非业务会话忽略", inbound.roomId, inbound.roomName);
+    return state;
+  }
   if (hasRecentPersonalWechatMessage(state, inbound.messageId)) {
     appendPersonalWechatLog(state, {
       type: "重复入站",
@@ -2934,7 +3707,12 @@ export function ingestPersonalWechatMessageAction(inputState, payload = {}) {
       text: inbound.text,
       msgType: inbound.msgType,
       sendAt: inbound.sendAt,
-      source: inbound.source
+      source: inbound.source,
+      observedAt: inbound.observedAt,
+      readBatchId: inbound.readBatchId,
+      visibleOrder: inbound.visibleOrder,
+      senderConfidence: inbound.senderConfidence,
+      readSource: inbound.readSource
     }
   });
   upsertWecomGroupBinding(state, {
@@ -2968,7 +3746,7 @@ export function ingestPersonalWechatMessageAction(inputState, payload = {}) {
   if (inbound.senderType === "customer") {
     nextState = ingestMessageAction(state, {
       customerId: target.customerId,
-      channel: "VIP模拟群",
+      channel: "VIP群",
       message: inbound.text,
       senderRole: "客户",
       senderName: inbound.senderName
@@ -2976,7 +3754,7 @@ export function ingestPersonalWechatMessageAction(inputState, payload = {}) {
   } else {
     appendConversationMessage(nextState, {
       customerId: target.customerId,
-      channel: "VIP模拟群",
+      channel: "VIP群",
       message: inbound.text,
       senderRole: ["bot", "managed_account"].includes(inbound.senderType) ? "私域" : "销售",
       senderName: inbound.senderName
@@ -3028,7 +3806,7 @@ export function ingestWecomArchiveMessageAction(inputState, payload = {}) {
     type: "会话存档入站",
     status: "成功",
     customerId: inbound.customerId || nextConfig.archive.defaultCustomerId || nextState.selectedCustomerId,
-    channel: "VIP模拟群",
+    channel: "VIP群",
     source: "wecom-archive",
     externalMessageId: inbound.messageId,
     chatId: inbound.roomId,
@@ -3127,26 +3905,59 @@ export function failPersonalWechatSendJobAction(inputState, jobId = "", payload 
   const nowMs = personalWechatNowMs(payload.now);
   const now = new Date(nowMs).toISOString();
   const backoffSeconds = Math.max(5, Number(config.account.failureBackoffSeconds || 30));
-  job.status = "failed";
+  const errorCode = cleanLimitedText(payload.errorCode, "", 80);
+  if (TRANSIENT_PERSONAL_WECHAT_SEND_ERRORS.has(errorCode)) {
+    job.status = "queued";
+    job.error = cleanLimitedText(payload.error, "企微客户端暂不可用，任务保留并稍后重试。", 400);
+    job.retryAfterAt = new Date(nowMs + backoffSeconds * 1000).toISOString();
+    job.attempts = Math.max(1, Number(job.attempts || 0));
+    config.account.status = "发送暂停";
+    config.account.lastEventAt = now;
+    config.account.lastError = job.error;
+    config.gateway.status = "发送暂停，等待重试";
+    config.gateway.lastEventAt = now;
+    config.gateway.lastError = job.error;
+    const context = config.groupContexts.find((item) => item.roomId === job.roomId);
+    if (context) context.pendingSendJobId = job.jobId;
+    appendPersonalWechatLog(state, {
+      type: "发送暂停",
+      status: "等待重试",
+      accountId: job.accountId,
+      roomId: job.roomId,
+      roomName: job.roomName,
+      sendJobId: job.jobId,
+      contentPreview: job.replyText,
+      errorCode,
+      error: job.error,
+      gatewayMode: job.gatewayMode,
+      gatewayRequestId: job.gatewayRequestId,
+      externalSideEffects: false
+    });
+    audit(state, "个人微信发送暂停", job.jobId, job.error);
+    return state;
+  }
+  const terminalStatus = payload.status === "cancelled" || payload.terminalStatus === "cancelled" ? "cancelled" : "failed";
+  job.status = terminalStatus;
   job.error = cleanLimitedText(payload.error, "个人微信Gateway发送失败，需退避后重新判断或人工接管。", 400);
-  job.retryAfterAt = new Date(nowMs + backoffSeconds * 1000).toISOString();
+  job.retryAfterAt = terminalStatus === "failed" ? new Date(nowMs + backoffSeconds * 1000).toISOString() : "";
   job.attempts = Math.max(1, Number(job.attempts || 0));
-  config.account.status = "异常";
+  config.account.status = terminalStatus === "cancelled" ? "发送已取消" : "异常";
   config.account.lastEventAt = now;
   config.account.lastError = job.error;
-  config.gateway.status = "发送失败";
+  config.gateway.status = terminalStatus === "cancelled" ? "发送已取消" : "发送失败";
   config.gateway.lastEventAt = now;
   config.gateway.lastError = job.error;
   const context = config.groupContexts.find((item) => item.roomId === job.roomId);
   if (context?.pendingSendJobId === job.jobId) context.pendingSendJobId = "";
   appendPersonalWechatLog(state, {
-    type: "发送失败",
+    type: terminalStatus === "cancelled" ? "发送取消" : "发送失败",
     status: "失败",
     accountId: job.accountId,
     roomId: job.roomId,
     roomName: job.roomName,
     sendJobId: job.jobId,
     contentPreview: job.replyText,
+    errorCode: payload.errorCode,
     error: job.error,
     gatewayMode: job.gatewayMode,
     gatewayRequestId: job.gatewayRequestId,
@@ -3225,7 +4036,7 @@ export function confirmPersonalWechatSendJobAction(inputState, jobId = "", paylo
   }
   appendConversationMessage(state, {
     customerId: customer.id,
-    channel: "VIP模拟群",
+    channel: "VIP群",
     message: job.replyText,
     senderRole: "私域",
     senderName: config.account.displayName || config.account.name
@@ -3246,7 +4057,7 @@ export function confirmPersonalWechatSendJobAction(inputState, jobId = "", paylo
   });
   appendEvent(state, customer.id, {
     channel: "个人微信托管",
-    type: "模拟发送确认",
+    type: "发送确认",
     text: `AccountAgent已确认发送：${job.replyText}`
   });
   audit(state, "个人微信发送确认", job.jobId, `${job.roomName || job.roomId} / ${job.status}`);
@@ -3977,12 +4788,14 @@ export function buildCapabilityAudit(inputState) {
   const modelReport = buildModelConfigReport(state);
   const wecomReport = buildWecomConfigReport(state);
   const personalWechatReport = buildPersonalWechatReport(state);
+  const wecomRealtimeReport = buildWecomClientRealtimeReport(state);
   const wecomReady = wecomReport.summary.enabled && wecomReport.summary.configuredRoutes > 0 && wecomReport.summary.enabledRoutes > 0;
   const wecomAibotReady = wecomReport.summary.aibotEnabled && wecomReport.summary.aibotConfigured;
   const wecomArchiveReady = wecomReport.summary.archiveEnabled;
   const personalWechatReady = personalWechatReport.summary.enabled && personalWechatReport.summary.autoReply;
+  const wecomRealtimeReady = wecomRealtimeReport.summary.enabled && (wecomRealtimeReport.summary.canReceive || wecomRealtimeReport.summary.canSend);
   const vipConversationMessages = conversations
-    .filter((conversation) => conversation.channel === "VIP模拟群")
+    .filter((conversation) => conversation.channel === "VIP群")
     .reduce((sum, conversation) => sum + (conversation.messages || []).length, 0);
   const salesSamples = state.salesSamples || [];
   const highQualitySalesSamples = salesSamples.filter((sample) => sample.outcome === "成交" && Number(sample.qualityScore) >= 80);
@@ -4093,6 +4906,13 @@ export function buildCapabilityAudit(inputState) {
             ? `已启用${wecomReport.summary.enabledRoutes}个企微发送路由，成功发送${wecomReport.summary.sent}次，失败${wecomReport.summary.failed}次`
             : "可在企微接入页配置会话存档入口、智能机器人Bot ID/Secret或测试群机器人Webhook",
       gap: "真实存档拉取、解密SDK、客户同意校验、权限审批、消息幂等和失败重试仍需补齐"
+    },
+    {
+      area: "企微客户端实时连接器",
+      capability: "本地企微客户端未读识别、实时入站、企微员工客户端发送调度和历史下载补账确认",
+      status: wecomRealtimeReady ? "Worker可用" : wecomRealtimeReport.summary.enabled ? "待接本地脚本" : "已停用",
+      evidence: `员工号 ${wecomRealtimeReport.summary.accountName}，Monitor ${wecomRealtimeReport.summary.monitorStatus}，Worker ${wecomRealtimeReport.summary.workerStatus}，接收${wecomRealtimeReport.summary.canReceive ? "可用" : "不可用"}，发送${wecomRealtimeReport.summary.canSend ? "可用" : "不可用"}，补账${wecomRealtimeReport.summary.archiveReconcileStatus}`,
+      gap: "真实未读识别、搜索群、标题校验、粘贴发送和窗口异常处理需由本地企微客户端脚本实现；系统不保存截图/录屏文件"
     },
     {
       area: "个人微信AccountAgent",
