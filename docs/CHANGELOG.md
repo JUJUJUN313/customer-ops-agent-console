@@ -1,5 +1,31 @@
 # 变更记录
 
+## 2026-06-11
+
+### 新增
+
+- 新增电销企微后台群发派发链路：`wecomAdminMassSend` 状态、`/api/wecom-admin/mass-send/*` API、`scripts/wecom-admin-local-automation.mjs` 和 `scripts/wecom-admin-mass-send-worker.mjs`。
+- 电销运营页新增“企微后台群发派发”区域：推荐批次可填写指定员工、创建群发任务、审批入队、检查企微后台执行器并派发下一条任务。
+- 新增本地Chrome企微后台执行器，默认定位企微后台 `客户与上下游 > 客户联系 > 群发工具` 页面，默认只做 dry-run，不点击最终提交。
+- 新增群发任务状态流转：`pending_approval -> queued -> dispatching -> dry_run_passed/submitted/failed/cancelled/manual_done`，并记录目标客户、指定员工、文案、审批人、执行结果和外部副作用状态。
+- 新增同批次幂等保护：同一分层、客户集合、员工集合和文案在未完成前重复创建，会复用原群发任务，避免重复批次污染界面。
+- 新增企微后台群发单元测试：覆盖创建、重复创建复用、审批、Worker未就绪不调度、Worker就绪调度、dry-run回写，以及缺客户/缺员工/缺文案拒绝。
+
+### 改进
+
+- 企微客户端实时发送调度的 `skipRoomIds` 候选排序稳定化：本轮刚读取到新消息的会话先标记等待，再派发其他会话，保持“只跳过对应会话、不影响其他会话”的逻辑，并避免日志顺序受同毫秒任务创建影响。
+- 新群发链路使用独立端口 `8792`、独立脚本 `wecom-admin-*`、独立状态 `wecomAdminMassSend`，不复用企微客户端实时收发的 `8791`、未读读取、发送队列或 SendScheduler。
+
+### 验证
+
+- `node --check src/systemActions.js`
+- `node --check src/app.js`
+- `node --check src/api.js`
+- `node --check scripts/serve.mjs`
+- `node --check scripts/wecom-admin-local-automation.mjs`
+- `node --check scripts/wecom-admin-mass-send-worker.mjs`
+- `npm test`：78 个用例通过；现有企微客户端实时收发、发送前预检、静默窗口、按会话跳过、锁屏暂停和员工接管回归继续通过。
+
 ## 2026-06-04
 
 ### 新增

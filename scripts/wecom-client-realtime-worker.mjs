@@ -838,11 +838,14 @@ async function runOnce() {
           gatewayMode: "wecom-client-local-script",
           gatewayRequestId: result.gatewayRequestId || result.requestId || result.id || "",
           externalMessageId: result.externalMessageId || result.messageId || result.msgid || "",
+          openStrategy: result.openStrategy || result.timings?.openStrategy || "",
+          sendTimings: result.timings || {},
+          preSendGuard: result.preSendGuard || null,
           now: new Date().toISOString()
         })
       });
       dispatched += 1;
-      console.log(`dispatched ${job.jobId}`);
+      console.log(`dispatched ${job.jobId} strategy=${result.openStrategy || result.timings?.openStrategy || "unknown"} totalMs=${result.timings?.totalMs || 0}`);
     } catch (error) {
       failed += 1;
       await api(`/api/wecom-client/realtime/send-jobs/${encodeURIComponent(job.jobId)}/fail`, {

@@ -13,13 +13,16 @@ import {
   buildOutboundDraftReport,
   buildPersonalWechatReport,
   buildTaskSlaReport,
+  buildWecomAdminMassSendReport,
   buildWecomClientRealtimeReport,
   buildWecomConfigReport,
   bindChatSessionCustomerAction,
+  approveWecomMassSendTaskAction,
   createCustomerAction,
   createOutboundDraftAction,
   createSalesSampleAction,
   createTaskAction,
+  createWecomMassSendTaskAction,
   diagnoseState,
   escalateOverdueTasksAction,
   enhanceLatestAgentRunWithLlmAction,
@@ -37,6 +40,7 @@ import {
   markPersonalWechatSendJobDispatchedAction,
   runAgentAction,
   runDemoAction,
+  runWecomMassSendSchedulerAction,
   runWorkflowAction,
   seedState,
   sendOutboundDraftToWecomAction,
@@ -51,6 +55,7 @@ import {
   updatePersonalWechatGatewayStatusAction,
   updateWecomClientRealtimeConfigAction,
   updateWecomClientRealtimeStatusAction,
+  updateWecomAdminMassSendStatusAction,
   updateWecomBridgeStatusAction,
   updateWecomArchiveStatusAction,
   updateWecomGroupBindingAction,
@@ -59,6 +64,7 @@ import {
   updateTemplateAction,
   updateWecomConfigAction,
   replyChatSessionAction,
+  recordWecomMassSendTaskResultAction,
   reconcileWecomClientArchiveAction,
   upsertQuoteAction
 } from "../src/systemActions.js";
@@ -183,6 +189,7 @@ function publicState(state) {
   copy.wecomLogs = Array.isArray(state.wecomLogs) ? state.wecomLogs.slice(0, 100) : [];
   copy.personalWechat = buildPersonalWechatReport(state).config;
   copy.wecomClientRealtime = buildWecomClientRealtimeReport(state).config;
+  copy.wecomAdminMassSend = buildWecomAdminMassSendReport(state).config;
   return copy;
 }
 
@@ -297,6 +304,10 @@ async function handleApi(req, res, pathname) {
 
   if (req.method === "GET" && pathname === "/api/wecom-client/realtime/config") {
     return json(res, 200, buildWecomClientRealtimeReport(readState()));
+  }
+
+  if (req.method === "GET" && pathname === "/api/wecom-admin/mass-send") {
+    return json(res, 200, buildWecomAdminMassSendReport(readState()));
   }
 
   if (req.method === "GET" && pathname === "/api/wecom/aibot/check") {
@@ -555,6 +566,66 @@ async function handleApi(req, res, pathname) {
     }
   }
 
+  if (req.method === "POST" && pathname === "/api/wecom-admin/mass-send/worker/check") {
+    const currentState = readState();
+    const admin = currentState.wecomAdminMassSend || {};
+    const worker = admin.worker || {};
+    if (worker.mode === "disabled") {
+      const nextState = await mutateState((state) => updateWecomAdminMassSendStatusAction(state, {
+        ok: false,
+        status: "检查失败",
+        worker: { canDispatch: false, lastError: "企微后台群发执行器已停用" },
+        error: "企微后台群发执行器已停用"
+      }));
+      return json(res, 200, { ok: false, missing: ["worker.mode"], state: publicState(nextState) });
+    }
+    const sidecarUrl = worker.sidecarUrl || "http://127.0.0.1:8792";
+    try {
+      const healthUrl = endpointWithPath(sidecarUrl, "/health");
+      const result = await checkHttpEndpoint(healthUrl, 5000);
+      const capability = result.body?.capabilities || result.body || {};
+      const ok = Boolean(result.ok) && capability.ok !== false;
+      const canDispatch = ok && (capability.canDispatch === true || capability.massSend?.enabled === true);
+      const supportsDryRun = ok && (capability.supportsDryRun !== false);
+      const supportsSubmit = ok && capability.supportsSubmit === true;
+      const loginStatus = capability.loginStatus || capability.account?.loginStatus || capability.status || (ok ? "企微后台可达" : "未连接");
+      const nextState = await mutateState((state) => updateWecomAdminMassSendStatusAction(state, {
+        ok: ok && canDispatch,
+        status: ok ? canDispatch ? "执行器可用" : "执行器可达但能力不足" : "检查失败",
+        worker: {
+          mode: worker.mode || "chrome-admin",
+          sidecarUrl,
+          canDispatch,
+          supportsDryRun,
+          supportsSubmit,
+          loginStatus,
+          status: ok ? canDispatch ? "执行器可用" : "执行器可达但能力不足" : "检查失败",
+          lastError: ok ? canDispatch ? "" : "执行器未声明canDispatch=true" : `执行器健康检查失败 HTTP ${result.httpStatus}`
+        },
+        detail: ok
+          ? `企微后台执行器健康检查 ${result.httpStatus}，${result.latencyMs}ms，派发 ${canDispatch ? "可用" : "不可用"}，登录态 ${loginStatus}`
+          : `企微后台执行器健康检查失败 HTTP ${result.httpStatus}`,
+        error: ok ? canDispatch ? "" : "执行器未声明canDispatch=true" : `执行器健康检查失败 HTTP ${result.httpStatus}`
+      }));
+      return json(res, 200, {
+        ok: ok && canDispatch,
+        url: healthUrl,
+        result,
+        capability: { canDispatch, supportsDryRun, supportsSubmit, loginStatus },
+        state: publicState(nextState)
+      });
+    } catch (error) {
+      const nextState = await mutateState((state) => updateWecomAdminMassSendStatusAction(state, {
+        ok: false,
+        status: "检查失败",
+        worker: { mode: worker.mode || "chrome-admin", sidecarUrl, canDispatch: false, loginStatus: "未连接", status: "检查失败", lastError: error.message },
+        detail: "企微后台群发执行器不可达",
+        error: error.message
+      }));
+      return json(res, 200, { ok: false, error: error.message, state: publicState(nextState) });
+    }
+  }
+
   if (req.method === "POST" && pathname === "/api/personal-wechat/gateway/status") {
     const body = await readBody(req);
     const nextState = await mutateState((currentState) => updatePersonalWechatGatewayStatusAction(currentState, body));
@@ -792,6 +863,38 @@ async function handleApi(req, res, pathname) {
   if (req.method === "POST" && pathname === "/api/wecom-client/realtime/reconcile") {
     const body = await readBody(req);
     const nextState = await mutateState((currentState) => reconcileWecomClientArchiveAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  if (req.method === "POST" && pathname === "/api/wecom-admin/mass-send/status") {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => updateWecomAdminMassSendStatusAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  if (req.method === "POST" && pathname === "/api/wecom-admin/mass-send/tasks") {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => createWecomMassSendTaskAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  if (req.method === "POST" && pathname === "/api/wecom-admin/mass-send/scheduler/run") {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => runWecomMassSendSchedulerAction(currentState, body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  const massSendApproveMatch = pathname.match(/^\/api\/wecom-admin\/mass-send\/tasks\/([^/]+)\/approve$/);
+  if (req.method === "POST" && massSendApproveMatch) {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => approveWecomMassSendTaskAction(currentState, massSendApproveMatch[1], body));
+    return json(res, 200, publicState(nextState));
+  }
+
+  const massSendResultMatch = pathname.match(/^\/api\/wecom-admin\/mass-send\/tasks\/([^/]+)\/result$/);
+  if (req.method === "POST" && massSendResultMatch) {
+    const body = await readBody(req);
+    const nextState = await mutateState((currentState) => recordWecomMassSendTaskResultAction(currentState, massSendResultMatch[1], body));
     return json(res, 200, publicState(nextState));
   }
 

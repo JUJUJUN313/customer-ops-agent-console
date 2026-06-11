@@ -23,6 +23,9 @@ const VALID_STAGES = new Set(STAGES);
 const VALID_TASK_STATUSES = new Set(["待处理", "跟进中", "已完成"]);
 const VALID_DRAFT_STATUSES = new Set(["待确认", "已确认", "已复制", "人工已处理", "已废弃", "企微已发送"]);
 const VALID_DRAFT_CHANNELS = new Set(["电话外呼", "短信", "企微私聊", "VIP群", "报价页", "人工触达"]);
+const VALID_WECOM_MASS_SEND_STATUSES = new Set(["pending_approval", "queued", "dispatching", "dry_run_passed", "submitted", "failed", "cancelled", "manual_done"]);
+const TERMINAL_WECOM_MASS_SEND_STATUSES = new Set(["submitted", "failed", "cancelled", "manual_done"]);
+const VALID_WECOM_MASS_SEND_SUBMIT_MODES = new Set(["dry-run", "submit"]);
 const VALID_WECOM_SEND_MODES = new Set(["manualApproval", "testOnly"]);
 const VALID_WECOM_MSGTYPES = new Set(["markdown", "text"]);
 const VALID_OUTCOMES = new Set(["成交", "继续培育", "暂缓", "无效"]);
@@ -222,6 +225,30 @@ const DEFAULT_WECOM_CLIENT_REALTIME = {
     lastError: ""
   },
   logs: []
+};
+const DEFAULT_WECOM_ADMIN_MASS_SEND = {
+  enabled: true,
+  worker: {
+    mode: "chrome-admin",
+    sidecarUrl: "http://127.0.0.1:8792",
+    canDispatch: false,
+    supportsDryRun: true,
+    supportsSubmit: false,
+    loginStatus: "未连接",
+    status: "未启动",
+    lastConnectedAt: "",
+    lastEventAt: "",
+    lastError: ""
+  },
+  settings: {
+    requireApproval: true,
+    defaultSubmitMode: "dry-run",
+    defaultPageUrl: "https://work.weixin.qq.com/wework_admin/frame#/customer/config/groupSend",
+    idleWhenDone: true
+  },
+  tasks: [],
+  logs: [],
+  lastSchedulerResult: null
 };
 const ACTIVE_PERSONAL_WECHAT_JOB_STATUSES = new Set(["queued", "sending", "sent", "sent_pending_confirm", "manual_required"]);
 const DISPATCHABLE_PERSONAL_WECHAT_JOB_STATUSES = new Set(["queued"]);
@@ -1397,6 +1424,124 @@ function ensureWecomClientRealtime(state) {
   return state.wecomClientRealtime;
 }
 
+function normalizeWecomAdminMassSendStatus(value = "", fallback = "pending_approval") {
+  const status = cleanLimitedText(value, fallback, 40);
+  return VALID_WECOM_MASS_SEND_STATUSES.has(status) ? status : fallback;
+}
+
+function normalizeWecomAdminSubmitMode(value = "", fallback = "dry-run") {
+  const mode = cleanLimitedText(value, fallback, 40);
+  return VALID_WECOM_MASS_SEND_SUBMIT_MODES.has(mode) ? mode : fallback;
+}
+
+function normalizeWecomAdminWorker(worker = {}, current = DEFAULT_WECOM_ADMIN_MASS_SEND.worker) {
+  const mode = cleanLimitedText(worker.mode, current.mode || "chrome-admin", 40);
+  return {
+    mode: ["chrome-admin", "mock", "disabled"].includes(mode) ? mode : "chrome-admin",
+    sidecarUrl: worker.sidecarUrl
+      ? normalizeApiUrl(worker.sidecarUrl, "", false)
+      : cleanLimitedText(current.sidecarUrl || DEFAULT_WECOM_ADMIN_MASS_SEND.worker.sidecarUrl, "", 300),
+    canDispatch: worker.canDispatch === undefined ? Boolean(current.canDispatch) : worker.canDispatch === true || worker.canDispatch === "true",
+    supportsDryRun: worker.supportsDryRun === undefined ? Boolean(current.supportsDryRun ?? true) : worker.supportsDryRun === true || worker.supportsDryRun === "true",
+    supportsSubmit: worker.supportsSubmit === undefined ? Boolean(current.supportsSubmit) : worker.supportsSubmit === true || worker.supportsSubmit === "true",
+    loginStatus: cleanLimitedText(worker.loginStatus, current.loginStatus || "未连接", 80),
+    status: cleanLimitedText(worker.status, current.status || "未启动", 60),
+    lastConnectedAt: cleanLimitedText(worker.lastConnectedAt, current.lastConnectedAt || "", 80),
+    lastEventAt: cleanLimitedText(worker.lastEventAt, current.lastEventAt || "", 80),
+    lastError: cleanLimitedText(worker.lastError, current.lastError || "", 400)
+  };
+}
+
+function normalizeWecomAdminSettings(settings = {}, current = DEFAULT_WECOM_ADMIN_MASS_SEND.settings) {
+  const submitMode = normalizeWecomAdminSubmitMode(settings.defaultSubmitMode, current.defaultSubmitMode || "dry-run");
+  return {
+    requireApproval: settings.requireApproval === undefined ? Boolean(current.requireApproval ?? true) : settings.requireApproval === true || settings.requireApproval === "true",
+    defaultSubmitMode: submitMode,
+    defaultPageUrl: cleanLimitedText(settings.defaultPageUrl, current.defaultPageUrl || DEFAULT_WECOM_ADMIN_MASS_SEND.settings.defaultPageUrl, 500),
+    idleWhenDone: settings.idleWhenDone === undefined ? Boolean(current.idleWhenDone ?? true) : settings.idleWhenDone === true || settings.idleWhenDone === "true"
+  };
+}
+
+function normalizeWecomMassSendTask(task = {}) {
+  const status = normalizeWecomAdminMassSendStatus(task.status, "pending_approval");
+  const targetCustomerIds = cleanLimitedTextList(task.targetCustomerIds, 80, 10000);
+  const excludedCustomerIds = cleanLimitedTextList(task.excludedCustomerIds, 80, 10000);
+  const employeeNames = cleanLimitedTextList(task.employeeNames, 120, 200);
+  return {
+    taskId: cleanLimitedText(task.taskId, id("wms_task"), 80),
+    title: cleanLimitedText(task.title, "企微客户群发任务", 160),
+    segmentKey: cleanLimitedText(task.segmentKey, "manual", 80),
+    segmentTitle: cleanLimitedText(task.segmentTitle, task.title || "企微客户群发任务", 160),
+    employeeNames,
+    messageText: cleanLimitedText(task.messageText || task.text || task.content, "", 4000),
+    targetCustomerIds,
+    targetCustomerNames: cleanLimitedTextList(task.targetCustomerNames, 120, 10000),
+    excludedCustomerIds,
+    excludedReason: cleanLimitedText(task.excludedReason, "", 500),
+    customerCount: Math.max(0, Math.round(finiteNumber(task.customerCount, targetCustomerIds.length))),
+    status,
+    submitMode: normalizeWecomAdminSubmitMode(task.submitMode, "dry-run"),
+    source: cleanLimitedText(task.source, "telemarketing", 80),
+    priority: normalizePriority(task.priority, "中"),
+    createdBy: cleanLimitedText(task.createdBy, "local-operator", 80),
+    approvedBy: cleanLimitedText(task.approvedBy, "", 80),
+    assignedDepartment: cleanLimitedText(task.assignedDepartment, "", 120),
+    pageUrl: cleanLimitedText(task.pageUrl, DEFAULT_WECOM_ADMIN_MASS_SEND.settings.defaultPageUrl, 500),
+    audienceKey: cleanLimitedText(task.audienceKey, "", 2000),
+    attempts: Math.max(0, Math.round(finiteNumber(task.attempts, 0))),
+    createdAt: cleanLimitedText(task.createdAt, new Date().toISOString(), 80),
+    approvedAt: cleanLimitedText(task.approvedAt, "", 80),
+    queuedAt: cleanLimitedText(task.queuedAt, "", 80),
+    dispatchStartedAt: cleanLimitedText(task.dispatchStartedAt, "", 80),
+    submittedAt: cleanLimitedText(task.submittedAt, "", 80),
+    completedAt: cleanLimitedText(task.completedAt, "", 80),
+    failedAt: cleanLimitedText(task.failedAt, "", 80),
+    cancelledAt: cleanLimitedText(task.cancelledAt, "", 80),
+    workerRequestId: cleanLimitedText(task.workerRequestId, "", 180),
+    externalTaskId: cleanLimitedText(task.externalTaskId, "", 180),
+    errorCode: cleanLimitedText(task.errorCode, "", 120),
+    error: cleanLimitedText(task.error, "", 500),
+    lastResult: task.lastResult && typeof task.lastResult === "object" ? task.lastResult : null,
+    externalSideEffects: task.externalSideEffects === true || task.externalSideEffects === "true"
+  };
+}
+
+function normalizeWecomAdminMassSendConfig(config = {}, current = DEFAULT_WECOM_ADMIN_MASS_SEND) {
+  return {
+    enabled: config.enabled === undefined ? Boolean(current.enabled ?? true) : config.enabled === true || config.enabled === "true",
+    worker: normalizeWecomAdminWorker(config.worker || {}, current.worker || DEFAULT_WECOM_ADMIN_MASS_SEND.worker),
+    settings: normalizeWecomAdminSettings(config.settings || {}, current.settings || DEFAULT_WECOM_ADMIN_MASS_SEND.settings),
+    tasks: (Array.isArray(config.tasks) ? config.tasks : current.tasks || []).map(normalizeWecomMassSendTask).slice(0, 500),
+    logs: (Array.isArray(config.logs) ? config.logs : current.logs || []).slice(0, 300),
+    lastSchedulerResult: config.lastSchedulerResult || current.lastSchedulerResult || null
+  };
+}
+
+function ensureWecomAdminMassSend(state) {
+  state.wecomAdminMassSend = normalizeWecomAdminMassSendConfig(
+    state.wecomAdminMassSend || {},
+    state.wecomAdminMassSend || DEFAULT_WECOM_ADMIN_MASS_SEND
+  );
+  return state.wecomAdminMassSend;
+}
+
+function appendWecomAdminMassSendLog(state, log = {}) {
+  const config = ensureWecomAdminMassSend(state);
+  config.logs.unshift({
+    logId: cleanLimitedText(log.logId, id("wms_log"), 80),
+    type: cleanLimitedText(log.type, "群发任务", 80),
+    status: cleanLimitedText(log.status, "记录", 40),
+    taskId: cleanLimitedText(log.taskId, "", 80),
+    title: cleanLimitedText(log.title, "", 160),
+    detail: cleanLimitedText(log.detail, "", 1000),
+    errorCode: cleanLimitedText(log.errorCode, "", 120),
+    error: cleanLimitedText(log.error, "", 500),
+    externalSideEffects: log.externalSideEffects === true || log.externalSideEffects === "true",
+    createdAt: cleanLimitedText(log.createdAt, new Date().toISOString(), 80)
+  });
+  config.logs = config.logs.slice(0, 300);
+}
+
 function syncPersonalWechatFromWecomClientRealtime(state) {
   const realtime = ensureWecomClientRealtime(state);
   const personal = ensurePersonalWechat(state);
@@ -1857,7 +2002,12 @@ function dispatchPersonalWechatJobs(state, payload = {}) {
   const skipped = [];
   const candidates = (config.sendJobs || [])
     .filter((job) => DISPATCHABLE_PERSONAL_WECHAT_JOB_STATUSES.has(job.status))
-    .sort((a, b) => personalWechatJobTimeMs(a.createdAt, 0) - personalWechatJobTimeMs(b.createdAt, 0));
+    .sort((a, b) => {
+      const aSkipped = skipRoomIds.has(a.roomId) ? 0 : 1;
+      const bSkipped = skipRoomIds.has(b.roomId) ? 0 : 1;
+      if (aSkipped !== bSkipped) return aSkipped - bSkipped;
+      return personalWechatJobTimeMs(a.createdAt, 0) - personalWechatJobTimeMs(b.createdAt, 0);
+    });
   for (const job of candidates) {
     if (availableSlots <= 0) break;
     if (job.accountId !== config.account.id) continue;
@@ -2588,6 +2738,7 @@ export function seedState() {
   const state = cloneState(initialState);
   ensureModelConfig(state);
   ensureWecomConfig(state);
+  ensureWecomAdminMassSend(state);
   state.auditLog = [
     {
       id: "audit_seed",
@@ -4520,6 +4671,291 @@ export function batchUpdateOutboundDraftsAction(inputState, payload = {}) {
   const firstDraft = state.outboundDrafts.find((draft) => draft.id === updated[0]);
   if (firstDraft) state.selectedCustomerId = firstDraft.customerId;
   audit(state, "批量更新触达草稿", "outboundDrafts", `${updated.length}条草稿更新为${status}：${updated.join("、")}`);
+  return state;
+}
+
+function wecomMassSendAudienceKey(segmentKey = "", customerIds = [], employeeNames = [], messageText = "") {
+  return [
+    cleanLimitedText(segmentKey, "manual", 80),
+    [...customerIds].sort().join("|"),
+    [...employeeNames].sort().join("|"),
+    cleanLimitedText(messageText, "", 500)
+  ].join("::");
+}
+
+function enrichWecomMassSendTask(task = {}, customerById = new Map()) {
+  const targetCustomerNames = task.targetCustomerIds
+    .map((customerId) => customerById.get(customerId)?.name || "")
+    .filter(Boolean);
+  return {
+    ...task,
+    targetCustomerNames: task.targetCustomerNames?.length ? task.targetCustomerNames : targetCustomerNames,
+    customerCount: task.targetCustomerIds.length,
+    statusLabel: wecomMassSendStatusLabel(task.status),
+    submitModeLabel: task.submitMode === "submit" ? "正式提交" : "干跑验证"
+  };
+}
+
+function wecomMassSendStatusLabel(status = "") {
+  return {
+    pending_approval: "待审批",
+    queued: "待派发",
+    dispatching: "派发中",
+    dry_run_passed: "干跑通过",
+    submitted: "已提交企微",
+    failed: "失败",
+    cancelled: "已取消",
+    manual_done: "人工已处理"
+  }[status] || "未知";
+}
+
+export function buildWecomAdminMassSendReport(inputState) {
+  const state = hydrateTaskTimings(cloneState(inputState));
+  const config = ensureWecomAdminMassSend(state);
+  const customerById = new Map(state.customers.map((customer) => [customer.id, customer]));
+  const tasks = config.tasks
+    .map((task) => enrichWecomMassSendTask(task, customerById))
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return {
+    generatedAt: new Date().toISOString(),
+    config: {
+      ...config,
+      tasks,
+      logs: (config.logs || []).slice(0, 100)
+    },
+    summary: {
+      enabled: config.enabled,
+      workerStatus: config.worker.status,
+      canDispatch: Boolean(config.worker.canDispatch),
+      supportsDryRun: Boolean(config.worker.supportsDryRun),
+      supportsSubmit: Boolean(config.worker.supportsSubmit),
+      total: tasks.length,
+      pendingApproval: tasks.filter((task) => task.status === "pending_approval").length,
+      queued: tasks.filter((task) => task.status === "queued").length,
+      dispatching: tasks.filter((task) => task.status === "dispatching").length,
+      dryRunPassed: tasks.filter((task) => task.status === "dry_run_passed").length,
+      submitted: tasks.filter((task) => task.status === "submitted").length,
+      failed: tasks.filter((task) => task.status === "failed").length
+    },
+    tasks,
+    logs: (config.logs || []).slice(0, 100)
+  };
+}
+
+export function createWecomMassSendTaskAction(inputState, payload = {}) {
+  const state = hydrateTaskTimings(cloneState(inputState));
+  const config = ensureWecomAdminMassSend(state);
+  if (!config.enabled) throw new Error("WeCom admin mass send is disabled");
+  const targetCustomerIds = cleanLimitedTextList(payload.targetCustomerIds, 80, 10000);
+  if (!targetCustomerIds.length) throw new Error("Target customer ids are required");
+  const customers = targetCustomerIds.map((customerId) => requireCustomer(state, customerId));
+  const employeeNames = cleanLimitedTextList(payload.employeeNames || payload.employeeName, 120, 200);
+  if (!employeeNames.length) throw new Error("Employee names are required");
+  const messageText = cleanLimitedText(payload.messageText || payload.text || payload.content, "", 4000);
+  if (!messageText) throw new Error("Mass send message text is required");
+  const segmentKey = cleanLimitedText(payload.segmentKey, "manual", 80);
+  const audienceKey = wecomMassSendAudienceKey(segmentKey, targetCustomerIds, employeeNames, messageText);
+  const existing = config.tasks.find((task) =>
+    task.audienceKey === audienceKey && !TERMINAL_WECOM_MASS_SEND_STATUSES.has(task.status)
+  );
+  if (existing) {
+    appendWecomAdminMassSendLog(state, {
+      type: "重复创建拦截",
+      status: "成功",
+      taskId: existing.taskId,
+      title: existing.title,
+      detail: "同一分层、客户、员工和文案已有未完成群发任务，本次复用原任务。",
+      externalSideEffects: false
+    });
+    audit(state, "复用企微群发任务", existing.taskId, `${existing.title} / ${existing.customerCount}人`);
+    return state;
+  }
+  const now = new Date().toISOString();
+  const task = normalizeWecomMassSendTask({
+    taskId: id("wms_task"),
+    title: cleanLimitedText(payload.title, `${payload.segmentTitle || "电销群发"} · ${customers.length}人`, 160),
+    segmentKey,
+    segmentTitle: cleanLimitedText(payload.segmentTitle, payload.title || "电销群发", 160),
+    employeeNames,
+    messageText,
+    targetCustomerIds,
+    targetCustomerNames: customers.map((customer) => customer.name),
+    excludedCustomerIds: payload.excludedCustomerIds,
+    excludedReason: payload.excludedReason || payload.criteria,
+    customerCount: customers.length,
+    status: config.settings.requireApproval ? "pending_approval" : "queued",
+    submitMode: normalizeWecomAdminSubmitMode(payload.submitMode, config.settings.defaultSubmitMode || "dry-run"),
+    source: payload.source || "telemarketing",
+    priority: payload.priority || "中",
+    assignedDepartment: payload.assignedDepartment || "",
+    pageUrl: payload.pageUrl || config.settings.defaultPageUrl,
+    audienceKey,
+    createdBy: payload.createdBy || "local-operator",
+    createdAt: now,
+    queuedAt: config.settings.requireApproval ? "" : now
+  });
+  config.tasks.unshift(task);
+  appendWecomAdminMassSendLog(state, {
+    type: "创建群发任务",
+    status: "成功",
+    taskId: task.taskId,
+    title: task.title,
+    detail: `${task.segmentTitle}，目标${customers.length}人，员工${employeeNames.join("、")}，状态${wecomMassSendStatusLabel(task.status)}。`,
+    externalSideEffects: false
+  });
+  audit(state, "创建企微群发任务", task.taskId, `${task.title} / ${customers.length}人 / ${task.submitMode}`);
+  return state;
+}
+
+export function approveWecomMassSendTaskAction(inputState, taskId, payload = {}) {
+  const state = hydrateTaskTimings(cloneState(inputState));
+  const config = ensureWecomAdminMassSend(state);
+  const task = config.tasks.find((item) => item.taskId === taskId);
+  if (!task) throw new Error(`WeCom mass send task not found: ${taskId || "empty"}`);
+  if (TERMINAL_WECOM_MASS_SEND_STATUSES.has(task.status)) throw new Error(`Task is already terminal: ${task.status}`);
+  const now = new Date().toISOString();
+  task.status = payload.queue === false ? "pending_approval" : "queued";
+  task.submitMode = normalizeWecomAdminSubmitMode(payload.submitMode, task.submitMode || config.settings.defaultSubmitMode);
+  task.approvedAt = now;
+  task.approvedBy = cleanLimitedText(payload.approvedBy, "local-operator", 80);
+  task.queuedAt = task.status === "queued" ? now : "";
+  task.error = "";
+  task.errorCode = "";
+  appendWecomAdminMassSendLog(state, {
+    type: "审批群发任务",
+    status: "成功",
+    taskId: task.taskId,
+    title: task.title,
+    detail: `${task.approvedBy} 已确认，${task.status === "queued" ? "进入派发队列" : "保留待审批"}，模式${task.submitMode === "submit" ? "正式提交" : "干跑验证"}。`,
+    externalSideEffects: false
+  });
+  audit(state, "审批企微群发任务", task.taskId, `${task.title} / ${wecomMassSendStatusLabel(task.status)} / ${task.submitMode}`);
+  return state;
+}
+
+export function runWecomMassSendSchedulerAction(inputState, payload = {}) {
+  const state = hydrateTaskTimings(cloneState(inputState));
+  const config = ensureWecomAdminMassSend(state);
+  const now = new Date().toISOString();
+  if (!config.enabled) {
+    config.lastSchedulerResult = { ok: false, reason: "disabled", dispatched: [] };
+    return state;
+  }
+  if (!payload.force && config.tasks.some((task) => task.status === "dispatching")) {
+    config.lastSchedulerResult = { ok: false, reason: "dispatching_exists", dispatched: [] };
+    return state;
+  }
+  if (!payload.ignoreWorkerReady && config.worker.canDispatch !== true) {
+    config.lastSchedulerResult = { ok: false, reason: "worker_not_ready", dispatched: [] };
+    return state;
+  }
+  const maxTasks = Math.max(1, Math.min(5, Math.round(finiteNumber(payload.maxTasks, 1))));
+  const candidates = config.tasks
+    .filter((task) => task.status === "queued")
+    .sort((a, b) => new Date(a.queuedAt || a.createdAt || 0).getTime() - new Date(b.queuedAt || b.createdAt || 0).getTime())
+    .slice(0, maxTasks);
+  for (const task of candidates) {
+    task.status = "dispatching";
+    task.dispatchStartedAt = now;
+    task.attempts = Math.max(0, Number(task.attempts || 0)) + 1;
+    task.workerRequestId = id("wms_req");
+    task.error = "";
+    task.errorCode = "";
+  }
+  config.lastSchedulerResult = {
+    ok: candidates.length > 0,
+    reason: candidates.length ? "dispatched" : "empty",
+    dispatched: candidates.map((task) => task.taskId),
+    generatedAt: now
+  };
+  if (candidates.length) {
+    appendWecomAdminMassSendLog(state, {
+      type: "调度群发任务",
+      status: "成功",
+      detail: `派发${candidates.length}个任务给本地企微后台执行器。`,
+      externalSideEffects: false
+    });
+    audit(state, "调度企微群发任务", "wecomAdminMassSend", candidates.map((task) => task.taskId).join("、"));
+  }
+  return state;
+}
+
+export function recordWecomMassSendTaskResultAction(inputState, taskId, payload = {}) {
+  const state = hydrateTaskTimings(cloneState(inputState));
+  const config = ensureWecomAdminMassSend(state);
+  const task = config.tasks.find((item) => item.taskId === taskId);
+  if (!task) throw new Error(`WeCom mass send task not found: ${taskId || "empty"}`);
+  const now = new Date().toISOString();
+  const rawStatus = cleanLimitedText(payload.status || (payload.ok ? "submitted" : "failed"), "failed", 60);
+  let status = rawStatus;
+  if (rawStatus === "sent") status = "submitted";
+  if (rawStatus === "ok" || rawStatus === "success") status = task.submitMode === "submit" ? "submitted" : "dry_run_passed";
+  status = normalizeWecomAdminMassSendStatus(status, "failed");
+  task.status = status;
+  task.lastResult = payload.result || payload;
+  task.externalTaskId = cleanLimitedText(payload.externalTaskId || payload.taskExternalId, task.externalTaskId || "", 180);
+  task.errorCode = cleanLimitedText(payload.errorCode, "", 120);
+  task.error = cleanLimitedText(payload.error, "", 500);
+  if (status === "submitted") {
+    task.submittedAt = now;
+    task.completedAt = now;
+    task.externalSideEffects = task.submitMode === "submit" || payload.externalSideEffects === true;
+  } else if (status === "dry_run_passed") {
+    task.completedAt = now;
+    task.externalSideEffects = false;
+  } else if (status === "failed") {
+    task.failedAt = now;
+    task.externalSideEffects = false;
+  } else if (status === "cancelled") {
+    task.cancelledAt = now;
+    task.externalSideEffects = false;
+  } else if (status === "manual_done") {
+    task.completedAt = now;
+    task.externalSideEffects = payload.externalSideEffects === true;
+  }
+  appendWecomAdminMassSendLog(state, {
+    type: "回写群发结果",
+    status: status === "failed" ? "失败" : "成功",
+    taskId: task.taskId,
+    title: task.title,
+    detail: payload.detail || `${task.title} 已更新为${wecomMassSendStatusLabel(status)}。`,
+    errorCode: task.errorCode,
+    error: task.error,
+    externalSideEffects: task.externalSideEffects
+  });
+  audit(state, "回写企微群发结果", task.taskId, `${task.title} / ${wecomMassSendStatusLabel(status)}`);
+  return state;
+}
+
+export function updateWecomAdminMassSendStatusAction(inputState, payload = {}) {
+  const state = hydrateTaskTimings(cloneState(inputState));
+  const config = ensureWecomAdminMassSend(state);
+  const workerPatch = payload.worker && typeof payload.worker === "object" ? payload.worker : payload;
+  const previousStatus = config.worker.status;
+  const previousLoginStatus = config.worker.loginStatus;
+  const previousError = config.worker.lastError;
+  config.worker = normalizeWecomAdminWorker({
+    ...config.worker,
+    ...workerPatch,
+    status: payload.status || workerPatch.status || config.worker.status,
+    lastConnectedAt: payload.connected || payload.ok || workerPatch.canDispatch ? new Date().toISOString() : workerPatch.lastConnectedAt || config.worker.lastConnectedAt,
+    lastEventAt: new Date().toISOString(),
+    lastError: payload.error || workerPatch.lastError || ""
+  }, config.worker);
+  const changed = previousStatus !== config.worker.status
+    || previousLoginStatus !== config.worker.loginStatus
+    || previousError !== config.worker.lastError
+    || payload.forceLog === true;
+  if (changed && payload.log !== false) {
+    appendWecomAdminMassSendLog(state, {
+      type: "企微后台执行器状态",
+      status: payload.ok === false || payload.error ? "失败" : "成功",
+      detail: payload.detail || `执行器 ${config.worker.status}，后台登录态 ${config.worker.loginStatus}。`,
+      error: payload.error || "",
+      externalSideEffects: false
+    });
+    audit(state, "更新企微后台执行器状态", "wecomAdminMassSend", config.worker.status);
+  }
   return state;
 }
 

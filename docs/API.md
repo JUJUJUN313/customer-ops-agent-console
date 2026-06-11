@@ -18,6 +18,7 @@
 | GET | `/api/wecom/aibot/check` | 检查企微智能机器人 Bot ID/Secret 是否完整，返回 bridge 启动条件和当前连接状态 |
 | GET | `/api/personal-wechat/config` | 返回内部兼容发送队列配置和运行状态 |
 | GET | `/api/wecom-client/realtime/config` | 返回企微客户端实时连接器配置、Monitor/Worker能力、员工账号、历史下载补账状态，以及复用的发送队列 |
+| GET | `/api/wecom-admin/mass-send` | 返回企微后台群发任务、审批/派发状态、本地Chrome执行器能力和最近动作日志 |
 | GET | `/api/outbound-drafts` | 返回触达草稿队列、客户信息和待确认/已复制/已处理等统计 |
 
 ## 写入接口
@@ -64,6 +65,12 @@
 | POST | `/api/wecom-client/realtime/send-jobs/:jobId/confirm` | 自回显或服务商历史下载补账确认发送任务 |
 | POST | `/api/wecom-client/realtime/send-jobs/:jobId/fail` | 本地企微客户端Worker回写结构化失败，例如 `room_not_found`、`target_not_verified`、`client_locked`、`send_failed` |
 | POST | `/api/wecom-client/realtime/reconcile` | 服务商历史下载脚本补账确认发送任务；用于基础留档、审计和最终闭环确认 |
+| POST | `/api/wecom-admin/mass-send/worker/check` | 检查本地Chrome企微后台群发执行器 `/health`，读取 `canDispatch/supportsDryRun/supportsSubmit/loginStatus` |
+| POST | `/api/wecom-admin/mass-send/status` | 本地Chrome执行器或Worker回写企微后台派发能力、登录态、错误和最近事件时间 |
+| POST | `/api/wecom-admin/mass-send/tasks` | 创建电销企微后台群发任务，包含目标客户、指定员工、文案和提交模式；同批次幂等复用未完成任务 |
+| POST | `/api/wecom-admin/mass-send/tasks/:taskId/approve` | 审批群发任务并进入派发队列；默认 `submitMode=dry-run` |
+| POST | `/api/wecom-admin/mass-send/scheduler/run` | 从已审批队列派发下一条任务给本地Chrome执行器；只改变系统任务状态，不直接操作浏览器 |
+| POST | `/api/wecom-admin/mass-send/tasks/:taskId/result` | 本地Chrome Worker回写 `dry_run_passed/submitted/failed/cancelled/manual_done` 等执行结果 |
 | POST | `/api/personal-wechat/gateway/check` | 内部兼容队列健康检查，不作为当前企微控制台入口 |
 | POST | `/api/personal-wechat/gateway/status` | Gateway脚本回写游标、最近拉取、ACK、登录态、错误和能力状态 |
 | POST | `/api/personal-wechat/inbound` | 内部兼容群消息写入，当前主链路使用企微客户端实时入站 |
@@ -146,6 +153,32 @@ Agent运行后，如果本次运行面向明确客户且生成了可触达文案
 触达草稿合法渠道：`电话外呼`、`短信`、`企微私聊`、`VIP群`、`报价页`、`人工触达`。
 
 触达草稿合法状态：`待确认`、`已确认`、`已复制`、`企微已发送`、`人工已处理`、`已废弃`。普通状态更新不能把草稿改成 `企微已发送`；必须通过 `/api/outbound-drafts/:draftId/send-wecom` 成功发送后由系统写入。未发送草稿保持 `externalSideEffects: false`，企微发送成功草稿会写入 `externalSideEffects: true` 和 `wecomDelivery`。
+
+创建电销企微后台群发任务：
+
+```json
+{
+  "segmentKey": "quote_nurture_mass_send",
+  "segmentTitle": "报价培育群发",
+  "employeeNames": ["张三", "李四"],
+  "messageText": "您好，本周您关注的型号报价有更新，我们整理了近期货源和会员权益，方便您有采购计划时参考。",
+  "targetCustomerIds": ["c001", "c002"],
+  "excludedReason": "中等意向、关注型号明确，适合推送报价变化或会员权益。",
+  "submitMode": "dry-run"
+}
+```
+
+审批并派发给本地Chrome企微后台执行器：
+
+```json
+{
+  "queue": true,
+  "submitMode": "dry-run",
+  "approvedBy": "运营"
+}
+```
+
+群发任务默认只做 `dry-run`：执行器会检查Chrome里是否已打开企微后台 `客户与上下游 > 客户联系 > 群发工具` 页面，并验证任务参数，不会点击最终提交。只有启动执行器时显式设置 `WECOM_ADMIN_ALLOW_SUBMIT=true`，并且任务 `submitMode=submit`，才允许进入正式提交流程。当前正式提交控件仍需要按测试企微后台页面补齐选择器映射。
 
 企微配置：
 
@@ -347,7 +380,7 @@ npm run wecom:archive -- --once
 
 - `GET /health`：返回企微客户端是否运行、`canReceive/canSend`、`supportsAck/supportsConfirm`、`ackStateFile` 和 `noScreenshot=true`。
 - `POST /messages`：进入下一个未读会话并批量读取当前会话可见消息，产出标准 `InboundGroupMessage[]`；不判断静默时间、不生成回复。请求可带 `{ cursor, knownMessageIds, limit, maxItems, timeoutMs, includeRaw, currentOnly }`，Worker 会把系统已记录的最近消息 ID 放入 `knownMessageIds`。`currentOnly=true` 时不切未读、不搜索，只读取当前窗口，用于业务会话看守。脚本会按 `cursor/knownMessageIds/ACK` 过滤系统已处理消息，只返回当前系统未记录的新消息批次；响应附带 `roomId/roomName/readBatchId/visibleMessageIds/latestMessageIds/returnedMessageCount/timings`。发送人优先从同一消息行的头像按钮 `AXButton` 读取并绑定到消息文本；命中本机员工/机器人名时标记 `senderType=staff`，否则为 `customer`。`sendAt` 优先来自企微可见时间行，缺失时使用本轮未读处理开始时间，`observedAt` 记录实际读取完成时间。语音、图片、文件等非文本可见项先以占位消息入站，最终完整历史仍以服务商历史下载补账为准。
-- `POST /send`：接收 `{ roomName, expectedTitleToken, text, dryRun, allowSend, triggerRoomVersion, triggerLatestMessageId, triggerLatestText, triggerReadBatchId }`。`dryRun=true` 会真实演练搜索和标题校验，但不粘贴回复、不发送。脚本通过真实键盘聚焦、清空和粘贴触发企微搜索刷新，回车进入第一条高亮结果后校验标题；不按 `Down`，不保存截图。粘贴发送前会快读目标会话尾部少量消息，默认 `preSendGuardMaxItems=3`，最新消息必须匹配 `triggerLatestMessageId`；缺少 messageId 时才用 `triggerLatestText` 兜底。匹配成功后返回 `status=sent` 和 `preSendGuard.status=matched`。发送前发现新消息时返回 `status=aborted_new_messages`、`sent=false`、`messages/latestMessageId/latestText/preSendGuard`，Worker 会先入站并 ACK，再取消旧任务等待系统重新判断。无法确认目标最新消息时返回 `status=target_latest_unverified` 且不发送。没有 `expectedTitleToken`、没有显式允许发送、标题校验失败或客户端异常时，返回 `target_not_verified/send_blocked/client_locked/search_failed/input_box_failed/send_failed` 等结构化错误。
+- `POST /send`：接收 `{ roomName, expectedTitleToken, text, dryRun, allowSend, triggerRoomVersion, triggerLatestMessageId, triggerLatestText, triggerReadBatchId }`。`dryRun=true` 会真实演练进入会话和标题校验，但不粘贴回复、不发送。脚本先轻量校验当前窗口标题，命中目标时直接返回 `openStrategy=current_room` 并跳过搜索；未命中才通过真实键盘聚焦、清空和粘贴触发企微搜索刷新，等搜索值稳定后回车进入第一条高亮结果，再轻量读取顶部标题校验；不按 `Down`，不保存截图。粘贴发送前会快读目标会话尾部少量消息，默认 `preSendGuardMaxItems=3`，最新消息必须匹配 `triggerLatestMessageId`；缺少 messageId 时才用 `triggerLatestText` 兜底。匹配成功后返回 `status=sent`、`openStrategy`、`preSendGuard.status=matched` 和 `timings`，其中包含 `currentRoomVerifyMs/searchMs/titleVerifyMs/openConversationMs/preSendGuardMs/inputAndSendMs/inputWriteMode/totalMs`。发送前发现新消息时返回 `status=aborted_new_messages`、`sent=false`、`messages/latestMessageId/latestText/preSendGuard`，Worker 会先入站并 ACK，再取消旧任务等待系统重新判断。无法确认目标最新消息时返回 `status=target_latest_unverified` 且不发送。没有 `expectedTitleToken`、没有显式允许发送、标题校验失败或客户端异常时，返回 `target_not_verified/send_blocked/client_locked/search_failed/input_box_failed/send_failed` 等结构化错误。
 - `POST /ack`：系统成功写入入站消息后回写 `{ messages: [{ messageId, roomId }], messageIds, cursor, roomId }`，本地脚本会记录 ACK，并按群保存最近 ACK 游标；ACK messageId 和按群 cursor 会持久化到小型 JSON 状态文件，脚本重启后仍会在 `/messages` 过滤已处理消息，避免多个群之间共用 cursor 导致重复回传。
 
 企微客户端本地发送动作回执：

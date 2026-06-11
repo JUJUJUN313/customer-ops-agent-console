@@ -10,15 +10,18 @@ import {
   buildOutboundDraftReport,
   buildPersonalWechatReport,
   buildTaskSlaReport,
+  buildWecomAdminMassSendReport,
   buildWecomClientRealtimeReport,
   buildWecomConfigReport,
   bindChatSessionCustomerAction,
   approvePersonalWechatSendJobAction,
+  approveWecomMassSendTaskAction,
   confirmPersonalWechatSendJobAction,
   createCustomerAction,
   createOutboundDraftAction,
   createSalesSampleAction,
   createTaskAction,
+  createWecomMassSendTaskAction,
   diagnoseState,
   enhanceLatestAgentRunWithLlmAction,
   escalateOverdueTasksAction,
@@ -31,9 +34,11 @@ import {
   ingestWecomArchiveMessageAction,
   markPersonalWechatSendJobDispatchedAction,
   recordOutcomeAction,
+  recordWecomMassSendTaskResultAction,
   runAgentAction,
   runDemoAction,
   runPersonalWechatSendSchedulerAction,
+  runWecomMassSendSchedulerAction,
   runWorkflowAction,
   seedState,
   sendOutboundDraftToWecomAction,
@@ -48,6 +53,7 @@ import {
   updatePersonalWechatConfigAction,
   updatePersonalWechatGatewayStatusAction,
   updateWecomClientRealtimeConfigAction,
+  updateWecomAdminMassSendStatusAction,
   reconcileWecomClientArchiveAction,
   updateTaskAction,
   updateTemplateAction,
@@ -656,6 +662,80 @@ test("触达草稿会拒绝非法渠道、非法状态和空内容", () => {
   const diagnostics = diagnoseState(broken);
   assert.equal(diagnostics.ok, false);
   assert.ok(diagnostics.checks.some((item) => item.name === "触达草稿可用" && item.status === "失败"));
+});
+
+test("企微后台群发任务支持创建、审批、调度和干跑回写", () => {
+  let state = seedState();
+  const targetCustomerIds = state.customers.slice(0, 3).map((customer) => customer.id);
+  state = createWecomMassSendTaskAction(state, {
+    segmentKey: "quote_nurture_mass_send",
+    segmentTitle: "报价培育群发",
+    employeeNames: ["测试员工A", "测试员工B"],
+    messageText: "您好，本周报价已更新，请确认是否需要销售同事跟进。",
+    targetCustomerIds,
+    submitMode: "dry-run"
+  });
+  let report = buildWecomAdminMassSendReport(state);
+  assert.equal(report.summary.pendingApproval, 1);
+  assert.equal(report.tasks[0].customerCount, 3);
+  assert.equal(report.tasks[0].externalSideEffects, false);
+  const taskId = report.tasks[0].taskId;
+
+  state = createWecomMassSendTaskAction(state, {
+    segmentKey: "quote_nurture_mass_send",
+    segmentTitle: "报价培育群发",
+    employeeNames: ["测试员工B", "测试员工A"],
+    messageText: "您好，本周报价已更新，请确认是否需要销售同事跟进。",
+    targetCustomerIds: [...targetCustomerIds].reverse(),
+    submitMode: "dry-run"
+  });
+  assert.equal(state.wecomAdminMassSend.tasks.length, 1);
+
+  state = approveWecomMassSendTaskAction(state, taskId, { queue: true, submitMode: "dry-run", approvedBy: "运营" });
+  assert.equal(state.wecomAdminMassSend.tasks[0].status, "queued");
+  assert.ok(state.wecomAdminMassSend.tasks[0].approvedAt);
+
+  state = runWecomMassSendSchedulerAction(state);
+  assert.equal(state.wecomAdminMassSend.lastSchedulerResult.reason, "worker_not_ready");
+  assert.equal(state.wecomAdminMassSend.tasks[0].status, "queued");
+
+  state = updateWecomAdminMassSendStatusAction(state, {
+    ok: true,
+    status: "执行器可用",
+    worker: { canDispatch: true, supportsDryRun: true, supportsSubmit: false, loginStatus: "群发工具页已打开", status: "执行器可用" }
+  });
+  state = runWecomMassSendSchedulerAction(state);
+  assert.equal(state.wecomAdminMassSend.tasks[0].status, "dispatching");
+  assert.equal(state.wecomAdminMassSend.lastSchedulerResult.dispatched[0], taskId);
+
+  state = recordWecomMassSendTaskResultAction(state, taskId, {
+    status: "dry_run_passed",
+    detail: "企微后台群发工具页检查通过，未提交。",
+    externalSideEffects: false
+  });
+  report = buildWecomAdminMassSendReport(state);
+  assert.equal(report.summary.dryRunPassed, 1);
+  assert.equal(report.tasks[0].statusLabel, "干跑通过");
+  assert.equal(report.tasks[0].externalSideEffects, false);
+});
+
+test("企微后台群发任务会拒绝缺少名单、员工或文案", () => {
+  const state = seedState();
+  assert.throws(() => createWecomMassSendTaskAction(state, {
+    employeeNames: ["测试员工"],
+    messageText: "测试",
+    targetCustomerIds: []
+  }), /Target customer ids are required/);
+  assert.throws(() => createWecomMassSendTaskAction(state, {
+    employeeNames: [],
+    messageText: "测试",
+    targetCustomerIds: ["c001"]
+  }), /Employee names are required/);
+  assert.throws(() => createWecomMassSendTaskAction(state, {
+    employeeNames: ["测试员工"],
+    messageText: "",
+    targetCustomerIds: ["c001"]
+  }), /Mass send message text is required/);
 });
 
 test("企微配置报告会脱敏Webhook并保留已保存密钥", () => {

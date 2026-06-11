@@ -10,7 +10,7 @@ npm test
 
 GitHub Actions 会在 Pull Request 和 `main` 推送时自动运行同一条 `npm test`，作为 `main` 合并保护的必需检查。
 
-当前覆盖 76 个用例：
+当前覆盖 78 个用例：
 
 - 外呼筛选 Agent 将高价值客户升级到销售链路。
 - VIP群分流 Agent 将售后问题路由给售后。
@@ -39,6 +39,8 @@ GitHub Actions 会在 Pull Request 和 `main` 推送时自动运行同一条 `np
 - 触达草稿队列会记录Agent生成草稿、人工草稿、确认/复制/人工已处理/废弃状态，并写入事件和审计。
 - 触达草稿队列支持批量确认、批量人工已处理和批量废弃，仍保持 `externalSideEffects: false`。
 - 触达草稿输入会拒绝非法渠道、非法状态、空内容和伪造 `企微已发送`，系统诊断会发现孤儿草稿。
+- 企微后台群发任务支持从电销分层创建批次、同批次幂等复用、人工审批入队、执行器就绪后调度、dry-run结果回写，并保持 `externalSideEffects: false`。
+- 企微后台群发任务会拒绝缺少目标客户、指定员工或文案的请求。
 - 企微配置报告会脱敏Webhook和入站Secret，保存时留空Webhook会保留旧密钥。
 - 企微智能机器人 Bot ID/Secret 会脱敏展示，保存时空字段会保留旧凭据。
 - 企微测试发送会调用群机器人Webhook格式，并写入成功/失败日志。
@@ -102,6 +104,8 @@ node --check scripts/serve.mjs
 node --check scripts/wecom-aibot-bridge.mjs
 node --check scripts/wecom-archive-gateway.mjs
 node --check scripts/wecom-client-realtime-worker.mjs
+node --check scripts/wecom-admin-local-automation.mjs
+node --check scripts/wecom-admin-mass-send-worker.mjs
 node --check scripts/personal-wechat-send-gateway.mjs
 ```
 
@@ -150,23 +154,31 @@ node --check scripts/personal-wechat-send-gateway.mjs
 39. `POST /api/wecom-client/realtime/inbound`
 40. `POST /api/wecom-client/realtime/send-scheduler/run`
 41. `POST /api/wecom-client/realtime/reconcile`
-42. `GET /api/outbound-drafts`
-43. `POST /api/outbound-drafts`
-44. `POST /api/outbound-drafts/:draftId/status`
-45. `POST /api/outbound-drafts/:draftId/send-wecom`
-46. `POST /api/outbound-drafts/batch-status`
-47. `POST /api/tasks/escalate`
-48. `POST /api/tasks/:taskId/status`
-49. `POST /api/tasks/batch-status`
-50. `POST /api/sales-samples`
-51. `npm run wecom:archive -- --check`
-52. `npm run wecom:realtime -- --check`
-53. `npm run personal-wechat:gateway -- --check`
-54. `npm run wecom:bridge -- --check --timeout=20000`
-55. 企微客户端实时批量未读：保留读取批次元数据，连续客户消息合并为一个任务，非文本占位不丢失
-56. 企微客户端实时静默窗口：客户连续消息只更新系统任务，不占用企微UI；静默到期后才进入 `sending`
-57. 企微客户端实时版本过期：发送任务触发版本落后于当前 `roomVersion` 时，系统侧直接取消旧回复
-58. 异常输入：非法客户阶段、客户风险、任务状态、任务优先级、负责人角色、消息发送角色、SLA参考时间、空全局模型、非法API URL、非法销售结果、重复报价、非法销售样本、空渠道消息、非法触达草稿渠道、非法触达草稿状态、伪造企微已发送、未确认草稿发送企微、空草稿内容、空批量任务ID、空批量草稿ID、重复企微会话存档消息ID、重复企微客户端实时消息ID、重复个人微信消息ID、未知个人微信群ID、未知会话ID、无效会话绑定客户、高风险会话回复、未放行高风险任务直接确认、`queued`任务直接确认、Sidecar缺配置调度
+42. `GET /api/wecom-admin/mass-send`
+43. `POST /api/wecom-admin/mass-send/worker/check`
+44. `POST /api/wecom-admin/mass-send/tasks`
+45. `POST /api/wecom-admin/mass-send/tasks/:taskId/approve`
+46. `POST /api/wecom-admin/mass-send/scheduler/run`
+47. `POST /api/wecom-admin/mass-send/tasks/:taskId/result`
+48. `GET /api/outbound-drafts`
+49. `POST /api/outbound-drafts`
+50. `POST /api/outbound-drafts/:draftId/status`
+51. `POST /api/outbound-drafts/:draftId/send-wecom`
+52. `POST /api/outbound-drafts/batch-status`
+53. `POST /api/tasks/escalate`
+54. `POST /api/tasks/:taskId/status`
+55. `POST /api/tasks/batch-status`
+56. `POST /api/sales-samples`
+57. `npm run wecom:archive -- --check`
+58. `npm run wecom:realtime -- --check`
+59. `npm run wecom:admin-worker -- --check`
+60. `npm run personal-wechat:gateway -- --check`
+61. `npm run wecom:bridge -- --check --timeout=20000`
+62. 企微客户端实时批量未读：保留读取批次元数据，连续客户消息合并为一个任务，非文本占位不丢失
+63. 企微客户端实时静默窗口：客户连续消息只更新系统任务，不占用企微UI；静默到期后才进入 `sending`
+64. 企微客户端实时版本过期：发送任务触发版本落后于当前 `roomVersion` 时，系统侧直接取消旧回复
+65. 企微后台群发任务：创建、审批、调度和 dry-run 回写均不应影响企微客户端实时收发队列
+66. 异常输入：非法客户阶段、客户风险、任务状态、任务优先级、负责人角色、消息发送角色、SLA参考时间、空全局模型、非法API URL、非法销售结果、重复报价、非法销售样本、空渠道消息、非法触达草稿渠道、非法触达草稿状态、伪造企微已发送、未确认草稿发送企微、空草稿内容、空批量任务ID、空批量草稿ID、重复企微会话存档消息ID、重复企微客户端实时消息ID、重复个人微信消息ID、未知个人微信群ID、未知会话ID、无效会话绑定客户、高风险会话回复、未放行高风险任务直接确认、`queued`任务直接确认、Sidecar缺配置调度、企微后台群发缺客户/缺员工/缺文案
 
 期望结果：
 
@@ -191,6 +203,8 @@ node --check scripts/personal-wechat-send-gateway.mjs
 - 面向明确客户运行Agent后，会生成本地触达草稿，草稿 `externalSideEffects` 必须为 `false`。
 - 人工新增触达草稿后，队列统计增加；确认、复制、人工已处理和废弃只更新本地状态和事件，不触发外部发送。
 - 批量触达草稿状态更新能逐条写入事件和时间戳；外部副作用仍为 `false`。
+- 电销企微后台群发任务创建后默认为待审批，审批后进入待派发；本地Chrome执行器 dry-run 通过后状态为 `dry_run_passed`，且 `externalSideEffects=false`。
+- 群发执行器未声明 `canDispatch=true` 时，调度不会把任务改成派发中；不会影响企微客户端实时收发 Worker。
 - 企微测试发送会写入 `wecomLogs`；已确认草稿发送成功后状态为 `企微已发送`，未确认草稿会被拒绝。
 - 企微长连接或测试企微实时入站会写入会话并生成对应Agent输出。
 - 企微长连接认证检查成功时，bridge 状态应记录为 `认证成功`，且不会在终端输出明文 Secret。

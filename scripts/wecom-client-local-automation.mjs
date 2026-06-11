@@ -27,11 +27,42 @@ const ignoredUnreadConversationNames = new Set([
   "行业资讯",
   "微信客服"
 ]);
+const searchEnterMinDelayMs = boundedNumber(process.env.WECOM_AUTOMATION_SEARCH_ENTER_MIN_DELAY_MS, 420, 180, 1200);
+const searchEnterMaxDelayMs = boundedNumber(
+  process.env.WECOM_AUTOMATION_SEARCH_ENTER_MAX_DELAY_MS,
+  760,
+  searchEnterMinDelayMs,
+  1500
+);
+const searchRetryEnterMinDelayMs = boundedNumber(
+  process.env.WECOM_AUTOMATION_SEARCH_RETRY_ENTER_MIN_DELAY_MS,
+  760,
+  searchEnterMinDelayMs,
+  1500
+);
+const searchRetryEnterMaxDelayMs = boundedNumber(
+  process.env.WECOM_AUTOMATION_SEARCH_RETRY_ENTER_MAX_DELAY_MS,
+  1100,
+  searchRetryEnterMinDelayMs,
+  1800
+);
+const currentConversationFastVerifyMs = boundedNumber(process.env.WECOM_AUTOMATION_CURRENT_VERIFY_MS, 320, 120, 1500);
+const postSearchTitleVerifyMs = boundedNumber(process.env.WECOM_AUTOMATION_POST_SEARCH_VERIFY_MS, 900, 300, 2500);
 const ackStateFile = resolve(process.env.WECOM_AUTOMATION_ACK_STATE_FILE || `${tmpdir()}/wecom-client-automation-ack-state.json`);
 let automationTail = Promise.resolve();
 const ackedMessageIds = new Set();
 const lastAckedCursorByRoomId = new Map();
 let lastAckedCursor = "";
+
+function boundedNumber(value, fallback, min, max) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function delaySeconds(ms) {
+  return (Math.max(0, Number(ms || 0)) / 1000).toFixed(3);
+}
 
 function runAppleScript(script, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
@@ -923,6 +954,16 @@ function textMatchesTrigger(messageText = "", triggerText = "") {
   return Boolean(left && right && left === right);
 }
 
+function normalizeTitleText(value = "") {
+  return String(value || "").replace(/\u200b/g, "").replace(/\s+/g, " ").trim();
+}
+
+function titleTextIncludesToken(visibleText = "", expectedToken = "") {
+  const left = normalizeTitleText(visibleText);
+  const right = normalizeTitleText(expectedToken);
+  return Boolean(left && right && left.includes(right));
+}
+
 async function runPreSendGuard(command = {}, timings = {}) {
   const triggerLatestMessageId = String(command.triggerLatestMessageId || "").trim();
   const triggerLatestText = String(command.triggerLatestText || "").trim();
@@ -1139,13 +1180,24 @@ async function resetToIdleConversation({ roomName = idleConversationName } = {})
   const previousClipboard = await getClipboard().catch(() => "");
   const startedAt = Date.now();
   try {
-    await sidebarSearch(target, { openFirstResult: true, verifyToken: target });
+    const timings = {};
+    const openResult = await openTargetConversation({
+      roomName: target,
+      expectedTitleToken: target,
+      currentVerifyTimeoutMs: currentConversationFastVerifyMs,
+      searchEnterMinDelayMs,
+      searchEnterMaxDelayMs,
+      searchRetryEnterMinDelayMs,
+      searchRetryEnterMaxDelayMs
+    }, timings);
     return {
       status: "idle",
       ok: true,
       reset: true,
       roomName: target,
+      openStrategy: openResult.openStrategy,
       timings: {
+        ...timings,
         totalMs: Date.now() - startedAt
       },
       noScreenshot: true
@@ -1210,8 +1262,19 @@ if pane is missing value then error "main_pane_not_found"
 `;
 }
 
-async function sidebarSearch(query = "", { openFirstResult = false, verifyToken = "" } = {}) {
-  await setClipboard(query);
+async function sidebarSearch(query = "", options = {}) {
+  const {
+    openFirstResult = false,
+    verifyToken = "",
+    minReadyMs = searchEnterMinDelayMs,
+    maxReadyMs = searchEnterMaxDelayMs
+  } = options;
+  const queryText = String(query || "").trim();
+  if (!queryText) throw new Error("search_query_missing");
+  const readyMinMs = boundedNumber(minReadyMs, searchEnterMinDelayMs, 80, 1800);
+  const readyMaxMs = boundedNumber(maxReadyMs, searchEnterMaxDelayMs, readyMinMs, 2200);
+  const readyProbeMs = 80;
+  await setClipboard(queryText);
   const output = await runAppleScript(`
 tell application "System Events"
   if not (exists process ${scriptString(appProcessName)}) then error "wecom_not_running"
@@ -1275,16 +1338,38 @@ tell application "System Events"
       on error
         set appliedSearchValue to ""
       end try
-      if appliedSearchValue is not ${scriptString(query)} then
+      if appliedSearchValue is not ${scriptString(queryText)} then
         set lastSearchError to "search_value_not_applied"
       end if
-      delay 0.9
+      set waitedSeconds to 0
+      set stableReads to 0
+      set lastReadyValue to ""
+      repeat while waitedSeconds < ${delaySeconds(readyMaxMs)}
+        delay ${delaySeconds(readyProbeMs)}
+        set waitedSeconds to waitedSeconds + ${delaySeconds(readyProbeMs)}
+        try
+          set readySearchValue to value of searchField
+        on error
+          set readySearchValue to ""
+        end try
+        if readySearchValue is ${scriptString(queryText)} then
+          if readySearchValue is lastReadyValue then
+            set stableReads to stableReads + 1
+          else
+            set stableReads to 1
+          end if
+        else
+          set stableReads to 0
+        end if
+        set lastReadyValue to readySearchValue
+        if waitedSeconds >= ${delaySeconds(readyMinMs)} and stableReads >= 2 then exit repeat
+      end repeat
       try
         set searchValue to value of searchField
       on error
         set searchValue to ""
       end try
-      if searchValue is not ${scriptString(query)} then
+      if searchValue is not ${scriptString(queryText)} then
         set lastSearchError to "search_value_not_applied"
       else
         set searchReady to true
@@ -1384,9 +1469,9 @@ tell application "System Events"
         end if
         if r is "AXStaticText" or (r is "AXTextField" and textFieldIndex > 1) then
           if (v is not missing value and v is not "") then
-            set out to out & r & tab & v & linefeed
+            set out to out & r & tab & v & tab & directIndex & linefeed
           else if (n is not missing value and n is not "") then
-            set out to out & r & tab & n & linefeed
+            set out to out & r & tab & n & tab & directIndex & linefeed
           end if
         end if
       end repeat
@@ -1396,12 +1481,19 @@ tell application "System Events"
 end tell
 `, timeoutMs);
   return output.split(/\r?\n/).map((line) => {
-    const [role, ...rest] = line.split("\t");
-    return { role, text: rest.join("\t").trim() };
+    const [role, text = "", order = "0"] = line.split("\t");
+    return { role, text: text.trim(), order: Number(order || 0) };
   }).filter((item) => item.text);
 }
 
-async function verifyCurrentConversation({ roomName = "", expectedTitleToken = "" } = {}) {
+async function verifyCurrentConversation({
+  roomName = "",
+  expectedTitleToken = "",
+  timeoutMs = 1400,
+  intervalMs = 120,
+  readTimeoutMs = 1200,
+  strictHeader = false
+} = {}) {
   const verifyToken = String(expectedTitleToken || roomName || "").trim();
   if (!verifyToken) {
     return { verified: false, visiblePreview: "", errorCode: "target_token_missing" };
@@ -1411,19 +1503,22 @@ async function verifyCurrentConversation({ roomName = "", expectedTitleToken = "
     let lastVisibleText = "";
     let lastCount = 0;
     do {
-      const items = await readConversationHeaderText({ timeoutMs: 1200 });
-      const visibleText = items.map((item) => item.text).join("\n");
-      if (visibleText.includes(verifyToken)) {
+      const items = await readConversationHeaderText({ timeoutMs: Math.max(300, Number(readTimeoutMs || 1200)) });
+      const candidateItems = strictHeader
+        ? items.filter((item) => item.order > 0 && item.order <= 8)
+        : items;
+      const visibleText = candidateItems.map((item) => item.text).join("\n");
+      if (titleTextIncludesToken(visibleText, verifyToken)) {
         return {
           verified: true,
           visiblePreview: visibleText.slice(0, 400),
           rawTextCount: items.length
         };
       }
-      lastVisibleText = visibleText;
+      lastVisibleText = items.map((item) => item.text).join("\n");
       lastCount = items.length;
-      await new Promise((resolve) => setTimeout(resolve, 120));
-    } while (Date.now() - startedAt < 1400);
+      await new Promise((resolve) => setTimeout(resolve, Math.max(30, Number(intervalMs || 120))));
+    } while (Date.now() - startedAt < Math.max(80, Number(timeoutMs || 1400)));
     return {
       verified: false,
       visiblePreview: lastVisibleText.slice(0, 400),
@@ -1437,6 +1532,89 @@ async function verifyCurrentConversation({ roomName = "", expectedTitleToken = "
       error: error.message
     };
   }
+}
+
+async function openTargetConversation(command = {}, timings = {}) {
+  const roomName = String(command.roomName || command.searchName || command.roomId || "").trim();
+  const expectedTitleToken = String(command.expectedTitleToken || command.titleToken || roomName || "").trim();
+  const searchQuery = expectedTitleToken || roomName;
+  const currentVerifyStartedAt = Date.now();
+  const currentVerification = await verifyCurrentConversation({
+    roomName,
+    expectedTitleToken,
+    timeoutMs: boundedNumber(command.currentVerifyTimeoutMs, currentConversationFastVerifyMs, 80, 2000),
+    intervalMs: 60,
+    readTimeoutMs: 800,
+    strictHeader: true
+  });
+  timings.currentRoomVerifyMs = Date.now() - currentVerifyStartedAt;
+  if (currentVerification.verified) {
+    timings.openStrategy = "current_room";
+    timings.titleVerifyMs = timings.currentRoomVerifyMs;
+    timings.searchAttemptCount = 0;
+    return {
+      verified: true,
+      openStrategy: "current_room",
+      verification: currentVerification
+    };
+  }
+
+  const attempts = [
+    {
+      minReadyMs: boundedNumber(command.searchEnterMinDelayMs, searchEnterMinDelayMs, 120, 1800),
+      maxReadyMs: boundedNumber(command.searchEnterMaxDelayMs, searchEnterMaxDelayMs, 180, 2200),
+      verifyMs: boundedNumber(command.postSearchVerifyMs, postSearchTitleVerifyMs, 300, 2500)
+    },
+    {
+      minReadyMs: boundedNumber(command.searchRetryEnterMinDelayMs, searchRetryEnterMinDelayMs, 180, 2200),
+      maxReadyMs: boundedNumber(command.searchRetryEnterMaxDelayMs, searchRetryEnterMaxDelayMs, 240, 2600),
+      verifyMs: Math.max(1200, boundedNumber(command.postSearchRetryVerifyMs, 1400, 500, 3000))
+    }
+  ];
+  let lastError = null;
+  let lastVerification = currentVerification;
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attempt = attempts[index];
+    const searchStartedAt = Date.now();
+    try {
+      await sidebarSearch(searchQuery, {
+        openFirstResult: true,
+        minReadyMs: attempt.minReadyMs,
+        maxReadyMs: attempt.maxReadyMs
+      });
+      timings.searchMs = (timings.searchMs || 0) + (Date.now() - searchStartedAt);
+    } catch (error) {
+      timings.searchMs = (timings.searchMs || 0) + (Date.now() - searchStartedAt);
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      continue;
+    }
+
+    const verifyStartedAt = Date.now();
+    const verification = await verifyCurrentConversation({
+      roomName,
+      expectedTitleToken,
+      timeoutMs: attempt.verifyMs,
+      intervalMs: 70,
+      readTimeoutMs: 900
+    });
+    timings.titleVerifyMs = (timings.titleVerifyMs || 0) + (Date.now() - verifyStartedAt);
+    timings.searchAttemptCount = index + 1;
+    lastVerification = verification;
+    if (verification.verified) {
+      timings.openStrategy = "search";
+      return {
+        verified: true,
+        openStrategy: "search",
+        verification
+      };
+    }
+    lastError = new Error(`target_not_verified:${verification.visiblePreview || "target title not found after search"}`);
+    await new Promise((resolve) => setTimeout(resolve, 220));
+  }
+  const preview = lastVerification?.visiblePreview || "";
+  if (lastError && !String(lastError.message || "").startsWith("target_not_verified:")) throw lastError;
+  throw new Error(`target_not_verified:${preview || lastError?.message || "target title not found"}`);
 }
 
 async function sendMessage(command = {}) {
@@ -1475,27 +1653,16 @@ async function sendMessage(command = {}) {
   const startedAt = Date.now();
   try {
     await assertInteractiveSession();
-    const searchStartedAt = Date.now();
-    let lastSearchException = null;
-    for (let searchAttempt = 1; searchAttempt <= 2; searchAttempt += 1) {
-      try {
-        await sidebarSearch(expectedTitleToken || roomName, { openFirstResult: true, verifyToken: expectedTitleToken });
-        lastSearchException = null;
-        break;
-      } catch (error) {
-        lastSearchException = error;
-        if (searchAttempt >= 2) break;
-        await new Promise((resolve) => setTimeout(resolve, 350));
-      }
-    }
-    if (lastSearchException) throw lastSearchException;
-    timings.searchAndVerifyMs = Date.now() - searchStartedAt;
+    const openStartedAt = Date.now();
+    const openResult = await openTargetConversation(command, timings);
+    timings.openConversationMs = Date.now() - openStartedAt;
     if (dryRun) {
       return {
         status: "dry_run_verified",
         verified: true,
         roomName,
         expectedTitleToken,
+        openStrategy: openResult.openStrategy,
         timings: { ...timings, totalMs: Date.now() - startedAt },
         noScreenshot: true
       };
@@ -1527,9 +1694,11 @@ async function sendMessage(command = {}) {
         noScreenshot: true
       };
     }
+    const clipboardStartedAt = Date.now();
     await setClipboard(text);
+    timings.clipboardSetMs = Date.now() - clipboardStartedAt;
     const inputStartedAt = Date.now();
-    const inputMode = await runAppleScript(`
+    const inputResult = await runAppleScript(`
 tell application "System Events"
   tell process ${scriptString(appProcessName)}
     set frontmost to true
@@ -1602,6 +1771,7 @@ tell application "System Events"
     end try
     if inputField is missing value then error "input_box_not_found"
     set inputReady to false
+    set inputWriteMode to "ax_value"
     set lastInputError to "input_not_started"
     repeat with attemptIndex from 1 to 3
       set frontmost to true
@@ -1644,6 +1814,7 @@ tell application "System Events"
       end try
       if pastedText does not contain ${scriptString(text)} and inputFocused then
         keystroke "v" using command down
+        set inputWriteMode to "clipboard_paste"
         delay 0.08
         try
           set pastedText to value of inputField
@@ -1670,28 +1841,32 @@ tell application "System Events"
     else
       key code 36
     end if
-    return inputLocateMode
+    return inputLocateMode & tab & inputWriteMode
   end tell
 end tell
 `, 10000);
     timings.inputAndSendMs = Date.now() - inputStartedAt;
+    const [inputMode = "unknown", inputWriteMode = "unknown"] = String(inputResult || "").split("\t");
     timings.inputMode = inputMode || "unknown";
+    timings.inputWriteMode = inputWriteMode || "unknown";
     if (prepareOnly) {
       return {
-	      status: "prepared",
-	      verified: true,
-	      roomName,
-	      expectedTitleToken,
-	      preSendGuard: preSendGuard.preSendGuard,
-	      timings: { ...timings, totalMs: Date.now() - startedAt },
-	      noScreenshot: true
-	    };
-	  }
+        status: "prepared",
+        verified: true,
+        roomName,
+        expectedTitleToken,
+        openStrategy: openResult.openStrategy,
+        preSendGuard: preSendGuard.preSendGuard,
+        timings: { ...timings, totalMs: Date.now() - startedAt },
+        noScreenshot: true
+      };
+    }
     return {
       status: "sent",
       gatewayRequestId: `wecom_local_${Date.now()}`,
       externalMessageId: "",
       verified: true,
+      openStrategy: openResult.openStrategy,
       preSendGuard: preSendGuard.preSendGuard,
       timings: { ...timings, totalMs: Date.now() - startedAt },
       noScreenshot: true

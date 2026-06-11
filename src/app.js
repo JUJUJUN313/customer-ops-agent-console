@@ -196,6 +196,31 @@ const defaultPersonalWechatState = {
   logs: []
 };
 
+const defaultWecomAdminMassSendState = {
+  enabled: true,
+  worker: {
+    mode: "chrome-admin",
+    sidecarUrl: "",
+    canDispatch: false,
+    supportsDryRun: true,
+    supportsSubmit: false,
+    loginStatus: "未连接",
+    status: "未启动",
+    lastConnectedAt: "",
+    lastEventAt: "",
+    lastError: ""
+  },
+  settings: {
+    requireApproval: true,
+    defaultSubmitMode: "dry-run",
+    defaultPageUrl: "https://work.weixin.qq.com/wework_admin/frame#/customer/config/groupSend",
+    idleWhenDone: true
+  },
+  tasks: [],
+  logs: [],
+  lastSchedulerResult: null
+};
+
 let state = await loadState();
 let activeView = "overview";
 let activeNavGroup = "overview";
@@ -369,6 +394,7 @@ async function loadState() {
       wecomBindings: { groups: [] },
       wecomLogs: [],
       personalWechat: defaultPersonalWechatState,
+      wecomAdminMassSend: defaultWecomAdminMassSendState,
       auditLog: [],
       loadError: error.message
     });
@@ -400,6 +426,7 @@ function normalizeState(nextState = {}) {
     wecomBindings: { groups: [] },
     wecomLogs: [],
     personalWechat: defaultPersonalWechatState,
+    wecomAdminMassSend: defaultWecomAdminMassSendState,
     auditLog: [],
     ...nextState
   };
@@ -416,6 +443,7 @@ function normalizeState(nextState = {}) {
     groups: Array.isArray(normalized.wecomBindings?.groups) ? normalized.wecomBindings.groups : []
   };
   normalized.personalWechat = normalizePersonalWechatState(normalized.personalWechat);
+  normalized.wecomAdminMassSend = normalizeWecomAdminMassSendState(normalized.wecomAdminMassSend);
   return normalized;
 }
 
@@ -576,6 +604,37 @@ function normalizePersonalWechatState(config = {}) {
     decisions: Array.isArray(config.decisions) ? config.decisions : [],
     logs: Array.isArray(config.logs) ? config.logs : [],
     schedulerResult: config.schedulerResult || null
+  };
+}
+
+function normalizeWecomAdminMassSendState(config = {}) {
+  const worker = {
+    ...defaultWecomAdminMassSendState.worker,
+    ...(config.worker || {})
+  };
+  const settings = {
+    ...defaultWecomAdminMassSendState.settings,
+    ...(config.settings || {})
+  };
+  return {
+    ...defaultWecomAdminMassSendState,
+    ...config,
+    enabled: config.enabled === undefined ? defaultWecomAdminMassSendState.enabled : Boolean(config.enabled),
+    worker: {
+      ...worker,
+      canDispatch: Boolean(worker.canDispatch),
+      supportsDryRun: worker.supportsDryRun !== false,
+      supportsSubmit: Boolean(worker.supportsSubmit)
+    },
+    settings: {
+      ...settings,
+      requireApproval: settings.requireApproval !== false,
+      defaultSubmitMode: settings.defaultSubmitMode === "submit" ? "submit" : "dry-run",
+      idleWhenDone: settings.idleWhenDone !== false
+    },
+    tasks: Array.isArray(config.tasks) ? config.tasks : [],
+    logs: Array.isArray(config.logs) ? config.logs : [],
+    lastSchedulerResult: config.lastSchedulerResult || null
   };
 }
 
@@ -1868,34 +1927,44 @@ function customerInsightText(customer) {
 function telemarketingSegments(customers) {
   return [
     {
+      key: "high_intent_to_sales",
       title: "高意向转销售",
       status: "建议转交",
       customers: customers.filter((customer) => Number(customer.intentScore || 0) >= 75 || (customer.tags || []).includes("明确意向")),
       criteria: "意向分>=75，或历史消息/标签已识别明确意向。",
       message: "您好，看到您近期关注的型号和会员权益比较明确，我让销售同事给您整理一版更完整的报价和权益说明。",
-      owner: "销售队列"
+      owner: "销售队列",
+      employeePlaceholder: "输入负责员工姓名，多个用逗号分隔"
     },
     {
+      key: "quote_nurture_mass_send",
       title: "报价培育群发",
       status: "待确认",
       customers: customers.filter((customer) => Number(customer.intentScore || 0) >= 50 && Number(customer.intentScore || 0) < 75),
       criteria: "中等意向、关注型号明确，适合推送报价变化或会员权益。",
       message: "您好，本周您关注的型号报价有更新，我们整理了近期货源和会员权益，方便您有采购计划时参考。",
-      owner: "电销队列"
+      owner: "电销队列",
+      employeePlaceholder: "输入电销员工姓名，多个用逗号分隔"
     },
     {
+      key: "low_active_wakeup",
       title: "低活跃唤醒",
       status: "低优先级",
       customers: customers.filter((customer) => Number(customer.intentScore || 0) < 50),
       criteria: "意向较低或最近未形成明确采购计划，只做轻触达。",
       message: "您好，近期报价和货源有变化，如后面有采购计划，可以随时让我们帮您查最新行情。",
-      owner: "电销队列"
+      owner: "电销队列",
+      employeePlaceholder: "输入电销员工姓名，多个用逗号分隔"
     }
   ];
 }
 
 function renderTelemarketingCampaignCard(segment) {
   const excluded = businessCustomers("telemarketing").length - segment.customers.length;
+  const existingOpenTask = (state.wecomAdminMassSend?.tasks || []).find((task) =>
+    task.segmentKey === segment.key
+    && !["submitted", "failed", "cancelled", "manual_done"].includes(task.status)
+  );
   return `
     <article class="business-card">
       <div class="agent-customer-head">
@@ -1915,11 +1984,99 @@ function renderTelemarketingCampaignCard(segment) {
       <div class="tag-list">
         ${segment.customers.slice(0, 6).map((customer) => `<span class="tag">${escapeHtml(customer.name)}</span>`).join("") || `<span class="tag">暂无客户</span>`}
       </div>
+      <div class="field full-span compact-field">
+        <label>指定员工</label>
+        <input data-wecom-mass-employee="${escapeHtml(segment.key)}" value="" placeholder="${escapeHtml(segment.employeePlaceholder)}">
+      </div>
       <div class="button-row">
         <button class="small-button" type="button" data-jump-section="telemarketingApprovals">进入审批</button>
-        <button class="ghost-button" type="button" disabled>企微后台任务创建待接入</button>
+        <button class="primary-button" type="button" data-create-wecom-mass-task="${escapeHtml(segment.key)}" ${segment.customers.length ? "" : "disabled"} ${actionAttrs(`wecom-mass-create-${segment.key}`)}>
+          ${existingOpenTask ? "已创建企微任务" : "创建企微群发任务"}
+        </button>
       </div>
     </article>
+  `;
+}
+
+function wecomMassTaskStatusClass(status = "") {
+  if (status === "pending_approval") return "soon";
+  if (status === "queued" || status === "dispatching") return "normal";
+  if (status === "submitted" || status === "dry_run_passed" || status === "manual_done") return "done";
+  return "overdue";
+}
+
+function wecomMassTaskStatusLabel(status = "") {
+  return {
+    pending_approval: "待审批",
+    queued: "待派发",
+    dispatching: "派发中",
+    dry_run_passed: "干跑通过",
+    submitted: "已提交企微",
+    failed: "失败",
+    cancelled: "已取消",
+    manual_done: "人工已处理"
+  }[status] || "未知";
+}
+
+function renderWecomMassTaskCard(task) {
+  const terminal = ["submitted", "failed", "cancelled", "manual_done"].includes(task.status);
+  const canApprove = ["pending_approval", "dry_run_passed"].includes(task.status);
+  return `
+    <article class="draft-card">
+      <div class="draft-head">
+        <div>
+          <strong>${escapeHtml(task.title || task.segmentTitle || "企微群发任务")}</strong>
+          <div class="muted">${escapeHtml((task.employeeNames || []).join("、") || "未指定员工")} · ${escapeHtml(task.segmentTitle || "电销群发")} · ${Number(task.customerCount || (task.targetCustomerIds || []).length)}人</div>
+        </div>
+        <span class="sla-pill ${wecomMassTaskStatusClass(task.status)}">${escapeHtml(task.statusLabel || wecomMassTaskStatusLabel(task.status))}</span>
+      </div>
+      <div class="draft-content">${escapeHtml(task.messageText || "")}</div>
+      <div class="tag-list">
+        ${(task.targetCustomerNames || []).slice(0, 8).map((name) => `<span class="tag">${escapeHtml(name)}</span>`).join("") || `<span class="tag">暂无客户名单</span>`}
+      </div>
+      <div class="draft-meta">
+        <span class="status-pill">${task.submitMode === "submit" ? "正式提交" : "干跑验证"}</span>
+        <span class="status-pill">尝试 ${Number(task.attempts || 0)}</span>
+        <span class="muted">创建 ${escapeHtml(formatDateTime(task.createdAt))}</span>
+        ${task.error ? `<span class="muted">错误：${escapeHtml(task.error)}</span>` : ""}
+      </div>
+      <div class="split-actions">
+        <button class="small-button" type="button" data-wecom-mass-approve="${escapeHtml(task.taskId)}" ${canApprove ? "" : "disabled"} ${actionAttrs(`wecom-mass-approve-${task.taskId}`)}>确认并入队</button>
+        <button class="small-button" type="button" data-wecom-mass-result="${escapeHtml(task.taskId)}" data-status="manual_done" ${terminal ? "disabled" : ""} ${actionAttrs(`wecom-mass-manual-${task.taskId}`)}>人工已处理</button>
+        <button class="danger-button" type="button" data-wecom-mass-result="${escapeHtml(task.taskId)}" data-status="cancelled" ${terminal ? "disabled" : ""} ${actionAttrs(`wecom-mass-cancel-${task.taskId}`)}>取消</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderWecomMassSendPanel() {
+  const mass = normalizeWecomAdminMassSendState(state.wecomAdminMassSend);
+  const tasks = [...mass.tasks].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  const pending = tasks.filter((task) => task.status === "pending_approval").length;
+  const queued = tasks.filter((task) => task.status === "queued").length;
+  const dispatched = tasks.filter((task) => ["dispatching", "dry_run_passed", "submitted"].includes(task.status)).length;
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">企微后台群发派发</h2>
+          <p class="panel-subtitle">电销批次确认后，由本地浏览器执行器进入企微后台群发工具创建任务；默认干跑验证，不直接提交。</p>
+        </div>
+        <div class="button-row">
+          <button class="small-button" type="button" id="checkWecomMassWorker" ${actionAttrs("wecom-mass-worker-check")}>检查企微后台</button>
+          <button class="primary-button" type="button" id="runWecomMassScheduler" ${queued ? "" : "disabled"} ${actionAttrs("wecom-mass-scheduler")}>派发下一条</button>
+        </div>
+      </div>
+      <section class="grid four compact-grid">
+        ${cardKpi("执行器", mass.worker.canDispatch ? "可用" : mass.worker.status || "未启动", mass.worker.loginStatus || "企微后台")}
+        ${cardKpi("待审批", pending, "业务确认")}
+        ${cardKpi("待派发", queued, "等待本地执行器")}
+        ${cardKpi("已处理", dispatched, "含干跑/提交")}
+      </section>
+      <div class="event-list">
+        ${tasks.slice(0, 8).map(renderWecomMassTaskCard).join("") || renderEmptyState("暂无企微群发任务", "从上方推荐批次创建任务后，会在这里审批和派发。")}
+      </div>
+    </section>
   `;
 }
 
@@ -2001,13 +2158,15 @@ function renderTelemarketingOps() {
       <div class="panel-header">
         <div>
           <h2 class="panel-title">推荐群发批次与审批</h2>
-          <p class="panel-subtitle">第一版只生成名单和文案，进入人工确认后再创建企微后台群发任务。</p>
+          <p class="panel-subtitle">确认名单、指定员工和文案后，可生成企微后台群发任务并交给本地Chrome执行器干跑验证。</p>
         </div>
       </div>
       <div class="event-list">
         ${segments.map(renderTelemarketingCampaignCard).join("")}
       </div>
     </section>
+
+    ${renderWecomMassSendPanel()}
   `;
 }
 
@@ -4907,6 +5066,91 @@ document.addEventListener("click", (event) => {
   const modelTestButton = event.target.closest("[data-model-test]");
   if (modelTestButton) {
     void testModelConnection(modelTestButton.dataset.modelTest);
+    return;
+  }
+  const createMassTaskButton = event.target.closest("[data-create-wecom-mass-task]");
+  if (createMassTaskButton) {
+    const segmentKey = createMassTaskButton.dataset.createWecomMassTask;
+    const segment = telemarketingSegments(businessCustomers("telemarketing")).find((item) => item.key === segmentKey);
+    if (!segment) {
+      showToast("群发批次不存在");
+      return;
+    }
+    const employeeText = document.querySelector(`[data-wecom-mass-employee="${CSS.escape(segmentKey)}"]`)?.value || "";
+    const employeeNames = employeeText.split(/[,，、\n]/).map((item) => item.trim()).filter(Boolean);
+    if (!employeeNames.length) {
+      showToast("请先填写指定员工姓名");
+      return;
+    }
+    void withBusy(`wecom-mass-create-${segmentKey}`, async () => {
+      try {
+        const nextState = await api.createWecomMassSendTask({
+          segmentKey: segment.key,
+          segmentTitle: segment.title,
+          title: `${segment.title} · 企微群发`,
+          employeeNames,
+          messageText: segment.message,
+          targetCustomerIds: segment.customers.map((customer) => customer.id),
+          excludedReason: segment.criteria,
+          submitMode: "dry-run",
+          source: "telemarketing"
+        });
+        setState(nextState, "企微群发任务已创建，等待确认");
+      } catch (error) {
+        showToast(`创建群发任务失败：${error.message}`);
+      }
+    });
+    return;
+  }
+  const approveMassTaskButton = event.target.closest("[data-wecom-mass-approve]");
+  if (approveMassTaskButton) {
+    const taskId = approveMassTaskButton.dataset.wecomMassApprove;
+    void withBusy(`wecom-mass-approve-${taskId}`, async () => {
+      try {
+        const nextState = await api.approveWecomMassSendTask(taskId, { queue: true, submitMode: "dry-run", approvedBy: "local-operator" });
+        setState(nextState, "群发任务已确认并入队");
+      } catch (error) {
+        showToast(`确认群发任务失败：${error.message}`);
+      }
+    });
+    return;
+  }
+  const massTaskResultButton = event.target.closest("[data-wecom-mass-result]");
+  if (massTaskResultButton) {
+    const taskId = massTaskResultButton.dataset.wecomMassResult;
+    const status = massTaskResultButton.dataset.status;
+    void withBusy(`wecom-mass-result-${taskId}`, async () => {
+      try {
+        const nextState = await api.recordWecomMassSendTaskResult(taskId, { status, detail: status === "cancelled" ? "人工取消群发任务。" : "人工已在企微后台处理该群发任务。" });
+        setState(nextState, status === "cancelled" ? "群发任务已取消" : "群发任务已标记处理");
+      } catch (error) {
+        showToast(`更新群发任务失败：${error.message}`);
+      }
+    });
+    return;
+  }
+  if (event.target.closest("#checkWecomMassWorker")) {
+    void withBusy("wecom-mass-worker-check", async () => {
+      try {
+        const result = await api.checkWecomAdminMassSendWorker();
+        if (result.state) setState(result.state);
+        showToast(result.ok ? "企微后台执行器已就绪" : `企微后台执行器未就绪：${(result.missing || []).join("、") || result.error || "请先启动本地执行器"}`);
+      } catch (error) {
+        showToast(`检查企微后台执行器失败：${error.message}`);
+      }
+    });
+    return;
+  }
+  if (event.target.closest("#runWecomMassScheduler")) {
+    void withBusy("wecom-mass-scheduler", async () => {
+      try {
+        const nextState = await api.runWecomMassSendScheduler();
+        const result = nextState.wecomAdminMassSend?.lastSchedulerResult;
+        setState(nextState, result?.ok ? "已派发下一条群发任务给本地执行器" : `暂未派发：${result?.reason || "无可派发任务"}`);
+      } catch (error) {
+        showToast(`派发群发任务失败：${error.message}`);
+      }
+    });
     return;
   }
   const draftCopyButton = event.target.closest("[data-draft-copy]");

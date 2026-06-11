@@ -122,6 +122,30 @@ export const initialState = {
     },
     logs: []
   },
+  wecomAdminMassSend: {
+    enabled: true,
+    worker: {
+      mode: "chrome-admin",
+      sidecarUrl: "http://127.0.0.1:8792",
+      canDispatch: false,
+      supportsDryRun: true,
+      supportsSubmit: false,
+      loginStatus: "未连接",
+      status: "未启动",
+      lastConnectedAt: "",
+      lastEventAt: "",
+      lastError: ""
+    },
+    settings: {
+      requireApproval: true,
+      defaultSubmitMode: "dry-run",
+      defaultPageUrl: "https://work.weixin.qq.com/wework_admin/frame#/customer/config/groupSend",
+      idleWhenDone: true
+    },
+    tasks: [],
+    logs: [],
+    lastSchedulerResult: null
+  },
   wecomBindings: {
     groups: []
   },

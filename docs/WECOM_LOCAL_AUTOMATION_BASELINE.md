@@ -20,13 +20,14 @@
 系统 SendScheduler
   -> realtime worker 预检任务仍有效
   -> 本地脚本 /send
-  -> Cmd+F 搜索会话
-  -> Enter 进入第一条搜索结果
-  -> 标题校验
+  -> 快速校验当前窗口是否已是目标会话
+  -> 命中则跳过搜索；未命中才 Cmd+F 搜索会话
+  -> 等搜索值稳定后 Enter 进入第一条搜索结果
+  -> 轻量读取顶部标题校验
   -> 发送前快读尾部3条消息
   -> 校验最新消息仍匹配triggerLatestMessageId
   -> fast_path 定位输入框
-  -> 写入/粘贴回复
+  -> 优先 AX 写入回复，失败时剪贴板粘贴兜底
   -> Enter 发送
   -> 回写 dispatched
   -> 空闲复位到文件传输助手
@@ -61,15 +62,20 @@
 - Worker 主循环由 `unreadHint` 触发判断：如果系统队列没有可执行发送任务，不等待系统派发“读未读任务”，直接调用 `/messages` 读取未读并回传。
 - 如果系统队列已有发送任务，Worker 先完成当前 1 个发送原子动作；动作完成后如果 `unreadHint=true`，再调用 `/messages` 读未读并回传，实现 `发送1 -> 读取未读a -> 发送2/3`。
 - 如果没有未读标记，发送动作完成后不做完整读取，下一轮继续调度后续发送任务；发送目标会话的新消息由 `/send` 的发送前快读保护兜底。
+- `/send` 会先轻量读取当前窗口标题；如果已经在目标会话，直接走 `openStrategy=current_room`，不再搜索。
+- 未命中当前会话时才进入搜索；搜索框仍用真实键盘粘贴触发企微刷新，但回车等待从固定长等改为“搜索值稳定后的短等”，失败重试时再使用更保守等待。
+- 搜索后标题校验只读取顶部标题区域，不读取消息区；发送前防漏读才读取目标会话尾部消息。
 - 进入会话后必须校验标题包含 `expectedTitleToken`。
 - `/send` 在粘贴回复前必须执行发送前快读保护，默认只读当前目标会话尾部 3 条可见消息。
 - 发送前快读最新消息必须匹配系统下发的 `triggerLatestMessageId`；只有缺少 messageId 时才允许用 `triggerLatestText` 兜底，避免连续相同文本误判。
 - 如果发送前发现目标会话已有新消息，`/send` 返回 `aborted_new_messages` 且不发送；Worker 先把新消息写入入站并 ACK，再取消旧任务，等待系统重新判断。
 - 如果发送前无法确认目标会话最新消息，`/send` 返回 `target_latest_unverified` 且不发送。
 - 输入框使用固定 AX 路径 `fast_path`，递归扫描只作为兜底。
+- 输入内容优先通过 AX value 写入，无法确认写入成功时再执行剪贴板粘贴；返回 `inputWriteMode=ax_value|clipboard_paste` 便于判断耗时。
 - 本地 `/send` 必须显式传 `allowSend=true` 才会真实发送。
 - SendScheduler 的队列过期从 `max(createdAt, validAfterAt/quietUntilAt)` 开始计算，避免“刚读取保护”和静默窗口把 60 秒有效期提前消耗完。
 - realtime worker 输出会带 `schedulerDispatched/schedulerSkipped/schedulerExpired/preSendAborted/preSendInboundCount`，用于判断本轮到底是发送、保护跳过、过期取消还是发送前防漏读中止。
+- `/send` 响应会带 `openStrategy/searchAttemptCount/currentRoomVerifyMs/searchMs/titleVerifyMs/openConversationMs/preSendGuardMs/inputAndSendMs/inputWriteMode/totalMs`，用于拆解慢点。
 
 ## 空闲复位
 

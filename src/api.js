@@ -67,6 +67,9 @@ export const api = {
   wecomClientRealtimeConfig() {
     return request("/api/wecom-client/realtime/config");
   },
+  wecomAdminMassSend() {
+    return request("/api/wecom-admin/mass-send");
+  },
   outboundDrafts() {
     return request("/api/outbound-drafts");
   },
@@ -105,6 +108,9 @@ export const api = {
   },
   checkWecomClientRealtimeWorker() {
     return request("/api/wecom-client/realtime/worker/check", { method: "POST" });
+  },
+  checkWecomAdminMassSendWorker() {
+    return request("/api/wecom-admin/mass-send/worker/check", { method: "POST" });
   },
   updateWecomGroupBinding(payload) {
     return request("/api/wecom/group-bindings", {
@@ -248,6 +254,30 @@ export const api = {
     return request("/api/outbound-drafts/batch-status", {
       method: "POST",
       body: JSON.stringify({ draftIds, status, note })
+    });
+  },
+  createWecomMassSendTask(payload) {
+    return request("/api/wecom-admin/mass-send/tasks", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  approveWecomMassSendTask(taskId, payload = {}) {
+    return request(`/api/wecom-admin/mass-send/tasks/${encodeURIComponent(taskId)}/approve`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  runWecomMassSendScheduler(payload = {}) {
+    return request("/api/wecom-admin/mass-send/scheduler/run", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  recordWecomMassSendTaskResult(taskId, payload = {}) {
+    return request(`/api/wecom-admin/mass-send/tasks/${encodeURIComponent(taskId)}/result`, {
+      method: "POST",
+      body: JSON.stringify(payload)
     });
   },
   escalateTasks() {
