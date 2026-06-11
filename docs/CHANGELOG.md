@@ -6,15 +6,19 @@
 
 - 新增电销企微后台群发派发链路：`wecomAdminMassSend` 状态、`/api/wecom-admin/mass-send/*` API、`scripts/wecom-admin-local-automation.mjs` 和 `scripts/wecom-admin-mass-send-worker.mjs`。
 - 电销运营页新增“企微后台群发派发”区域：推荐批次可填写指定员工、创建群发任务、审批入队、检查企微后台执行器并派发下一条任务。
-- 新增本地Chrome企微后台执行器，默认定位企微后台 `客户与上下游 > 客户联系 > 群发工具` 页面，默认只做 dry-run，不点击最终提交。
-- 新增群发任务状态流转：`pending_approval -> queued -> dispatching -> dry_run_passed/submitted/failed/cancelled/manual_done`，并记录目标客户、指定员工、文案、审批人、执行结果和外部副作用状态。
-- 新增同批次幂等保护：同一分层、客户集合、员工集合和文案在未完成前重复创建，会复用原群发任务，避免重复批次污染界面。
-- 新增企微后台群发单元测试：覆盖创建、重复创建复用、审批、Worker未就绪不调度、Worker就绪调度、dry-run回写，以及缺客户/缺员工/缺文案拒绝。
+- 新增后台浏览器企微后台执行器，默认定位企微后台 `客户与上下游 > 客户联系 > 群发工具` 页面；系统确认后默认正式提交，也支持显式 `submitMode=dry-run` 做提交前验证。
+- 新增 `npm run wecom:admin-chrome`，使用专用 Chrome Profile + `--remote-debugging-port=9222` 登录企微后台，群发执行器通过 CDP 后台控制页面，不再抢 Chrome 前台、鼠标键盘或 AX。
+- 新增群发任务状态流转：`pending_approval -> queued -> dispatching -> dry_run_passed/submitted/failed/cancelled/manual_done`，并记录目标对象类型、目标客户/客户群、指定员工、文案、审批人、执行结果和外部副作用状态。
+- 新增双入口支持：`audienceType=customer` 进入“群发消息给客户”，`audienceType=customer_group` 进入“群发消息到企业的客户群”。
+- 新增客户群关键词唯一性保护：企微后台客户群入口按“群名包含关键词”筛选，关键词命中多个已知群时正式提交会失败为 `ambiguous_customer_group_keyword`，不会点击最终提交。
+- 新增同批次幂等保护：同一分层、对象类型、目标范围、员工集合和文案在未完成前重复创建，会复用原群发任务，避免重复批次污染界面。
+- 新增企微后台群发单元测试：覆盖创建、重复创建复用、审批、Worker未就绪不调度、Worker就绪调度、提交前验证回写、客户群入口，以及缺客户/缺员工/缺文案拒绝。
 
 ### 改进
 
 - 企微客户端实时发送调度的 `skipRoomIds` 候选排序稳定化：本轮刚读取到新消息的会话先标记等待，再派发其他会话，保持“只跳过对应会话、不影响其他会话”的逻辑，并避免日志顺序受同毫秒任务创建影响。
 - 新群发链路使用独立端口 `8792`、独立脚本 `wecom-admin-*`、独立状态 `wecomAdminMassSend`，不复用企微客户端实时收发的 `8791`、未读读取、发送队列或 SendScheduler。
+- 企微后台群发正式提交仍保留执行器能力门禁：任务必须是 `submitMode=submit`，执行器必须声明 `supportsSubmit=true`；否则任务保持队列或结构化失败，不降级成前台点击。
 
 ### 验证
 
@@ -24,7 +28,7 @@
 - `node --check scripts/serve.mjs`
 - `node --check scripts/wecom-admin-local-automation.mjs`
 - `node --check scripts/wecom-admin-mass-send-worker.mjs`
-- `npm test`：78 个用例通过；现有企微客户端实时收发、发送前预检、静默窗口、按会话跳过、锁屏暂停和员工接管回归继续通过。
+- `npm test`：81 个用例通过；现有企微客户端实时收发、发送前预检、静默窗口、按会话跳过、锁屏暂停和员工接管回归继续通过。
 
 ## 2026-06-04
 

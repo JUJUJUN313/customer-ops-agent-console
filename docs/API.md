@@ -18,7 +18,7 @@
 | GET | `/api/wecom/aibot/check` | 检查企微智能机器人 Bot ID/Secret 是否完整，返回 bridge 启动条件和当前连接状态 |
 | GET | `/api/personal-wechat/config` | 返回内部兼容发送队列配置和运行状态 |
 | GET | `/api/wecom-client/realtime/config` | 返回企微客户端实时连接器配置、Monitor/Worker能力、员工账号、历史下载补账状态，以及复用的发送队列 |
-| GET | `/api/wecom-admin/mass-send` | 返回企微后台群发任务、审批/派发状态、本地Chrome执行器能力和最近动作日志 |
+| GET | `/api/wecom-admin/mass-send` | 返回企微后台群发任务、审批/派发状态、后台浏览器执行器能力和最近动作日志 |
 | GET | `/api/outbound-drafts` | 返回触达草稿队列、客户信息和待确认/已复制/已处理等统计 |
 
 ## 写入接口
@@ -65,12 +65,12 @@
 | POST | `/api/wecom-client/realtime/send-jobs/:jobId/confirm` | 自回显或服务商历史下载补账确认发送任务 |
 | POST | `/api/wecom-client/realtime/send-jobs/:jobId/fail` | 本地企微客户端Worker回写结构化失败，例如 `room_not_found`、`target_not_verified`、`client_locked`、`send_failed` |
 | POST | `/api/wecom-client/realtime/reconcile` | 服务商历史下载脚本补账确认发送任务；用于基础留档、审计和最终闭环确认 |
-| POST | `/api/wecom-admin/mass-send/worker/check` | 检查本地Chrome企微后台群发执行器 `/health`，读取 `canDispatch/supportsDryRun/supportsSubmit/loginStatus` |
-| POST | `/api/wecom-admin/mass-send/status` | 本地Chrome执行器或Worker回写企微后台派发能力、登录态、错误和最近事件时间 |
-| POST | `/api/wecom-admin/mass-send/tasks` | 创建电销企微后台群发任务，包含目标客户、指定员工、文案和提交模式；同批次幂等复用未完成任务 |
-| POST | `/api/wecom-admin/mass-send/tasks/:taskId/approve` | 审批群发任务并进入派发队列；默认 `submitMode=dry-run` |
-| POST | `/api/wecom-admin/mass-send/scheduler/run` | 从已审批队列派发下一条任务给本地Chrome执行器；只改变系统任务状态，不直接操作浏览器 |
-| POST | `/api/wecom-admin/mass-send/tasks/:taskId/result` | 本地Chrome Worker回写 `dry_run_passed/submitted/failed/cancelled/manual_done` 等执行结果 |
+| POST | `/api/wecom-admin/mass-send/worker/check` | 检查专用Chrome CDP企微后台群发执行器 `/health`，读取 `canDispatch/supportsDryRun/supportsSubmit/loginStatus/foregroundSafe` |
+| POST | `/api/wecom-admin/mass-send/status` | 后台浏览器执行器或Worker回写企微后台派发能力、登录态、错误和最近事件时间 |
+| POST | `/api/wecom-admin/mass-send/tasks` | 创建电销企微后台群发任务，包含对象类型、目标客户/客户群、指定员工、文案和提交模式；同批次幂等复用未完成任务 |
+| POST | `/api/wecom-admin/mass-send/tasks/:taskId/approve` | 审批群发任务并进入派发队列；默认 `submitMode=submit` |
+| POST | `/api/wecom-admin/mass-send/scheduler/run` | 从已审批队列派发下一条任务给后台浏览器执行器；只改变系统任务状态，不直接操作浏览器 |
+| POST | `/api/wecom-admin/mass-send/tasks/:taskId/result` | 后台浏览器 Worker回写 `dry_run_passed/submitted/failed/cancelled/manual_done` 等执行结果 |
 | POST | `/api/personal-wechat/gateway/check` | 内部兼容队列健康检查，不作为当前企微控制台入口 |
 | POST | `/api/personal-wechat/gateway/status` | Gateway脚本回写游标、最近拉取、ACK、登录态、错误和能力状态 |
 | POST | `/api/personal-wechat/inbound` | 内部兼容群消息写入，当前主链路使用企微客户端实时入站 |
@@ -164,21 +164,39 @@ Agent运行后，如果本次运行面向明确客户且生成了可触达文案
   "messageText": "您好，本周您关注的型号报价有更新，我们整理了近期货源和会员权益，方便您有采购计划时参考。",
   "targetCustomerIds": ["c001", "c002"],
   "excludedReason": "中等意向、关注型号明确，适合推送报价变化或会员权益。",
-  "submitMode": "dry-run"
+  "submitMode": "submit"
 }
 ```
 
-审批并派发给本地Chrome企微后台执行器：
+审批并派发给后台浏览器企微后台执行器：
 
 ```json
 {
   "queue": true,
-  "submitMode": "dry-run",
+  "submitMode": "submit",
   "approvedBy": "运营"
 }
 ```
 
-群发任务默认只做 `dry-run`：执行器会检查Chrome里是否已打开企微后台 `客户与上下游 > 客户联系 > 群发工具` 页面，并验证任务参数，不会点击最终提交。只有启动执行器时显式设置 `WECOM_ADMIN_ALLOW_SUBMIT=true`，并且任务 `submitMode=submit`，才允许进入正式提交流程。当前正式提交控件仍需要按测试企微后台页面补齐选择器映射。
+群发任务默认使用 `submitMode=submit`：执行器通过专用 Chrome CDP 检查企微后台是否已登录、是否位于 `客户与上下游 > 客户联系 > 群发工具` 页面，然后按 `audienceType` 自动进入正确入口并提交。`audienceType=customer` 使用“群发消息给客户”，`audienceType=customer_group` 使用“群发消息到企业的客户群”。显式设置 `submitMode=dry-run` 时只做提交前验证，不点击最终按钮。客户群入口使用企微后台的“群名关键词包含”筛选；正式提交时如果关键词命中多个已知群，会返回 `ambiguous_customer_group_keyword` 且不会提交。若需要临时关闭真实提交，可用 `WECOM_ADMIN_ALLOW_SUBMIT=false` 启动执行器。
+
+启动后台控制链路：
+
+```bash
+npm run wecom:admin-chrome
+npm run wecom:admin-local
+npm run wecom:admin-worker
+```
+
+可选环境变量：
+
+```text
+WECOM_ADMIN_CDP_PORT=9222
+WECOM_ADMIN_CDP_ENDPOINT=http://127.0.0.1:9222
+WECOM_ADMIN_CHROME_PROFILE=$HOME/.customer-ops/wecom-admin-chrome-profile
+WECOM_ADMIN_ALLOW_SUBMIT=false # 可选；设为 false 时禁用真实提交
+WECOM_ADMIN_MASS_SEND_SELECTORS='{"employeePickerOpen":"...","employeeSearchInput":"...","employeeResult":"...","employeeConfirmButton":"...","customerScopeOpen":"...","customerSearchInput":"...","customerResult":"...","customerScopeConfirmButton":"...","messageEditor":"...","submitButton":"..."}'
+```
 
 企微配置：
 

@@ -715,8 +715,49 @@ test("企微后台群发任务支持创建、审批、调度和干跑回写", ()
   });
   report = buildWecomAdminMassSendReport(state);
   assert.equal(report.summary.dryRunPassed, 1);
-  assert.equal(report.tasks[0].statusLabel, "干跑通过");
+  assert.equal(report.tasks[0].statusLabel, "已填表待提交");
   assert.equal(report.tasks[0].externalSideEffects, false);
+});
+
+test("企微后台客户群群发任务会按客户群入口独立创建和调度", () => {
+  let state = seedState();
+  state = createWecomMassSendTaskAction(state, {
+    audienceType: "customer_group",
+    segmentKey: "vip_group_notice",
+    segmentTitle: "客户群公告",
+    employeeNames: ["李一凡"],
+    messageText: "您好，这是一条客户群测试通知。",
+    targetGroupNames: ["测试群"],
+    submitMode: "submit"
+  });
+  let report = buildWecomAdminMassSendReport(state);
+  assert.equal(report.summary.pendingApproval, 1);
+  assert.equal(report.tasks[0].audienceType, "customer_group");
+  assert.equal(report.tasks[0].audienceTypeLabel, "客户群");
+  assert.deepEqual(report.tasks[0].targetGroupNames, ["测试群"]);
+  assert.equal(report.tasks[0].customerCount, 1);
+
+  state = createWecomMassSendTaskAction(state, {
+    audienceType: "customer",
+    segmentKey: "vip_group_notice",
+    segmentTitle: "客户私聊通知",
+    employeeNames: ["李一凡"],
+    messageText: "您好，这是一条客户群测试通知。",
+    targetCustomerIds: [state.customers[0].id],
+    submitMode: "submit"
+  });
+  assert.equal(state.wecomAdminMassSend.tasks.length, 2);
+
+  const taskId = state.wecomAdminMassSend.tasks.find((task) => task.audienceType === "customer_group").taskId;
+  state = approveWecomMassSendTaskAction(state, taskId, { queue: true, submitMode: "submit", approvedBy: "运营" });
+  state = updateWecomAdminMassSendStatusAction(state, {
+    ok: true,
+    status: "执行器可用",
+    worker: { canDispatch: true, supportsDryRun: true, supportsSubmit: true, loginStatus: "群发工具页已打开", status: "执行器可用" }
+  });
+  state = runWecomMassSendSchedulerAction(state);
+  assert.equal(state.wecomAdminMassSend.lastSchedulerResult.dispatched[0], taskId);
+  assert.equal(state.wecomAdminMassSend.tasks.find((task) => task.taskId === taskId).status, "dispatching");
 });
 
 test("企微后台群发任务会拒绝缺少名单、员工或文案", () => {
@@ -736,6 +777,49 @@ test("企微后台群发任务会拒绝缺少名单、员工或文案", () => {
     messageText: "",
     targetCustomerIds: ["c001"]
   }), /Mass send message text is required/);
+});
+
+test("企微后台群发正式提交任务在执行器未开放提交时不会派发", () => {
+  let state = seedState();
+  const targetCustomerIds = state.customers.slice(0, 2).map((customer) => customer.id);
+  state = createWecomMassSendTaskAction(state, {
+    segmentKey: "quote_nurture_mass_send",
+    segmentTitle: "报价培育群发",
+    employeeNames: ["测试员工A"],
+    messageText: "您好，本周报价已更新，请确认是否需要销售同事跟进。",
+    targetCustomerIds,
+    submitMode: "submit"
+  });
+  const taskId = state.wecomAdminMassSend.tasks[0].taskId;
+  state = approveWecomMassSendTaskAction(state, taskId, { queue: true, submitMode: "submit", approvedBy: "运营" });
+  state = updateWecomAdminMassSendStatusAction(state, {
+    ok: true,
+    status: "执行器可用",
+    worker: { canDispatch: true, supportsDryRun: true, supportsSubmit: false, loginStatus: "群发工具页已打开", status: "执行器可用" }
+  });
+  state = runWecomMassSendSchedulerAction(state);
+  assert.equal(state.wecomAdminMassSend.tasks[0].status, "queued");
+  assert.equal(state.wecomAdminMassSend.lastSchedulerResult.reason, "submit_not_supported");
+  assert.deepEqual(state.wecomAdminMassSend.lastSchedulerResult.skipped, [taskId]);
+});
+
+test("企微后台执行器恢复可用后会清空旧错误", () => {
+  let state = seedState();
+  state = updateWecomAdminMassSendStatusAction(state, {
+    ok: false,
+    status: "检查失败",
+    worker: { canDispatch: false, status: "检查失败", loginStatus: "未连接", lastError: "fetch failed" },
+    error: "fetch failed"
+  });
+  assert.equal(state.wecomAdminMassSend.worker.lastError, "fetch failed");
+
+  state = updateWecomAdminMassSendStatusAction(state, {
+    ok: true,
+    status: "执行器可用",
+    worker: { canDispatch: true, supportsDryRun: true, supportsSubmit: false, loginStatus: "群发工具页已打开", status: "执行器可用", lastError: "" },
+    error: ""
+  });
+  assert.equal(state.wecomAdminMassSend.worker.lastError, "");
 });
 
 test("企微配置报告会脱敏Webhook并保留已保存密钥", () => {

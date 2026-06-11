@@ -212,7 +212,7 @@ const defaultWecomAdminMassSendState = {
   },
   settings: {
     requireApproval: true,
-    defaultSubmitMode: "dry-run",
+    defaultSubmitMode: "submit",
     defaultPageUrl: "https://work.weixin.qq.com/wework_admin/frame#/customer/config/groupSend",
     idleWhenDone: true
   },
@@ -629,7 +629,7 @@ function normalizeWecomAdminMassSendState(config = {}) {
     settings: {
       ...settings,
       requireApproval: settings.requireApproval !== false,
-      defaultSubmitMode: settings.defaultSubmitMode === "submit" ? "submit" : "dry-run",
+      defaultSubmitMode: settings.defaultSubmitMode === "dry-run" ? "dry-run" : "submit",
       idleWhenDone: settings.idleWhenDone !== false
     },
     tasks: Array.isArray(config.tasks) ? config.tasks : [],
@@ -2010,7 +2010,7 @@ function wecomMassTaskStatusLabel(status = "") {
     pending_approval: "待审批",
     queued: "待派发",
     dispatching: "派发中",
-    dry_run_passed: "干跑通过",
+    dry_run_passed: "已填表待提交",
     submitted: "已提交企微",
     failed: "失败",
     cancelled: "已取消",
@@ -2021,23 +2021,28 @@ function wecomMassTaskStatusLabel(status = "") {
 function renderWecomMassTaskCard(task) {
   const terminal = ["submitted", "failed", "cancelled", "manual_done"].includes(task.status);
   const canApprove = ["pending_approval", "dry_run_passed"].includes(task.status);
+  const audienceType = task.audienceType === "customer_group" ? "customer_group" : "customer";
+  const targetNames = audienceType === "customer_group" ? (task.targetGroupNames || []) : (task.targetCustomerNames || []);
+  const targetUnit = audienceType === "customer_group" ? "个客户群" : "人";
+  const targetLabel = audienceType === "customer_group" ? "客户群入口" : "客户入口";
   return `
     <article class="draft-card">
       <div class="draft-head">
         <div>
           <strong>${escapeHtml(task.title || task.segmentTitle || "企微群发任务")}</strong>
-          <div class="muted">${escapeHtml((task.employeeNames || []).join("、") || "未指定员工")} · ${escapeHtml(task.segmentTitle || "电销群发")} · ${Number(task.customerCount || (task.targetCustomerIds || []).length)}人</div>
+          <div class="muted">${escapeHtml((task.employeeNames || []).join("、") || "未指定员工")} · ${escapeHtml(task.segmentTitle || "电销群发")} · ${escapeHtml(targetLabel)} · ${Number(task.customerCount || targetNames.length)}${targetUnit}</div>
         </div>
         <span class="sla-pill ${wecomMassTaskStatusClass(task.status)}">${escapeHtml(task.statusLabel || wecomMassTaskStatusLabel(task.status))}</span>
       </div>
       <div class="draft-content">${escapeHtml(task.messageText || "")}</div>
       <div class="tag-list">
-        ${(task.targetCustomerNames || []).slice(0, 8).map((name) => `<span class="tag">${escapeHtml(name)}</span>`).join("") || `<span class="tag">暂无客户名单</span>`}
+        ${targetNames.slice(0, 8).map((name) => `<span class="tag">${escapeHtml(name)}</span>`).join("") || `<span class="tag">暂无${audienceType === "customer_group" ? "客户群关键词" : "客户名单"}</span>`}
       </div>
       <div class="draft-meta">
-        <span class="status-pill">${task.submitMode === "submit" ? "正式提交" : "干跑验证"}</span>
+        <span class="status-pill">${task.submitMode === "submit" ? "正式提交" : "提交前验证"}</span>
         <span class="status-pill">尝试 ${Number(task.attempts || 0)}</span>
         <span class="muted">创建 ${escapeHtml(formatDateTime(task.createdAt))}</span>
+        ${task.lastResult?.detail ? `<span class="muted">${escapeHtml(task.lastResult.detail)}</span>` : ""}
         ${task.error ? `<span class="muted">错误：${escapeHtml(task.error)}</span>` : ""}
       </div>
       <div class="split-actions">
@@ -2046,6 +2051,27 @@ function renderWecomMassTaskCard(task) {
         <button class="danger-button" type="button" data-wecom-mass-result="${escapeHtml(task.taskId)}" data-status="cancelled" ${terminal ? "disabled" : ""} ${actionAttrs(`wecom-mass-cancel-${task.taskId}`)}>取消</button>
       </div>
     </article>
+  `;
+}
+
+function renderWecomAdminSetupGuide(mass) {
+  const worker = mass.worker || {};
+  const canDispatch = worker.canDispatch === true;
+  const statusText = worker.status || (canDispatch ? "执行器可用" : "未启动");
+  const loginText = worker.loginStatus || "未连接";
+  return `
+    <div class="setup-guide">
+      <div class="setup-step ${canDispatch ? "is-active" : ""}">
+        <strong>后台派发${canDispatch ? "已就绪" : "未就绪"}</strong>
+        <span>${canDispatch ? "派发任务会自动进入企微后台创建群发任务，业务人员无需再到企微后台手工配置。" : "点击启动后，系统会连接后台浏览器执行器；首次使用需要管理员完成企微后台登录。"}</span>
+        <button class="small-button" type="button" id="startWecomAdminChrome" ${actionAttrs("wecom-admin-chrome-start")}>启动后台组件</button>
+      </div>
+      <div class="setup-step ${canDispatch ? "is-active" : ""}">
+        <strong>派发能力</strong>
+        <span>${escapeHtml(statusText)} · ${escapeHtml(loginText)}</span>
+        <button class="small-button" type="button" id="checkWecomMassWorker" ${actionAttrs("wecom-mass-worker-check")}>检查企微后台</button>
+      </div>
+    </div>
   `;
 }
 
@@ -2060,18 +2086,18 @@ function renderWecomMassSendPanel() {
       <div class="panel-header">
         <div>
           <h2 class="panel-title">企微后台群发派发</h2>
-          <p class="panel-subtitle">电销批次确认后，由本地浏览器执行器进入企微后台群发工具创建任务；默认干跑验证，不直接提交。</p>
+          <p class="panel-subtitle">电销批次确认后，系统自动进入企微后台创建客户或客户群群发任务；确认派发后直接提交，不会抢企微客户端前台。</p>
         </div>
         <div class="button-row">
-          <button class="small-button" type="button" id="checkWecomMassWorker" ${actionAttrs("wecom-mass-worker-check")}>检查企微后台</button>
           <button class="primary-button" type="button" id="runWecomMassScheduler" ${queued ? "" : "disabled"} ${actionAttrs("wecom-mass-scheduler")}>派发下一条</button>
         </div>
       </div>
+      ${renderWecomAdminSetupGuide(mass)}
       <section class="grid four compact-grid">
-        ${cardKpi("执行器", mass.worker.canDispatch ? "可用" : mass.worker.status || "未启动", mass.worker.loginStatus || "企微后台")}
+        ${cardKpi("后台浏览器", mass.worker.canDispatch ? "可用" : mass.worker.status || "未启动", mass.worker.loginStatus || "企微后台")}
         ${cardKpi("待审批", pending, "业务确认")}
         ${cardKpi("待派发", queued, "等待本地执行器")}
-        ${cardKpi("已处理", dispatched, "含干跑/提交")}
+        ${cardKpi("已处理", dispatched, "已提交或待确认")}
       </section>
       <div class="event-list">
         ${tasks.slice(0, 8).map(renderWecomMassTaskCard).join("") || renderEmptyState("暂无企微群发任务", "从上方推荐批次创建任务后，会在这里审批和派发。")}
@@ -2158,7 +2184,7 @@ function renderTelemarketingOps() {
       <div class="panel-header">
         <div>
           <h2 class="panel-title">推荐群发批次与审批</h2>
-          <p class="panel-subtitle">确认名单、指定员工和文案后，可生成企微后台群发任务并交给本地Chrome执行器干跑验证。</p>
+          <p class="panel-subtitle">确认名单、指定员工和文案后，可生成企微后台群发任务并交给后台浏览器自动派发。</p>
         </div>
       </div>
       <div class="event-list">
@@ -5092,7 +5118,7 @@ document.addEventListener("click", (event) => {
           messageText: segment.message,
           targetCustomerIds: segment.customers.map((customer) => customer.id),
           excludedReason: segment.criteria,
-          submitMode: "dry-run",
+          submitMode: "submit",
           source: "telemarketing"
         });
         setState(nextState, "企微群发任务已创建，等待确认");
@@ -5107,7 +5133,7 @@ document.addEventListener("click", (event) => {
     const taskId = approveMassTaskButton.dataset.wecomMassApprove;
     void withBusy(`wecom-mass-approve-${taskId}`, async () => {
       try {
-        const nextState = await api.approveWecomMassSendTask(taskId, { queue: true, submitMode: "dry-run", approvedBy: "local-operator" });
+        const nextState = await api.approveWecomMassSendTask(taskId, { queue: true, submitMode: "submit", approvedBy: "local-operator" });
         setState(nextState, "群发任务已确认并入队");
       } catch (error) {
         showToast(`确认群发任务失败：${error.message}`);
@@ -5129,14 +5155,26 @@ document.addEventListener("click", (event) => {
     });
     return;
   }
+  if (event.target.closest("#startWecomAdminChrome")) {
+    void withBusy("wecom-admin-chrome-start", async () => {
+      try {
+        const result = await api.startWecomAdminChrome();
+        if (result.state) setState(result.state);
+        showToast(result.message || (result.ok ? "后台组件已启动，请在新窗口登录企微后台" : "后台组件启动中"));
+      } catch (error) {
+        showToast(`启动后台组件失败：${error.message.includes("API not found") ? "请先重启本地系统服务" : error.message}`);
+      }
+    });
+    return;
+  }
   if (event.target.closest("#checkWecomMassWorker")) {
     void withBusy("wecom-mass-worker-check", async () => {
       try {
         const result = await api.checkWecomAdminMassSendWorker();
         if (result.state) setState(result.state);
-        showToast(result.ok ? "企微后台执行器已就绪" : `企微后台执行器未就绪：${(result.missing || []).join("、") || result.error || "请先启动本地执行器"}`);
+        showToast(result.ok ? "企微后台执行器已就绪" : `企微后台执行器未就绪：${(result.missing || []).join("、") || result.error || "请先启动后台组件并登录企微后台"}`);
       } catch (error) {
-        showToast(`检查企微后台执行器失败：${error.message}`);
+        showToast(`检查企微后台执行器失败：${error.message.includes("API not found") ? "请先重启本地系统服务" : error.message}`);
       }
     });
     return;

@@ -304,6 +304,47 @@ h3 {
   margin-top: 10px;
 }
 
+.setup-guide {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.setup-step {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-height: 128px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+}
+
+.setup-step.is-active {
+  border-color: #a6d5bd;
+  background: #f6fffa;
+}
+
+.setup-step span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.setup-step code {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: #edf2f7;
+  color: #31445b;
+  font-size: 12px;
+  white-space: normal;
+  word-break: break-word;
+}
+
 .warning-panel {
   border-color: #f2c3bf;
   background: #fffafa;

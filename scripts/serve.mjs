@@ -1,4 +1,5 @@
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { extname, join, normalize, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,6 +124,71 @@ async function checkHttpEndpoint(url, timeoutMs = 5000) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function startWecomAdminChrome() {
+  const cdpPort = Number(process.env.WECOM_ADMIN_CDP_PORT || 9222);
+  const cdpUrl = `http://127.0.0.1:${cdpPort}/json/version`;
+  const automationPort = Number(process.env.WECOM_ADMIN_AUTOMATION_PORT || 8792);
+  const automationUrl = `http://127.0.0.1:${automationPort}/health`;
+  const scriptPath = join(root, "scripts", "start-wecom-admin-chrome.mjs");
+  const automationScriptPath = join(root, "scripts", "wecom-admin-local-automation.mjs");
+  const command = "npm run wecom:admin-chrome && npm run wecom:admin-local";
+  const alreadyRunning = await checkHttpEndpoint(cdpUrl, 1500).catch(() => null);
+  let chromeStarted = Boolean(alreadyRunning?.ok);
+  if (!chromeStarted) {
+    const child = spawn(process.execPath, [scriptPath], {
+      cwd: root,
+      detached: true,
+      stdio: "ignore",
+      env: process.env
+    });
+    child.unref();
+  }
+  const automationRunning = await checkHttpEndpoint(automationUrl, 1500).catch(() => null);
+  let automationStarted = Boolean(automationRunning);
+  if (!automationStarted) {
+    const worker = spawn(process.execPath, [automationScriptPath], {
+      cwd: root,
+      detached: true,
+      stdio: "ignore",
+      env: process.env
+    });
+    worker.unref();
+  }
+  await new Promise((resolveStart) => setTimeout(resolveStart, 1600));
+  const cdpCheck = await checkHttpEndpoint(cdpUrl, 1500).catch(() => null);
+  const automationCheck = await checkHttpEndpoint(automationUrl, 2500).catch(() => null);
+  chromeStarted = Boolean(cdpCheck?.ok);
+  automationStarted = Boolean(automationCheck);
+  const capability = automationCheck?.body?.capabilities || automationCheck?.body || {};
+  const healthOk = Boolean(automationCheck?.ok) && capability.ok !== false;
+  const canDispatch = healthOk && (capability.canDispatch === true || capability.massSend?.enabled === true);
+  const supportsDryRun = healthOk && capability.supportsDryRun !== false;
+  const supportsSubmit = healthOk && capability.supportsSubmit === true;
+  const loginStatus = capability.loginStatus || capability.account?.loginStatus || capability.status || (healthOk ? "企微后台可达" : "等待登录企微后台");
+  if (chromeStarted && automationStarted) {
+    return {
+      ok: true,
+      status: alreadyRunning?.ok && automationRunning ? "already_running" : "started",
+      command,
+      cdpEndpoint: `http://127.0.0.1:${cdpPort}`,
+      automationUrl: `http://127.0.0.1:${automationPort}`,
+      capability: { canDispatch, supportsDryRun, supportsSubmit, loginStatus },
+      message: canDispatch
+        ? "企微后台组件已启动且群发工具页可用。"
+        : "企微后台组件已启动：请在自动打开的后台浏览器登录企微后台后点击检查。"
+    };
+  }
+  return {
+    ok: false,
+    status: "starting",
+    command,
+    cdpEndpoint: `http://127.0.0.1:${cdpPort}`,
+    automationUrl: `http://127.0.0.1:${automationPort}`,
+    message: `已发起启动后台组件；当前后台浏览器 ${chromeStarted ? "已启动" : "未就绪"}，后台执行器 ${automationStarted ? "已启动" : "未就绪"}。如果没有看到后台浏览器窗口，请在终端运行 npm run wecom:admin-chrome。`,
+    components: { chromeStarted, automationStarted }
+  };
 }
 
 function ensureStore() {
@@ -623,6 +689,44 @@ async function handleApi(req, res, pathname) {
         error: error.message
       }));
       return json(res, 200, { ok: false, error: error.message, state: publicState(nextState) });
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/wecom-admin/mass-send/admin-chrome/start") {
+    try {
+      const result = await startWecomAdminChrome();
+      const capability = result.capability || {};
+      const canDispatch = result.ok && capability.canDispatch === true;
+      const status = result.ok ? canDispatch ? "执行器可用" : "等待登录/检查" : "启动中";
+      const loginStatus = result.ok
+        ? capability.loginStatus || "后台浏览器已启动，等待登录企微后台"
+        : "后台浏览器启动中";
+      const nextState = await mutateState((state) => updateWecomAdminMassSendStatusAction(state, {
+        ok: result.ok,
+        status,
+        worker: {
+          mode: "chrome-admin",
+          sidecarUrl: result.automationUrl || "http://127.0.0.1:8792",
+          canDispatch,
+          supportsDryRun: result.ok && capability.supportsDryRun !== false,
+          supportsSubmit: result.ok && capability.supportsSubmit === true,
+          loginStatus,
+          status,
+          lastError: result.ok ? "" : result.message
+        },
+        detail: result.message,
+        error: result.ok ? "" : result.message
+      }));
+      return json(res, 200, { ...result, state: publicState(nextState) });
+    } catch (error) {
+      const nextState = await mutateState((state) => updateWecomAdminMassSendStatusAction(state, {
+        ok: false,
+        status: "启动失败",
+        worker: { mode: "chrome-admin", canDispatch: false, loginStatus: "未连接", status: "启动失败", lastError: error.message },
+        detail: "后台浏览器启动失败",
+        error: error.message
+      }));
+      return json(res, 200, { ok: false, status: "failed", error: error.message, state: publicState(nextState) });
     }
   }
 

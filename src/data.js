@@ -138,7 +138,7 @@ export const initialState = {
     },
     settings: {
       requireApproval: true,
-      defaultSubmitMode: "dry-run",
+      defaultSubmitMode: "submit",
       defaultPageUrl: "https://work.weixin.qq.com/wework_admin/frame#/customer/config/groupSend",
       idleWhenDone: true
     },

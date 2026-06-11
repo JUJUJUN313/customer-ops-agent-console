@@ -48,10 +48,12 @@ async function updateWorkerStatusFromHealth() {
       supportsSubmit: Boolean(health.supportsSubmit),
       loginStatus: health.loginStatus || health.status || "未知",
       status: health.ok && health.canDispatch ? "执行器可用" : "检查失败",
-      lastError: health.ok && health.canDispatch ? "" : health.status || "企微后台执行器不可用"
+      lastError: health.ok && health.canDispatch
+        ? ""
+        : health.error || health.status || "企微后台执行器不可用"
     },
     log: false,
-    detail: `企微后台执行器 ${health.status || "unknown"}，登录态 ${health.loginStatus || "未知"}`
+    detail: `企微后台执行器 ${health.status || "unknown"}，登录态 ${health.loginStatus || "未知"}，模式 ${health.automationMode || "unknown"}，前台安全 ${health.foregroundSafe ? "是" : "否"}`
   };
   const state = await requestJson(`${appBaseUrl}/api/wecom-admin/mass-send/status`, {
     method: "POST",

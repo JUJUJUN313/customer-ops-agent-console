@@ -15,6 +15,7 @@
     "wecom:archive": "node scripts/wecom-archive-gateway.mjs",
     "wecom:realtime": "node scripts/wecom-client-realtime-worker.mjs",
     "wecom:local": "node scripts/wecom-client-local-automation.mjs",
+    "wecom:admin-chrome": "node scripts/start-wecom-admin-chrome.mjs",
     "wecom:admin-local": "node scripts/wecom-admin-local-automation.mjs",
     "wecom:admin-worker": "node scripts/wecom-admin-mass-send-worker.mjs",
     "wecom:start": "node scripts/start-wecom-realtime.mjs",
@@ -22,6 +23,7 @@
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
-    "@wecom/aibot-node-sdk": "^1.0.7"
+    "@wecom/aibot-node-sdk": "^1.0.7",
+    "playwright-core": "^1.60.0"
   }
 }

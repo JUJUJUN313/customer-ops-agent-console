@@ -26,6 +26,7 @@ const VALID_DRAFT_CHANNELS = new Set(["电话外呼", "短信", "企微私聊", 
 const VALID_WECOM_MASS_SEND_STATUSES = new Set(["pending_approval", "queued", "dispatching", "dry_run_passed", "submitted", "failed", "cancelled", "manual_done"]);
 const TERMINAL_WECOM_MASS_SEND_STATUSES = new Set(["submitted", "failed", "cancelled", "manual_done"]);
 const VALID_WECOM_MASS_SEND_SUBMIT_MODES = new Set(["dry-run", "submit"]);
+const VALID_WECOM_MASS_SEND_AUDIENCE_TYPES = new Set(["customer", "customer_group"]);
 const VALID_WECOM_SEND_MODES = new Set(["manualApproval", "testOnly"]);
 const VALID_WECOM_MSGTYPES = new Set(["markdown", "text"]);
 const VALID_OUTCOMES = new Set(["成交", "继续培育", "暂缓", "无效"]);
@@ -242,7 +243,7 @@ const DEFAULT_WECOM_ADMIN_MASS_SEND = {
   },
   settings: {
     requireApproval: true,
-    defaultSubmitMode: "dry-run",
+    defaultSubmitMode: "submit",
     defaultPageUrl: "https://work.weixin.qq.com/wework_admin/frame#/customer/config/groupSend",
     idleWhenDone: true
   },
@@ -1429,9 +1430,15 @@ function normalizeWecomAdminMassSendStatus(value = "", fallback = "pending_appro
   return VALID_WECOM_MASS_SEND_STATUSES.has(status) ? status : fallback;
 }
 
-function normalizeWecomAdminSubmitMode(value = "", fallback = "dry-run") {
+function normalizeWecomAdminSubmitMode(value = "", fallback = "submit") {
   const mode = cleanLimitedText(value, fallback, 40);
   return VALID_WECOM_MASS_SEND_SUBMIT_MODES.has(mode) ? mode : fallback;
+}
+
+function normalizeWecomMassSendAudienceType(value = "", fallback = "customer") {
+  const type = cleanLimitedText(value, fallback, 60).replaceAll("-", "_");
+  if (["group", "groups", "customer_group", "客户群", "群聊", "vip_group"].includes(type)) return "customer_group";
+  return VALID_WECOM_MASS_SEND_AUDIENCE_TYPES.has(type) ? type : fallback;
 }
 
 function normalizeWecomAdminWorker(worker = {}, current = DEFAULT_WECOM_ADMIN_MASS_SEND.worker) {
@@ -1453,7 +1460,7 @@ function normalizeWecomAdminWorker(worker = {}, current = DEFAULT_WECOM_ADMIN_MA
 }
 
 function normalizeWecomAdminSettings(settings = {}, current = DEFAULT_WECOM_ADMIN_MASS_SEND.settings) {
-  const submitMode = normalizeWecomAdminSubmitMode(settings.defaultSubmitMode, current.defaultSubmitMode || "dry-run");
+  const submitMode = normalizeWecomAdminSubmitMode(settings.defaultSubmitMode, current.defaultSubmitMode || "submit");
   return {
     requireApproval: settings.requireApproval === undefined ? Boolean(current.requireApproval ?? true) : settings.requireApproval === true || settings.requireApproval === "true",
     defaultSubmitMode: submitMode,
@@ -1464,23 +1471,29 @@ function normalizeWecomAdminSettings(settings = {}, current = DEFAULT_WECOM_ADMI
 
 function normalizeWecomMassSendTask(task = {}) {
   const status = normalizeWecomAdminMassSendStatus(task.status, "pending_approval");
+  const audienceType = normalizeWecomMassSendAudienceType(task.audienceType || task.targetType || task.massSendType, "customer");
   const targetCustomerIds = cleanLimitedTextList(task.targetCustomerIds, 80, 10000);
   const excludedCustomerIds = cleanLimitedTextList(task.excludedCustomerIds, 80, 10000);
   const employeeNames = cleanLimitedTextList(task.employeeNames, 120, 200);
+  const targetGroupNames = cleanLimitedTextList(task.targetGroupNames, 120, 1000);
+  const knownGroupNames = cleanLimitedTextList(task.knownGroupNames, 120, 3000);
   return {
     taskId: cleanLimitedText(task.taskId, id("wms_task"), 80),
     title: cleanLimitedText(task.title, "企微客户群发任务", 160),
+    audienceType,
     segmentKey: cleanLimitedText(task.segmentKey, "manual", 80),
     segmentTitle: cleanLimitedText(task.segmentTitle, task.title || "企微客户群发任务", 160),
     employeeNames,
     messageText: cleanLimitedText(task.messageText || task.text || task.content, "", 4000),
     targetCustomerIds,
     targetCustomerNames: cleanLimitedTextList(task.targetCustomerNames, 120, 10000),
+    targetGroupNames,
+    knownGroupNames,
     excludedCustomerIds,
     excludedReason: cleanLimitedText(task.excludedReason, "", 500),
-    customerCount: Math.max(0, Math.round(finiteNumber(task.customerCount, targetCustomerIds.length))),
+    customerCount: Math.max(0, Math.round(finiteNumber(task.customerCount, audienceType === "customer_group" ? targetGroupNames.length : targetCustomerIds.length))),
     status,
-    submitMode: normalizeWecomAdminSubmitMode(task.submitMode, "dry-run"),
+    submitMode: normalizeWecomAdminSubmitMode(task.submitMode, "submit"),
     source: cleanLimitedText(task.source, "telemarketing", 80),
     priority: normalizePriority(task.priority, "中"),
     createdBy: cleanLimitedText(task.createdBy, "local-operator", 80),
@@ -4674,13 +4687,34 @@ export function batchUpdateOutboundDraftsAction(inputState, payload = {}) {
   return state;
 }
 
-function wecomMassSendAudienceKey(segmentKey = "", customerIds = [], employeeNames = [], messageText = "") {
+function wecomMassSendAudienceKey(segmentKey = "", customerIds = [], employeeNames = [], messageText = "", audienceType = "customer", groupNames = []) {
   return [
+    normalizeWecomMassSendAudienceType(audienceType, "customer"),
     cleanLimitedText(segmentKey, "manual", 80),
     [...customerIds].sort().join("|"),
+    [...groupNames].sort().join("|"),
     [...employeeNames].sort().join("|"),
     cleanLimitedText(messageText, "", 500)
   ].join("::");
+}
+
+function collectKnownWecomGroupNames(state = {}) {
+  const names = [];
+  const pushIfLikelyGroup = (name = "") => {
+    const cleanName = cleanLimitedText(name, "", 120);
+    if (cleanName && (/群|VIP|vip|\[.*\]/.test(cleanName))) names.push(cleanName);
+  };
+  for (const context of state.personalWechat?.groupContexts || []) {
+    if (context?.roomName) pushIfLikelyGroup(context.roomName);
+  }
+  for (const context of state.wecomClientRealtime?.groupContexts || []) {
+    if (context?.roomName) pushIfLikelyGroup(context.roomName);
+  }
+  for (const group of state.wecomBindings?.groups || []) {
+    if (group?.roomName) pushIfLikelyGroup(group.roomName);
+    if (group?.groupName) pushIfLikelyGroup(group.groupName);
+  }
+  return [...new Set(names.map((name) => cleanLimitedText(name, "", 120)).filter(Boolean))];
 }
 
 function enrichWecomMassSendTask(task = {}, customerById = new Map()) {
@@ -4690,9 +4724,12 @@ function enrichWecomMassSendTask(task = {}, customerById = new Map()) {
   return {
     ...task,
     targetCustomerNames: task.targetCustomerNames?.length ? task.targetCustomerNames : targetCustomerNames,
-    customerCount: task.targetCustomerIds.length,
+    customerCount: task.audienceType === "customer_group"
+      ? (task.targetGroupNames?.length || task.customerCount || 0)
+      : task.targetCustomerIds.length,
     statusLabel: wecomMassSendStatusLabel(task.status),
-    submitModeLabel: task.submitMode === "submit" ? "正式提交" : "干跑验证"
+    submitModeLabel: task.submitMode === "submit" ? "正式提交" : "提交前验证",
+    audienceTypeLabel: task.audienceType === "customer_group" ? "客户群" : "客户"
   };
 }
 
@@ -4701,7 +4738,7 @@ function wecomMassSendStatusLabel(status = "") {
     pending_approval: "待审批",
     queued: "待派发",
     dispatching: "派发中",
-    dry_run_passed: "干跑通过",
+    dry_run_passed: "已填表待提交",
     submitted: "已提交企微",
     failed: "失败",
     cancelled: "已取消",
@@ -4746,15 +4783,23 @@ export function createWecomMassSendTaskAction(inputState, payload = {}) {
   const state = hydrateTaskTimings(cloneState(inputState));
   const config = ensureWecomAdminMassSend(state);
   if (!config.enabled) throw new Error("WeCom admin mass send is disabled");
+  const audienceType = normalizeWecomMassSendAudienceType(payload.audienceType || payload.targetType || payload.massSendType, "customer");
   const targetCustomerIds = cleanLimitedTextList(payload.targetCustomerIds, 80, 10000);
-  if (!targetCustomerIds.length) throw new Error("Target customer ids are required");
-  const customers = targetCustomerIds.map((customerId) => requireCustomer(state, customerId));
+  const targetGroupNames = cleanLimitedTextList(payload.targetGroupNames || payload.groupNames || payload.targetCustomerNames, 120, 1000);
+  if (audienceType === "customer_group") {
+    if (!targetGroupNames.length) throw new Error("Target group names are required");
+  } else if (!targetCustomerIds.length) {
+    throw new Error("Target customer ids are required");
+  }
+  const customers = audienceType === "customer"
+    ? targetCustomerIds.map((customerId) => requireCustomer(state, customerId))
+    : [];
   const employeeNames = cleanLimitedTextList(payload.employeeNames || payload.employeeName, 120, 200);
   if (!employeeNames.length) throw new Error("Employee names are required");
   const messageText = cleanLimitedText(payload.messageText || payload.text || payload.content, "", 4000);
   if (!messageText) throw new Error("Mass send message text is required");
   const segmentKey = cleanLimitedText(payload.segmentKey, "manual", 80);
-  const audienceKey = wecomMassSendAudienceKey(segmentKey, targetCustomerIds, employeeNames, messageText);
+  const audienceKey = wecomMassSendAudienceKey(segmentKey, targetCustomerIds, employeeNames, messageText, audienceType, targetGroupNames);
   const existing = config.tasks.find((task) =>
     task.audienceKey === audienceKey && !TERMINAL_WECOM_MASS_SEND_STATUSES.has(task.status)
   );
@@ -4764,27 +4809,34 @@ export function createWecomMassSendTaskAction(inputState, payload = {}) {
       status: "成功",
       taskId: existing.taskId,
       title: existing.title,
-      detail: "同一分层、客户、员工和文案已有未完成群发任务，本次复用原任务。",
+      detail: "同一分层、对象类型、目标范围、员工和文案已有未完成群发任务，本次复用原任务。",
       externalSideEffects: false
     });
-    audit(state, "复用企微群发任务", existing.taskId, `${existing.title} / ${existing.customerCount}人`);
+    audit(state, "复用企微群发任务", existing.taskId, `${existing.title} / ${existing.customerCount}${existing.audienceType === "customer_group" ? "个客户群" : "人"}`);
     return state;
   }
   const now = new Date().toISOString();
+  const targetCount = audienceType === "customer_group" ? targetGroupNames.length : customers.length;
+  const knownGroupNames = audienceType === "customer_group"
+    ? cleanLimitedTextList(payload.knownGroupNames, 120, 3000).concat(collectKnownWecomGroupNames(state))
+    : [];
   const task = normalizeWecomMassSendTask({
     taskId: id("wms_task"),
-    title: cleanLimitedText(payload.title, `${payload.segmentTitle || "电销群发"} · ${customers.length}人`, 160),
+    title: cleanLimitedText(payload.title, `${payload.segmentTitle || "电销群发"} · ${targetCount}${audienceType === "customer_group" ? "个客户群" : "人"}`, 160),
+    audienceType,
     segmentKey,
     segmentTitle: cleanLimitedText(payload.segmentTitle, payload.title || "电销群发", 160),
     employeeNames,
     messageText,
     targetCustomerIds,
-    targetCustomerNames: customers.map((customer) => customer.name),
+    targetCustomerNames: audienceType === "customer" ? customers.map((customer) => customer.name) : [],
+    targetGroupNames,
+    knownGroupNames: [...new Set(knownGroupNames)],
     excludedCustomerIds: payload.excludedCustomerIds,
     excludedReason: payload.excludedReason || payload.criteria,
-    customerCount: customers.length,
+    customerCount: targetCount,
     status: config.settings.requireApproval ? "pending_approval" : "queued",
-    submitMode: normalizeWecomAdminSubmitMode(payload.submitMode, config.settings.defaultSubmitMode || "dry-run"),
+    submitMode: normalizeWecomAdminSubmitMode(payload.submitMode, config.settings.defaultSubmitMode || "submit"),
     source: payload.source || "telemarketing",
     priority: payload.priority || "中",
     assignedDepartment: payload.assignedDepartment || "",
@@ -4800,10 +4852,10 @@ export function createWecomMassSendTaskAction(inputState, payload = {}) {
     status: "成功",
     taskId: task.taskId,
     title: task.title,
-    detail: `${task.segmentTitle}，目标${customers.length}人，员工${employeeNames.join("、")}，状态${wecomMassSendStatusLabel(task.status)}。`,
+    detail: `${task.segmentTitle}，目标${targetCount}${audienceType === "customer_group" ? "个客户群" : "人"}，员工${employeeNames.join("、")}，状态${wecomMassSendStatusLabel(task.status)}。`,
     externalSideEffects: false
   });
-  audit(state, "创建企微群发任务", task.taskId, `${task.title} / ${customers.length}人 / ${task.submitMode}`);
+  audit(state, "创建企微群发任务", task.taskId, `${task.title} / ${targetCount}${audienceType === "customer_group" ? "个客户群" : "人"} / ${task.submitMode}`);
   return state;
 }
 
@@ -4815,7 +4867,7 @@ export function approveWecomMassSendTaskAction(inputState, taskId, payload = {})
   if (TERMINAL_WECOM_MASS_SEND_STATUSES.has(task.status)) throw new Error(`Task is already terminal: ${task.status}`);
   const now = new Date().toISOString();
   task.status = payload.queue === false ? "pending_approval" : "queued";
-  task.submitMode = normalizeWecomAdminSubmitMode(payload.submitMode, task.submitMode || config.settings.defaultSubmitMode);
+  task.submitMode = normalizeWecomAdminSubmitMode(payload.submitMode, task.submitMode || config.settings.defaultSubmitMode || "submit");
   task.approvedAt = now;
   task.approvedBy = cleanLimitedText(payload.approvedBy, "local-operator", 80);
   task.queuedAt = task.status === "queued" ? now : "";
@@ -4826,7 +4878,7 @@ export function approveWecomMassSendTaskAction(inputState, taskId, payload = {})
     status: "成功",
     taskId: task.taskId,
     title: task.title,
-    detail: `${task.approvedBy} 已确认，${task.status === "queued" ? "进入派发队列" : "保留待审批"}，模式${task.submitMode === "submit" ? "正式提交" : "干跑验证"}。`,
+    detail: `${task.approvedBy} 已确认，${task.status === "queued" ? "进入派发队列" : "保留待审批"}，模式${task.submitMode === "submit" ? "正式提交" : "提交前验证"}。`,
     externalSideEffects: false
   });
   audit(state, "审批企微群发任务", task.taskId, `${task.title} / ${wecomMassSendStatusLabel(task.status)} / ${task.submitMode}`);
@@ -4850,9 +4902,12 @@ export function runWecomMassSendSchedulerAction(inputState, payload = {}) {
     return state;
   }
   const maxTasks = Math.max(1, Math.min(5, Math.round(finiteNumber(payload.maxTasks, 1))));
-  const candidates = config.tasks
+  const queuedTasks = config.tasks
     .filter((task) => task.status === "queued")
-    .sort((a, b) => new Date(a.queuedAt || a.createdAt || 0).getTime() - new Date(b.queuedAt || b.createdAt || 0).getTime())
+    .sort((a, b) => new Date(a.queuedAt || a.createdAt || 0).getTime() - new Date(b.queuedAt || b.createdAt || 0).getTime());
+  const submitBlocked = queuedTasks.filter((task) => task.submitMode === "submit" && config.worker.supportsSubmit !== true);
+  const candidates = queuedTasks
+    .filter((task) => task.submitMode !== "submit" || config.worker.supportsSubmit === true)
     .slice(0, maxTasks);
   for (const task of candidates) {
     task.status = "dispatching";
@@ -4864,8 +4919,9 @@ export function runWecomMassSendSchedulerAction(inputState, payload = {}) {
   }
   config.lastSchedulerResult = {
     ok: candidates.length > 0,
-    reason: candidates.length ? "dispatched" : "empty",
+    reason: candidates.length ? "dispatched" : submitBlocked.length ? "submit_not_supported" : "empty",
     dispatched: candidates.map((task) => task.taskId),
+    skipped: submitBlocked.map((task) => task.taskId),
     generatedAt: now
   };
   if (candidates.length) {
@@ -4942,6 +4998,9 @@ export function updateWecomAdminMassSendStatusAction(inputState, payload = {}) {
     lastEventAt: new Date().toISOString(),
     lastError: payload.error || workerPatch.lastError || ""
   }, config.worker);
+  if (payload.error === "" || workerPatch.lastError === "") {
+    config.worker.lastError = "";
+  }
   const changed = previousStatus !== config.worker.status
     || previousLoginStatus !== config.worker.loginStatus
     || previousError !== config.worker.lastError

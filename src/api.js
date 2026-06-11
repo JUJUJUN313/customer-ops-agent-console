@@ -112,6 +112,9 @@ export const api = {
   checkWecomAdminMassSendWorker() {
     return request("/api/wecom-admin/mass-send/worker/check", { method: "POST" });
   },
+  startWecomAdminChrome() {
+    return request("/api/wecom-admin/mass-send/admin-chrome/start", { method: "POST" });
+  },
   updateWecomGroupBinding(payload) {
     return request("/api/wecom/group-bindings", {
       method: "POST",
