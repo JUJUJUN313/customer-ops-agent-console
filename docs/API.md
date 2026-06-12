@@ -178,7 +178,7 @@ Agent运行后，如果本次运行面向明确客户且生成了可触达文案
 }
 ```
 
-群发任务默认使用 `submitMode=submit`：执行器通过专用 Chrome CDP 检查企微后台是否已登录、是否位于 `客户与上下游 > 客户联系 > 群发工具` 页面，然后按 `audienceType` 自动进入正确入口并提交。`audienceType=customer` 使用“群发消息给客户”，`audienceType=customer_group` 使用“群发消息到企业的客户群”。显式设置 `submitMode=dry-run` 时只做提交前验证，不点击最终按钮。客户群入口使用企微后台的“群名关键词包含”筛选；正式提交时如果关键词命中多个已知群，会返回 `ambiguous_customer_group_keyword` 且不会提交。若需要临时关闭真实提交，可用 `WECOM_ADMIN_ALLOW_SUBMIT=false` 启动执行器。
+群发任务默认使用 `submitMode=submit`：执行器通过专用 Chrome CDP 检查企微后台是否已登录、是否位于 `客户与上下游 > 客户联系 > 群发工具` 页面，然后按 `audienceType` 自动进入正确入口并提交。`audienceType=customer` 使用“群发消息给客户”，`audienceType=customer_group` 使用“群发消息到企业的客户群”。显式设置 `submitMode=dry-run` 时只做提交前验证，不点击最终按钮。企微后台客户入口只能按员工添加客户/标签等范围筛选，无法确认只命中指定客户时会返回 `customer_scope_not_exact`；客户群入口会选择任务里的 `employeeNames` 作为群主/成员范围，再使用“群名关键词包含”筛选，关键词命中多个已知群时会返回 `ambiguous_customer_group_keyword`。以上保护触发时都不会点击最终提交。若后台浏览器未登录，会返回 `needs_login`，需要先在专用 Chrome 里人工登录。若需要临时关闭真实提交，可用 `WECOM_ADMIN_ALLOW_SUBMIT=false` 启动执行器。
 
 启动后台控制链路：
 

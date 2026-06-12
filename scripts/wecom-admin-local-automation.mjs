@@ -169,25 +169,35 @@ async function getOrCreateGroupSendPage({ createIfMissing = true, pageUrl = defa
 
 async function navigateToGroupSendLanding(page, pageUrl = defaultGroupSendUrl) {
   if (!page) return;
-  if (!isGroupSendUrl(page.url()) || isCreateMessageUrl(page.url())) {
-    await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: navigationTimeoutMs });
-  }
-  await dismissUnsavedEditPrompt(page);
-  const ready = await page.waitForFunction(
-    () => document.body.innerText.includes("群发消息给客户") && document.body.innerText.includes("群发工具"),
-    null,
-    { timeout: 5000 }
-  ).then(() => true).catch(() => false);
-  if (!ready) {
-    await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: navigationTimeoutMs });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!isGroupSendUrl(page.url()) || isCreateMessageUrl(page.url()) || isCustomerGroupCreateMessageUrl(page.url())) {
+      await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: navigationTimeoutMs }).catch(() => {});
+    }
     await dismissUnsavedEditPrompt(page);
-    await page.waitForFunction(
-      () => document.body.innerText.includes("群发消息给客户") && document.body.innerText.includes("群发工具"),
+    await closeVisibleTransientDialogs(page);
+    const ready = await page.waitForFunction(
+      () => document.body.innerText.includes("群发消息给客户")
+        && document.body.innerText.includes("群发消息到企业的客户群")
+        && document.body.innerText.includes("群发工具"),
       null,
-      { timeout: navigationTimeoutMs }
-    ).catch(() => {});
+      { timeout: attempt === 0 ? 3000 : 5000 }
+    ).then(() => true).catch(() => false);
+    if (ready) {
+      await page.waitForLoadState("domcontentloaded", { timeout: navigationTimeoutMs }).catch(() => {});
+      return;
+    }
+    const bodyText = await readBodyText(page);
+    if (/扫码登录|登录企业微信|企业微信登录|请登录|重新登录/.test(bodyText) && !bodyText.includes("群发工具")) {
+      throw Object.assign(new Error("后台浏览器中的企微后台需要登录，请先在专用 Chrome 完成登录。"), { errorCode: "needs_login" });
+    }
+    await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: navigationTimeoutMs }).catch(() => {});
+    await dismissUnsavedEditPrompt(page);
   }
-  await page.waitForLoadState("domcontentloaded", { timeout: navigationTimeoutMs }).catch(() => {});
+  const preflight = await inspectGroupSendPage(page);
+  throw Object.assign(new Error("无法回到企微后台群发工具首页，可能仍停在编辑页、登录页或权限页。"), {
+    errorCode: preflight.status || "group_send_page_unverified",
+    preflight
+  });
 }
 
 async function dismissUnsavedEditPrompt(page) {
@@ -216,7 +226,7 @@ async function dismissUnsavedEditPrompt(page) {
   return clicked;
 }
 
-async function closeVisibleTransientDialogs(page, selector = ".multiselect_dialog,.csMessage_create_customerSelector_dialog") {
+async function closeVisibleTransientDialogs(page, selector = ".multiselect_dialog,.csMessage_create_customerSelector_dialog,.customer_qunSelector_dialog") {
   let closedCount = 0;
   for (let index = 0; index < 6; index += 1) {
     const closed = await page.evaluate((dialogSelector) => {
@@ -393,6 +403,12 @@ function findAmbiguousCustomerGroupKeywords(targetGroupNames = [], knownGroupNam
       return { keyword, matches };
     })
     .filter((item) => item.matches.length !== 1);
+}
+
+function exactCustomerTargetRequiresGuard(task = {}, normalizedTask = {}) {
+  if (normalizedTask.audienceType !== "customer") return false;
+  if (task.allowEmployeeCustomerScopeSubmit === true || task.allowMemberScopeSubmit === true) return false;
+  return normalizedTask.targetCustomerIds.length > 0 || normalizedTask.targetCustomerNames.length > 0;
 }
 
 async function clickConfiguredSelector(page, selector, label) {
@@ -739,6 +755,34 @@ async function configureCustomerScope(page, normalizedTask, task = {}) {
   };
 }
 
+async function openGroupOwnerSelectorFromCustomerGroupDialog(page) {
+  const result = await page.evaluate(() => {
+    const visible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+    };
+    const textOf = (el) => (el.innerText || el.textContent || el.getAttribute("aria-label") || "").trim().replace(/\s+/g, " ");
+    const dialog = Array.from(document.querySelectorAll(".customer_qunSelector_dialog"))
+      .filter(visible)
+      .at(-1);
+    if (!dialog) return { ok: false, errorCode: "customer_group_selector_dialog_not_found" };
+    const target = Array.from(dialog.querySelectorAll(".js_qunMaster_selector_default,a,button,[role='button'],.ww_btn,.qui_btn"))
+      .filter(visible)
+      .find((el) => el.classList.contains("js_qunMaster_selector_default"))
+      || Array.from(dialog.querySelectorAll("a,button,[role='button'],.ww_btn,.qui_btn"))
+        .filter(visible)
+        .find((el) => textOf(el).includes("按部门或成员筛选"));
+    if (!target) return { ok: false, errorCode: "customer_group_owner_selector_open_not_found" };
+    target.click();
+    return { ok: true, text: textOf(target) };
+  });
+  if (!result.ok) throw new Error(result.errorCode || "customer_group_owner_selector_open_failed");
+  await waitForVisibleSelector(page, ".multiselect_dialog", "customer_group_owner_selector_dialog");
+  await waitForVisibleSelector(page, "#memberSearchInput", "customer_group_owner_search_input");
+  return result;
+}
+
 async function openCustomerGroupSelectorDialog(page) {
   const result = await page.evaluate(() => {
     const visible = (el) => {
@@ -856,6 +900,28 @@ async function configureCustomerGroupScope(page, normalizedTask, task = {}) {
     : normalizedTask.targetCustomerNames;
   await openCustomerGroupSelectorDialog(page);
   await chooseFilteredCustomerGroupScope(page, task.allowGroupOwnerAdjustScope === true || task.allowEmployeeAdjustScope === true);
+  await openGroupOwnerSelectorFromCustomerGroupDialog(page);
+  const selectedOwners = [];
+  for (const name of normalizedTask.employeeNames) {
+    await selectEmployee(page, name);
+    selectedOwners.push(name);
+  }
+  await confirmVisibleDialog(page, ".multiselect_dialog", "确认", "customer_group_owner_selector");
+  await page.waitForFunction(
+    (names) => {
+      const visible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+      };
+      const dialog = Array.from(document.querySelectorAll(".customer_qunSelector_dialog")).filter(visible).at(-1);
+      const text = dialog?.innerText || "";
+      return names.every((name) => text.includes(name));
+    },
+    selectedOwners,
+    { timeout: actionTimeoutMs }
+  );
+  await closeVisibleTransientDialogs(page, ".multiselect_dialog");
   const keywordResult = await addCustomerGroupKeywords(page, keywords);
   await confirmVisibleDialog(page, ".customer_qunSelector_dialog", "确认", "customer_group_selector");
   await closeVisibleTransientDialogs(page, ".customer_qunSelector_dialog");
@@ -865,7 +931,7 @@ async function configureCustomerGroupScope(page, normalizedTask, task = {}) {
     { timeout: actionTimeoutMs }
   ).catch(() => {});
   return {
-    selectedEmployees: normalizedTask.employeeNames,
+    selectedEmployees: selectedOwners,
     customerSelectionMode: "group_name_keyword_scope",
     targetGroupKeywords: keywordResult.keywords,
     customerDialogText: keywordResult.dialogText
@@ -989,6 +1055,18 @@ async function runMassSendTask(task = {}) {
         { ambiguousKeywords }
       );
     }
+  }
+  if (submitMode === "submit" && exactCustomerTargetRequiresGuard(task, normalizedTask)) {
+    return buildFailure(
+      "customer_scope_not_exact",
+      "企微后台“群发消息给客户”入口只能按员工添加客户/标签等范围筛选，当前无法确认只命中指定客户。请补充唯一客户标签或显式允许按员工客户范围提交后再提交。",
+      startedAt,
+      {
+        requestedCustomers: normalizedTask.targetCustomerNames,
+        requestedCustomerIds: normalizedTask.targetCustomerIds,
+        actualSelectionMode: "member_scope"
+      }
+    );
   }
   if (submitMode === "submit" && !allowSubmit) {
     return buildFailure(
