@@ -5,14 +5,14 @@
 ### 新增
 
 - 新增电销企微后台群发派发链路：`wecomAdminMassSend` 状态、`/api/wecom-admin/mass-send/*` API、`scripts/wecom-admin-local-automation.mjs` 和 `scripts/wecom-admin-mass-send-worker.mjs`。
-- 电销运营页新增“企微后台群发派发”区域：推荐批次可填写指定员工、创建群发任务、审批入队、检查企微后台执行器并派发下一条任务。
+- 电销运营页新增“企微后台群发派发”区域：推荐批次可确认部门筛选、可选指定员工收窄、创建群发任务、审批入队、检查企微后台执行器并派发下一条任务。
 - 新增后台浏览器企微后台执行器，默认定位企微后台 `客户与上下游 > 客户联系 > 群发工具` 页面；系统确认后默认正式提交，也支持显式 `submitMode=dry-run` 做提交前验证。
 - 新增 `npm run wecom:admin-chrome`，使用专用 Chrome Profile + `--remote-debugging-port=9222` 登录企微后台，群发执行器通过 CDP 后台控制页面，不再抢 Chrome 前台、鼠标键盘或 AX。
-- 新增群发任务状态流转：`pending_approval -> queued -> dispatching -> dry_run_passed/submitted/failed/cancelled/manual_done`，并记录目标对象类型、目标客户/客户群、指定员工、文案、审批人、执行结果和外部副作用状态。
+- 新增群发任务状态流转：`pending_approval -> queued -> dispatching -> dry_run_passed/submitted/failed/cancelled/manual_done`，并记录目标对象类型、目标客户/客户群、部门筛选、可选员工收窄、文案、审批人、执行结果和外部副作用状态。
 - 新增双入口支持：`audienceType=customer` 进入“群发消息给客户”，`audienceType=customer_group` 进入“群发消息到企业的客户群”。
-- 新增客户群关键词唯一性保护：企微后台客户群入口按“群名包含关键词”筛选，关键词命中多个已知群时正式提交会失败为 `ambiguous_customer_group_keyword`，不会点击最终提交。
-- 新增同批次幂等保护：同一分层、对象类型、目标范围、员工集合和文案在未完成前重复创建，会复用原群发任务，避免重复批次污染界面。
-- 新增企微后台群发单元测试：覆盖创建、重复创建复用、审批、Worker未就绪不调度、Worker就绪调度、提交前验证回写、客户群入口，以及缺客户/缺员工/缺文案拒绝。
+- 新增客户群全名保护：企微后台客户群入口按“群名包含关键词”筛选，系统用已知群名自动生成“不发送给”排除词，避免全名目标被相似群扩大命中。
+- 新增同批次幂等保护：同一分层、对象类型、目标范围、部门/员工筛选和文案在未完成前重复创建，会复用原群发任务，避免重复批次污染界面。
+- 新增企微后台群发单元测试：覆盖创建、重复创建复用、审批、Worker未就绪不调度、Worker就绪调度、提交前验证回写、客户群入口，以及缺客户/缺文案拒绝和员工可选。
 
 ### 改进
 

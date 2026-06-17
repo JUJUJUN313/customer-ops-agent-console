@@ -678,6 +678,7 @@ test("企微后台群发任务支持创建、审批、调度和干跑回写", ()
   let report = buildWecomAdminMassSendReport(state);
   assert.equal(report.summary.pendingApproval, 1);
   assert.equal(report.tasks[0].customerCount, 3);
+  assert.deepEqual(report.tasks[0].departmentNames, ["电销部门"]);
   assert.equal(report.tasks[0].externalSideEffects, false);
   const taskId = report.tasks[0].taskId;
 
@@ -725,7 +726,7 @@ test("企微后台客户群群发任务会按客户群入口独立创建和调�
     audienceType: "customer_group",
     segmentKey: "vip_group_notice",
     segmentTitle: "客户群公告",
-    employeeNames: ["李一凡"],
+    departmentNames: ["电销部门"],
     messageText: "您好，这是一条客户群测试通知。",
     targetGroupNames: ["测试群"],
     submitMode: "submit"
@@ -735,6 +736,8 @@ test("企微后台客户群群发任务会按客户群入口独立创建和调�
   assert.equal(report.tasks[0].audienceType, "customer_group");
   assert.equal(report.tasks[0].audienceTypeLabel, "客户群");
   assert.deepEqual(report.tasks[0].targetGroupNames, ["测试群"]);
+  assert.deepEqual(report.tasks[0].departmentNames, ["电销部门"]);
+  assert.deepEqual(report.tasks[0].employeeNames, []);
   assert.equal(report.tasks[0].customerCount, 1);
 
   state = createWecomMassSendTaskAction(state, {
@@ -760,18 +763,20 @@ test("企微后台客户群群发任务会按客户群入口独立创建和调�
   assert.equal(state.wecomAdminMassSend.tasks.find((task) => task.taskId === taskId).status, "dispatching");
 });
 
-test("企微后台群发任务会拒绝缺少名单、员工或文案", () => {
+test("企微后台群发任务会拒绝缺少名单或文案且允许员工可选", () => {
   const state = seedState();
   assert.throws(() => createWecomMassSendTaskAction(state, {
     employeeNames: ["测试员工"],
     messageText: "测试",
     targetCustomerIds: []
   }), /Target customer ids are required/);
-  assert.throws(() => createWecomMassSendTaskAction(state, {
-    employeeNames: [],
+  const withoutEmployee = createWecomMassSendTaskAction(state, {
+    departmentNames: ["电销部门"],
     messageText: "测试",
     targetCustomerIds: ["c001"]
-  }), /Employee names are required/);
+  });
+  assert.deepEqual(withoutEmployee.wecomAdminMassSend.tasks[0].employeeNames, []);
+  assert.deepEqual(withoutEmployee.wecomAdminMassSend.tasks[0].departmentNames, ["电销部门"]);
   assert.throws(() => createWecomMassSendTaskAction(state, {
     employeeNames: ["测试员工"],
     messageText: "",

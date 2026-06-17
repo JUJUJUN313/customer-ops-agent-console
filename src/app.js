@@ -1934,7 +1934,8 @@ function telemarketingSegments(customers) {
       criteria: "意向分>=75，或历史消息/标签已识别明确意向。",
       message: "您好，看到您近期关注的型号和会员权益比较明确，我让销售同事给您整理一版更完整的报价和权益说明。",
       owner: "销售队列",
-      employeePlaceholder: "输入负责员工姓名，多个用逗号分隔"
+      defaultDepartment: "电销部门",
+      employeePlaceholder: "可选：输入员工姓名进一步收窄"
     },
     {
       key: "quote_nurture_mass_send",
@@ -1944,7 +1945,8 @@ function telemarketingSegments(customers) {
       criteria: "中等意向、关注型号明确，适合推送报价变化或会员权益。",
       message: "您好，本周您关注的型号报价有更新，我们整理了近期货源和会员权益，方便您有采购计划时参考。",
       owner: "电销队列",
-      employeePlaceholder: "输入电销员工姓名，多个用逗号分隔"
+      defaultDepartment: "电销部门",
+      employeePlaceholder: "可选：输入员工姓名进一步收窄"
     },
     {
       key: "low_active_wakeup",
@@ -1954,7 +1956,8 @@ function telemarketingSegments(customers) {
       criteria: "意向较低或最近未形成明确采购计划，只做轻触达。",
       message: "您好，近期报价和货源有变化，如后面有采购计划，可以随时让我们帮您查最新行情。",
       owner: "电销队列",
-      employeePlaceholder: "输入电销员工姓名，多个用逗号分隔"
+      defaultDepartment: "电销部门",
+      employeePlaceholder: "可选：输入员工姓名进一步收窄"
     }
   ];
 }
@@ -1985,7 +1988,11 @@ function renderTelemarketingCampaignCard(segment) {
         ${segment.customers.slice(0, 6).map((customer) => `<span class="tag">${escapeHtml(customer.name)}</span>`).join("") || `<span class="tag">暂无客户</span>`}
       </div>
       <div class="field full-span compact-field">
-        <label>指定员工</label>
+        <label>部门筛选</label>
+        <input data-wecom-mass-department="${escapeHtml(segment.key)}" value="${escapeHtml(segment.defaultDepartment || "电销部门")}" placeholder="输入部门名称，多个用逗号分隔">
+      </div>
+      <div class="field full-span compact-field">
+        <label>指定员工（可选）</label>
         <input data-wecom-mass-employee="${escapeHtml(segment.key)}" value="" placeholder="${escapeHtml(segment.employeePlaceholder)}">
       </div>
       <div class="button-row">
@@ -2030,13 +2037,13 @@ function renderWecomMassTaskCard(task) {
       <div class="draft-head">
         <div>
           <strong>${escapeHtml(task.title || task.segmentTitle || "企微群发任务")}</strong>
-          <div class="muted">${escapeHtml((task.employeeNames || []).join("、") || "未指定员工")} · ${escapeHtml(task.segmentTitle || "电销群发")} · ${escapeHtml(targetLabel)} · ${Number(task.customerCount || targetNames.length)}${targetUnit}</div>
+          <div class="muted">${escapeHtml((task.departmentNames || []).join("、") || "未指定部门")} ${task.employeeNames?.length ? `· ${escapeHtml(task.employeeNames.join("、"))}` : ""} · ${escapeHtml(task.segmentTitle || "电销群发")} · ${escapeHtml(targetLabel)} · ${Number(task.customerCount || targetNames.length)}${targetUnit}</div>
         </div>
         <span class="sla-pill ${wecomMassTaskStatusClass(task.status)}">${escapeHtml(task.statusLabel || wecomMassTaskStatusLabel(task.status))}</span>
       </div>
       <div class="draft-content">${escapeHtml(task.messageText || "")}</div>
       <div class="tag-list">
-        ${targetNames.slice(0, 8).map((name) => `<span class="tag">${escapeHtml(name)}</span>`).join("") || `<span class="tag">暂无${audienceType === "customer_group" ? "客户群关键词" : "客户名单"}</span>`}
+        ${targetNames.slice(0, 8).map((name) => `<span class="tag">${escapeHtml(name)}</span>`).join("") || `<span class="tag">暂无${audienceType === "customer_group" ? "客户群名单" : "客户名单"}</span>`}
       </div>
       <div class="draft-meta">
         <span class="status-pill">${task.submitMode === "submit" ? "正式提交" : "提交前验证"}</span>
@@ -2184,7 +2191,7 @@ function renderTelemarketingOps() {
       <div class="panel-header">
         <div>
           <h2 class="panel-title">推荐群发批次与审批</h2>
-          <p class="panel-subtitle">确认名单、指定员工和文案后，可生成企微后台群发任务并交给后台浏览器自动派发。</p>
+          <p class="panel-subtitle">确认名单、部门筛选和文案后，可生成企微后台群发任务并交给后台浏览器自动派发；指定员工仅作为可选收窄条件。</p>
         </div>
       </div>
       <div class="event-list">
@@ -5102,18 +5109,21 @@ document.addEventListener("click", (event) => {
       showToast("群发批次不存在");
       return;
     }
-    const employeeText = document.querySelector(`[data-wecom-mass-employee="${CSS.escape(segmentKey)}"]`)?.value || "";
-    const employeeNames = employeeText.split(/[,，、\n]/).map((item) => item.trim()).filter(Boolean);
-    if (!employeeNames.length) {
-      showToast("请先填写指定员工姓名");
+    const departmentText = document.querySelector(`[data-wecom-mass-department="${CSS.escape(segmentKey)}"]`)?.value || "";
+    const departmentNames = departmentText.split(/[,，、\n]/).map((item) => item.trim()).filter(Boolean);
+    if (!departmentNames.length) {
+      showToast("请先填写部门筛选条件");
       return;
     }
+    const employeeText = document.querySelector(`[data-wecom-mass-employee="${CSS.escape(segmentKey)}"]`)?.value || "";
+    const employeeNames = employeeText.split(/[,，、\n]/).map((item) => item.trim()).filter(Boolean);
     void withBusy(`wecom-mass-create-${segmentKey}`, async () => {
       try {
         const nextState = await api.createWecomMassSendTask({
           segmentKey: segment.key,
           segmentTitle: segment.title,
           title: `${segment.title} · 企微群发`,
+          departmentNames,
           employeeNames,
           messageText: segment.message,
           targetCustomerIds: segment.customers.map((customer) => customer.id),

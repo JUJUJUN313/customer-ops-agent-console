@@ -1474,20 +1474,24 @@ function normalizeWecomMassSendTask(task = {}) {
   const audienceType = normalizeWecomMassSendAudienceType(task.audienceType || task.targetType || task.massSendType, "customer");
   const targetCustomerIds = cleanLimitedTextList(task.targetCustomerIds, 80, 10000);
   const excludedCustomerIds = cleanLimitedTextList(task.excludedCustomerIds, 80, 10000);
+  const departmentNames = cleanLimitedTextList(task.departmentNames || task.departmentName || task.filterDepartmentNames, 120, 200);
   const employeeNames = cleanLimitedTextList(task.employeeNames, 120, 200);
   const targetGroupNames = cleanLimitedTextList(task.targetGroupNames, 120, 1000);
   const knownGroupNames = cleanLimitedTextList(task.knownGroupNames, 120, 3000);
+  const targetGroupExcludeKeywords = cleanLimitedTextList(task.targetGroupExcludeKeywords || task.excludeGroupKeywords || task.excludeGroupNames, 120, 1000);
   return {
     taskId: cleanLimitedText(task.taskId, id("wms_task"), 80),
     title: cleanLimitedText(task.title, "企微客户群发任务", 160),
     audienceType,
     segmentKey: cleanLimitedText(task.segmentKey, "manual", 80),
     segmentTitle: cleanLimitedText(task.segmentTitle, task.title || "企微客户群发任务", 160),
+    departmentNames,
     employeeNames,
     messageText: cleanLimitedText(task.messageText || task.text || task.content, "", 4000),
     targetCustomerIds,
     targetCustomerNames: cleanLimitedTextList(task.targetCustomerNames, 120, 10000),
     targetGroupNames,
+    targetGroupExcludeKeywords,
     knownGroupNames,
     excludedCustomerIds,
     excludedReason: cleanLimitedText(task.excludedReason, "", 500),
@@ -4687,12 +4691,14 @@ export function batchUpdateOutboundDraftsAction(inputState, payload = {}) {
   return state;
 }
 
-function wecomMassSendAudienceKey(segmentKey = "", customerIds = [], employeeNames = [], messageText = "", audienceType = "customer", groupNames = []) {
+function wecomMassSendAudienceKey(segmentKey = "", customerIds = [], departmentNames = [], employeeNames = [], messageText = "", audienceType = "customer", groupNames = [], excludeGroupKeywords = []) {
   return [
     normalizeWecomMassSendAudienceType(audienceType, "customer"),
     cleanLimitedText(segmentKey, "manual", 80),
     [...customerIds].sort().join("|"),
     [...groupNames].sort().join("|"),
+    [...excludeGroupKeywords].sort().join("|"),
+    [...departmentNames].sort().join("|"),
     [...employeeNames].sort().join("|"),
     cleanLimitedText(messageText, "", 500)
   ].join("::");
@@ -4794,12 +4800,18 @@ export function createWecomMassSendTaskAction(inputState, payload = {}) {
   const customers = audienceType === "customer"
     ? targetCustomerIds.map((customerId) => requireCustomer(state, customerId))
     : [];
+  const departmentNames = cleanLimitedTextList(
+    payload.departmentNames || payload.departmentName || payload.filterDepartmentNames || payload.assignedDepartment || ["电销部门"],
+    120,
+    200
+  );
+  if (!departmentNames.length) throw new Error("Department names are required");
   const employeeNames = cleanLimitedTextList(payload.employeeNames || payload.employeeName, 120, 200);
-  if (!employeeNames.length) throw new Error("Employee names are required");
   const messageText = cleanLimitedText(payload.messageText || payload.text || payload.content, "", 4000);
   if (!messageText) throw new Error("Mass send message text is required");
   const segmentKey = cleanLimitedText(payload.segmentKey, "manual", 80);
-  const audienceKey = wecomMassSendAudienceKey(segmentKey, targetCustomerIds, employeeNames, messageText, audienceType, targetGroupNames);
+  const targetGroupExcludeKeywords = cleanLimitedTextList(payload.targetGroupExcludeKeywords || payload.excludeGroupKeywords || payload.excludeGroupNames, 120, 1000);
+  const audienceKey = wecomMassSendAudienceKey(segmentKey, targetCustomerIds, departmentNames, employeeNames, messageText, audienceType, targetGroupNames, targetGroupExcludeKeywords);
   const existing = config.tasks.find((task) =>
     task.audienceKey === audienceKey && !TERMINAL_WECOM_MASS_SEND_STATUSES.has(task.status)
   );
@@ -4809,7 +4821,7 @@ export function createWecomMassSendTaskAction(inputState, payload = {}) {
       status: "成功",
       taskId: existing.taskId,
       title: existing.title,
-      detail: "同一分层、对象类型、目标范围、员工和文案已有未完成群发任务，本次复用原任务。",
+      detail: "同一分层、对象类型、目标范围、部门筛选和文案已有未完成群发任务，本次复用原任务。",
       externalSideEffects: false
     });
     audit(state, "复用企微群发任务", existing.taskId, `${existing.title} / ${existing.customerCount}${existing.audienceType === "customer_group" ? "个客户群" : "人"}`);
@@ -4826,11 +4838,13 @@ export function createWecomMassSendTaskAction(inputState, payload = {}) {
     audienceType,
     segmentKey,
     segmentTitle: cleanLimitedText(payload.segmentTitle, payload.title || "电销群发", 160),
+    departmentNames,
     employeeNames,
     messageText,
     targetCustomerIds,
     targetCustomerNames: audienceType === "customer" ? customers.map((customer) => customer.name) : [],
     targetGroupNames,
+    targetGroupExcludeKeywords,
     knownGroupNames: [...new Set(knownGroupNames)],
     excludedCustomerIds: payload.excludedCustomerIds,
     excludedReason: payload.excludedReason || payload.criteria,
@@ -4852,7 +4866,7 @@ export function createWecomMassSendTaskAction(inputState, payload = {}) {
     status: "成功",
     taskId: task.taskId,
     title: task.title,
-    detail: `${task.segmentTitle}，目标${targetCount}${audienceType === "customer_group" ? "个客户群" : "人"}，员工${employeeNames.join("、")}，状态${wecomMassSendStatusLabel(task.status)}。`,
+    detail: `${task.segmentTitle}，目标${targetCount}${audienceType === "customer_group" ? "个客户群" : "人"}，部门${departmentNames.join("、")}${employeeNames.length ? `，员工${employeeNames.join("、")}` : ""}，状态${wecomMassSendStatusLabel(task.status)}。`,
     externalSideEffects: false
   });
   audit(state, "创建企微群发任务", task.taskId, `${task.title} / ${targetCount}${audienceType === "customer_group" ? "个客户群" : "人"} / ${task.submitMode}`);

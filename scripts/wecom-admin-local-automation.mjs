@@ -367,14 +367,22 @@ function buildFailure(errorCode, error, startedAt, extra = {}) {
 
 function validateTask(task = {}) {
   const audienceType = normalizeAudienceType(task.audienceType || task.targetType || task.massSendType);
+  const departmentNames = Array.isArray(task.departmentNames || task.departmentName || task.filterDepartmentNames)
+    ? (task.departmentNames || task.departmentName || task.filterDepartmentNames).map((item) => safeText(item, 120)).filter(Boolean)
+    : safeText(task.departmentNames || task.departmentName || task.filterDepartmentNames, 120)
+      ? [safeText(task.departmentNames || task.departmentName || task.filterDepartmentNames, 120)]
+      : [];
   const employeeNames = Array.isArray(task.employeeNames) ? task.employeeNames.map((item) => safeText(item, 120)).filter(Boolean) : [];
   const targetCustomerIds = Array.isArray(task.targetCustomerIds) ? task.targetCustomerIds.map((item) => safeText(item, 120)).filter(Boolean) : [];
   const targetCustomerNames = Array.isArray(task.targetCustomerNames) ? task.targetCustomerNames.map((item) => safeText(item, 120)).filter(Boolean) : [];
   const targetGroupNames = Array.isArray(task.targetGroupNames) ? task.targetGroupNames.map((item) => safeText(item, 120)).filter(Boolean) : [];
+  const targetGroupExcludeKeywords = Array.isArray(task.targetGroupExcludeKeywords || task.excludeGroupKeywords || task.excludeGroupNames)
+    ? (task.targetGroupExcludeKeywords || task.excludeGroupKeywords || task.excludeGroupNames).map((item) => safeText(item, 120)).filter(Boolean)
+    : [];
   const knownGroupNames = Array.isArray(task.knownGroupNames) ? task.knownGroupNames.map((item) => safeText(item, 120)).filter(Boolean) : [];
   const messageText = safeText(task.messageText || task.text || task.content, 4000);
   const errors = [];
-  if (employeeNames.length === 0) errors.push("employeeNames");
+  if (departmentNames.length === 0) errors.push("departmentNames");
   if (audienceType === "customer_group") {
     if (targetGroupNames.length === 0 && targetCustomerNames.length === 0) errors.push("targetGroupNames");
   } else if (targetCustomerIds.length === 0 && targetCustomerNames.length === 0) {
@@ -385,24 +393,47 @@ function validateTask(task = {}) {
     ok: errors.length === 0,
     errors,
     audienceType,
+    departmentNames,
     employeeNames,
     targetCustomerIds,
     targetCustomerNames,
     targetGroupNames,
+    targetGroupExcludeKeywords,
     knownGroupNames,
     messageText
   };
 }
 
-function findAmbiguousCustomerGroupKeywords(targetGroupNames = [], knownGroupNames = []) {
-  if (!targetGroupNames.length || !knownGroupNames.length) return [];
-  const uniqueKnownNames = [...new Set(knownGroupNames.map((item) => safeText(item, 120)).filter(Boolean))];
-  return targetGroupNames
-    .map((keyword) => {
-      const matches = uniqueKnownNames.filter((name) => name.includes(keyword));
-      return { keyword, matches };
-    })
-    .filter((item) => item.matches.length !== 1);
+function uniqueTexts(items = []) {
+  return [...new Set(items.map((item) => safeText(item, 120)).filter(Boolean))];
+}
+
+function buildCustomerGroupExactMatchPlan(targetGroupNames = [], knownGroupNames = []) {
+  const targets = uniqueTexts(targetGroupNames);
+  const known = uniqueTexts(knownGroupNames);
+  if (!targets.length) {
+    return { targetKeywords: [], excludeKeywords: [], missingExactNames: [], collisionMatches: [] };
+  }
+  const targetSet = new Set(targets);
+  const missingExactNames = known.length ? targets.filter((target) => !known.includes(target)) : [];
+  const collisionMatches = targets.map((target) => ({
+    target,
+    matches: known.filter((name) => name.includes(target))
+  }));
+  const excludeKeywords = known.filter((name) =>
+    !targetSet.has(name) && targets.some((target) => name.includes(target))
+  );
+  return {
+    targetKeywords: targets,
+    excludeKeywords,
+    missingExactNames,
+    collisionMatches
+  };
+}
+
+function buildCustomerGroupExcludeKeywords(targetGroupNames = [], knownGroupNames = [], manualExcludeKeywords = []) {
+  const plan = buildCustomerGroupExactMatchPlan(targetGroupNames, knownGroupNames);
+  return uniqueTexts([...manualExcludeKeywords, ...plan.excludeKeywords]);
 }
 
 function exactCustomerTargetRequiresGuard(task = {}, normalizedTask = {}) {
@@ -711,6 +742,11 @@ async function configureCustomerScope(page, normalizedTask, task = {}) {
   await openCustomerSelectorDialog(page);
   await chooseFilteredCustomerScope(page, task.allowEmployeeAdjustScope === true);
   await openEmployeeSelectorFromCustomerDialog(page);
+  const selectedDepartments = [];
+  for (const name of normalizedTask.departmentNames) {
+    await selectEmployee(page, name);
+    selectedDepartments.push(name);
+  }
   const selectedEmployees = [];
   for (const name of normalizedTask.employeeNames) {
     await selectEmployee(page, name);
@@ -728,7 +764,7 @@ async function configureCustomerScope(page, normalizedTask, task = {}) {
       const text = dialog?.innerText || "";
       return names.every((name) => text.includes(name));
     },
-    selectedEmployees,
+    [...selectedDepartments, ...selectedEmployees],
     { timeout: actionTimeoutMs }
   );
   await closeVisibleTransientDialogs(page, ".multiselect_dialog");
@@ -749,8 +785,9 @@ async function configureCustomerScope(page, normalizedTask, task = {}) {
     { timeout: actionTimeoutMs }
   );
   return {
+    selectedDepartments,
     selectedEmployees,
-    customerSelectionMode: "member_scope",
+    customerSelectionMode: "department_customer_scope",
     customerDialogText
   };
 }
@@ -846,33 +883,34 @@ async function chooseFilteredCustomerGroupScope(page, allowOwnerAdjustScope = fa
   return result;
 }
 
-async function addCustomerGroupKeywords(page, keywords = []) {
+async function addCustomerGroupKeywords(page, keywords = [], parentSelector = ".js_qunSelector_texeareParent") {
   const added = [];
   for (const keyword of keywords) {
     const cleanKeyword = safeText(keyword, 120);
     if (!cleanKeyword) continue;
     if (cleanKeyword.length > 19) throw new Error(`customer_group_keyword_too_long:${cleanKeyword}`);
-    const input = page.locator(".customer_qunSelector_dialog .js_qunSelector_texeareParent .js_qunSelector_input").first();
+    const input = page.locator(`.customer_qunSelector_dialog ${parentSelector} .js_qunSelector_input`).first();
     await input.click({ timeout: actionTimeoutMs });
     await page.keyboard.type(cleanKeyword);
     await page.keyboard.press("Enter");
     await page.waitForFunction(
-      (name) => {
+      ({ name, selector }) => {
         const visible = (el) => {
           const rect = el.getBoundingClientRect();
           const style = window.getComputedStyle(el);
           return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
         };
         const dialog = Array.from(document.querySelectorAll(".customer_qunSelector_dialog")).filter(visible).at(-1);
-        return Boolean(dialog && dialog.innerText.includes(name));
+        const parent = dialog?.querySelector(selector);
+        return Boolean(parent && parent.innerText.includes(name));
       },
-      cleanKeyword,
+      { name: cleanKeyword, selector: parentSelector },
       { timeout: actionTimeoutMs }
     );
     added.push(cleanKeyword);
   }
   if (added.length === 0) throw new Error("customer_group_keywords_empty");
-  const verify = await page.evaluate((expectedKeywords) => {
+  const verify = await page.evaluate(({ expectedKeywords, selector }) => {
     const visible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
@@ -880,14 +918,17 @@ async function addCustomerGroupKeywords(page, keywords = []) {
     };
     const textOf = (el) => (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ");
     const dialog = Array.from(document.querySelectorAll(".customer_qunSelector_dialog")).filter(visible).at(-1);
+    const parent = dialog?.querySelector(selector);
     const confirm = dialog?.querySelector(".js_confirm_btn");
     const dialogText = textOf(dialog);
+    const parentText = textOf(parent);
     return {
-      ok: Boolean(dialog) && expectedKeywords.every((item) => dialogText.includes(item)) && !confirm?.hasAttribute("disabled"),
+      ok: Boolean(dialog) && expectedKeywords.every((item) => parentText.includes(item)) && !confirm?.hasAttribute("disabled"),
       dialogText: dialogText.slice(0, 700),
+      parentText: parentText.slice(0, 500),
       confirmDisabled: Boolean(confirm?.hasAttribute("disabled"))
     };
-  }, added);
+  }, { expectedKeywords: added, selector: parentSelector });
   if (!verify.ok) {
     throw Object.assign(new Error("customer_group_keywords_unverified"), { detail: verify });
   }
@@ -898,9 +939,19 @@ async function configureCustomerGroupScope(page, normalizedTask, task = {}) {
   const keywords = normalizedTask.targetGroupNames.length
     ? normalizedTask.targetGroupNames
     : normalizedTask.targetCustomerNames;
+  const excludeKeywords = buildCustomerGroupExcludeKeywords(
+    keywords,
+    normalizedTask.knownGroupNames,
+    normalizedTask.targetGroupExcludeKeywords
+  );
   await openCustomerGroupSelectorDialog(page);
   await chooseFilteredCustomerGroupScope(page, task.allowGroupOwnerAdjustScope === true || task.allowEmployeeAdjustScope === true);
   await openGroupOwnerSelectorFromCustomerGroupDialog(page);
+  const selectedDepartments = [];
+  for (const name of normalizedTask.departmentNames) {
+    await selectEmployee(page, name);
+    selectedDepartments.push(name);
+  }
   const selectedOwners = [];
   for (const name of normalizedTask.employeeNames) {
     await selectEmployee(page, name);
@@ -918,11 +969,14 @@ async function configureCustomerGroupScope(page, normalizedTask, task = {}) {
       const text = dialog?.innerText || "";
       return names.every((name) => text.includes(name));
     },
-    selectedOwners,
+    [...selectedDepartments, ...selectedOwners],
     { timeout: actionTimeoutMs }
   );
   await closeVisibleTransientDialogs(page, ".multiselect_dialog");
   const keywordResult = await addCustomerGroupKeywords(page, keywords);
+  const excludeKeywordResult = excludeKeywords.length
+    ? await addCustomerGroupKeywords(page, excludeKeywords, ".js_qunSelector_texeareParent2")
+    : { keywords: [], dialogText: "" };
   await confirmVisibleDialog(page, ".customer_qunSelector_dialog", "确认", "customer_group_selector");
   await closeVisibleTransientDialogs(page, ".customer_qunSelector_dialog");
   await page.waitForFunction(
@@ -931,9 +985,11 @@ async function configureCustomerGroupScope(page, normalizedTask, task = {}) {
     { timeout: actionTimeoutMs }
   ).catch(() => {});
   return {
+    selectedDepartments,
     selectedEmployees: selectedOwners,
-    customerSelectionMode: "group_name_keyword_scope",
+    customerSelectionMode: "department_group_exact_name_scope",
     targetGroupKeywords: keywordResult.keywords,
+    excludeGroupKeywords: excludeKeywordResult.keywords,
     customerDialogText: keywordResult.dialogText
   };
 }
@@ -1043,28 +1099,28 @@ async function runMassSendTask(task = {}) {
     );
   }
   if (submitMode === "submit" && normalizedTask.audienceType === "customer_group") {
-    const ambiguousKeywords = findAmbiguousCustomerGroupKeywords(
+    const groupExactPlan = buildCustomerGroupExactMatchPlan(
       normalizedTask.targetGroupNames.length ? normalizedTask.targetGroupNames : normalizedTask.targetCustomerNames,
       normalizedTask.knownGroupNames
     );
-    if (ambiguousKeywords.length) {
+    if (groupExactPlan.missingExactNames.length) {
       return buildFailure(
-        "ambiguous_customer_group_keyword",
-        `客户群关键词无法唯一命中：${ambiguousKeywords.map((item) => `${item.keyword}=>${item.matches.join("、") || "无匹配"}`).join("；")}。请使用唯一群标识后再提交。`,
+        "customer_group_exact_name_not_found",
+        `客户群全名未在已知群列表中命中：${groupExactPlan.missingExactNames.join("、")}。请先同步群绑定或修正群名后再提交。`,
         startedAt,
-        { ambiguousKeywords }
+        { groupExactPlan }
       );
     }
   }
   if (submitMode === "submit" && exactCustomerTargetRequiresGuard(task, normalizedTask)) {
     return buildFailure(
       "customer_scope_not_exact",
-      "企微后台“群发消息给客户”入口只能按员工添加客户/标签等范围筛选，当前无法确认只命中指定客户。请补充唯一客户标签或显式允许按员工客户范围提交后再提交。",
+      "企微后台“群发消息给客户”入口当前只能按部门/员工等范围筛选，本次任务带有指定客户名单，但页面未发现可用于客户全名精确选择的控件。为避免扩大到整个部门误发，已拦截正式提交；请改用可安全覆盖的部门批次，或在确认允许范围群发后显式放行。",
       startedAt,
       {
         requestedCustomers: normalizedTask.targetCustomerNames,
         requestedCustomerIds: normalizedTask.targetCustomerIds,
-        actualSelectionMode: "member_scope"
+        actualSelectionMode: "department_customer_scope"
       }
     );
   }
@@ -1096,14 +1152,20 @@ async function runMassSendTask(task = {}) {
     title: task.title || task.segmentTitle || "企微客户群发任务",
     audienceType: normalizedTask.audienceType,
     audienceLabel: audienceTypeLabel(normalizedTask.audienceType),
+    departmentNames: normalizedTask.departmentNames,
     employeeNames: normalizedTask.employeeNames,
     customerCount: Number(task.customerCount || normalizedTask.targetCustomerIds.length || normalizedTask.targetCustomerNames.length || normalizedTask.targetGroupNames.length),
     customerNames: normalizedTask.targetCustomerNames,
     groupNames: normalizedTask.targetGroupNames,
+    excludeGroupKeywords: buildCustomerGroupExcludeKeywords(
+      normalizedTask.targetGroupNames.length ? normalizedTask.targetGroupNames : normalizedTask.targetCustomerNames,
+      normalizedTask.knownGroupNames,
+      normalizedTask.targetGroupExcludeKeywords
+    ),
     knownGroupNames: normalizedTask.knownGroupNames,
     messagePreview: normalizedTask.messageText.slice(0, 120),
     pageUrl: task.pageUrl || defaultGroupSendUrl,
-    customerSelectionMode: normalizedTask.audienceType === "customer_group" ? "group_name_keyword_scope" : "member_scope"
+    customerSelectionMode: normalizedTask.audienceType === "customer_group" ? "department_group_exact_name_scope" : "department_customer_scope"
   };
   if (submitMode !== "submit") {
     try {

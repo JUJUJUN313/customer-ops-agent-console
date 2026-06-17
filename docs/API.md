@@ -67,7 +67,7 @@
 | POST | `/api/wecom-client/realtime/reconcile` | 服务商历史下载脚本补账确认发送任务；用于基础留档、审计和最终闭环确认 |
 | POST | `/api/wecom-admin/mass-send/worker/check` | 检查专用Chrome CDP企微后台群发执行器 `/health`，读取 `canDispatch/supportsDryRun/supportsSubmit/loginStatus/foregroundSafe` |
 | POST | `/api/wecom-admin/mass-send/status` | 后台浏览器执行器或Worker回写企微后台派发能力、登录态、错误和最近事件时间 |
-| POST | `/api/wecom-admin/mass-send/tasks` | 创建电销企微后台群发任务，包含对象类型、目标客户/客户群、指定员工、文案和提交模式；同批次幂等复用未完成任务 |
+| POST | `/api/wecom-admin/mass-send/tasks` | 创建电销企微后台群发任务，包含对象类型、目标客户/客户群、部门筛选、可选员工收窄、文案和提交模式；同批次幂等复用未完成任务 |
 | POST | `/api/wecom-admin/mass-send/tasks/:taskId/approve` | 审批群发任务并进入派发队列；默认 `submitMode=submit` |
 | POST | `/api/wecom-admin/mass-send/scheduler/run` | 从已审批队列派发下一条任务给后台浏览器执行器；只改变系统任务状态，不直接操作浏览器 |
 | POST | `/api/wecom-admin/mass-send/tasks/:taskId/result` | 后台浏览器 Worker回写 `dry_run_passed/submitted/failed/cancelled/manual_done` 等执行结果 |
@@ -160,7 +160,8 @@ Agent运行后，如果本次运行面向明确客户且生成了可触达文案
 {
   "segmentKey": "quote_nurture_mass_send",
   "segmentTitle": "报价培育群发",
-  "employeeNames": ["张三", "李四"],
+  "departmentNames": ["电销部门"],
+  "employeeNames": ["张三"],
   "messageText": "您好，本周您关注的型号报价有更新，我们整理了近期货源和会员权益，方便您有采购计划时参考。",
   "targetCustomerIds": ["c001", "c002"],
   "excludedReason": "中等意向、关注型号明确，适合推送报价变化或会员权益。",
@@ -178,7 +179,7 @@ Agent运行后，如果本次运行面向明确客户且生成了可触达文案
 }
 ```
 
-群发任务默认使用 `submitMode=submit`：执行器通过专用 Chrome CDP 检查企微后台是否已登录、是否位于 `客户与上下游 > 客户联系 > 群发工具` 页面，然后按 `audienceType` 自动进入正确入口并提交。`audienceType=customer` 使用“群发消息给客户”，`audienceType=customer_group` 使用“群发消息到企业的客户群”。显式设置 `submitMode=dry-run` 时只做提交前验证，不点击最终按钮。企微后台客户入口只能按员工添加客户/标签等范围筛选，无法确认只命中指定客户时会返回 `customer_scope_not_exact`；客户群入口会选择任务里的 `employeeNames` 作为群主/成员范围，再使用“群名关键词包含”筛选，关键词命中多个已知群时会返回 `ambiguous_customer_group_keyword`。以上保护触发时都不会点击最终提交。若后台浏览器未登录，会返回 `needs_login`，需要先在专用 Chrome 里人工登录。若需要临时关闭真实提交，可用 `WECOM_ADMIN_ALLOW_SUBMIT=false` 启动执行器。
+群发任务默认使用 `submitMode=submit`：执行器通过专用 Chrome CDP 检查企微后台是否已登录、是否位于 `客户与上下游 > 客户联系 > 群发工具` 页面，然后按 `audienceType` 自动进入正确入口并提交。`audienceType=customer` 使用“群发消息给客户”，`audienceType=customer_group` 使用“群发消息到企业的客户群”。显式设置 `submitMode=dry-run` 时只做提交前验证，不点击最终按钮。任务使用 `departmentNames` 做主筛选，`employeeNames` 仅作为可选收窄条件；未传部门时系统默认使用“电销部门”。企微后台客户入口当前只能按部门/员工/标签等范围筛选，无法确认只命中指定客户时会返回 `customer_scope_not_exact`；客户群入口按部门/员工筛选后使用群名全名关键词，并会根据 `knownGroupNames` 自动添加排除关键词，避免“测试群”误命中“客户测试群”。若后台浏览器未登录，会返回 `needs_login`，需要先在专用 Chrome 里人工登录。若需要临时关闭真实提交，可用 `WECOM_ADMIN_ALLOW_SUBMIT=false` 启动执行器。
 
 启动后台控制链路：
 
